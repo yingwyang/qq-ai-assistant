@@ -73,6 +73,11 @@
           
           <!-- 用户消息（右对齐） -->
           <div v-else class="message-bubble message-right">
+            <img 
+              :src="getAvatar(message.userQq)" 
+              class="message-avatar-img"
+              @error="handleAvatarError"
+            />
             <div class="message-content-wrapper">
               <div class="message-header">
                 <span class="message-time">{{ formatTime(message.sendTime || message.timestamp) }}</span>
@@ -85,11 +90,6 @@
                 <img :src="extractImageUrl(message.content)" @click="openImage(extractImageUrl(message.content))" />
               </div>
             </div>
-            <img 
-              :src="getAvatar(message.userQq)" 
-              class="message-avatar-img"
-              @error="handleAvatarError"
-            />
           </div>
         </div>
       </div>
@@ -126,7 +126,7 @@
 </template>
 
 <script>
-import { ref, nextTick, watch, onMounted } from 'vue';
+import { ref, nextTick, watch, onMounted, onUnmounted } from 'vue';
 import { messageApi } from '../services/api';
 
 export default {
@@ -146,17 +146,21 @@ export default {
     const messagesContainer = ref(null);
     const inputRef = ref(null);
     const previewImage = ref(null);
+    let autoRefreshInterval = null;
     
     // 假设当前用户ID，实际应该从登录信息获取
     const currentUserId = 'current_user';
 
-    const loadMessages = async () => {
+    const loadMessages = async (showLoading = true) => {
       if (!groupId.value) {
         alert('请输入群聊ID');
         return;
       }
       
-      isLoading.value = true;
+      // 只有在需要显示加载状态时才设置 isLoading
+      if (showLoading) {
+        isLoading.value = true;
+      }
       try {
         const response = await messageApi.getMessagesByGroupId(groupId.value);
         // 按时间正序排列（旧消息在前）
@@ -173,9 +177,13 @@ export default {
         });
       } catch (error) {
         console.error('加载消息失败:', error);
-        alert('加载消息失败: ' + error.message);
+        if (showLoading) {
+          alert('加载消息失败: ' + error.message);
+        }
       } finally {
-        isLoading.value = false;
+        if (showLoading) {
+          isLoading.value = false;
+        }
       }
     };
 
@@ -217,7 +225,16 @@ export default {
     };
 
     const isSelfMessage = (message) => {
-      // 判断是否是当前用户发送的消息
+      // 判断是否是登录账号发送的消息
+      // 通过比较 userQq 和 selfQq 是否相等来判断
+      if (message.userQq && message.selfQq) {
+        return message.userQq === message.selfQq;
+      }
+      // 备用方案：检查 isSelfMessage 字段
+      if (message.isSelfMessage !== undefined) {
+        return message.isSelfMessage;
+      }
+      // 兼容旧数据
       return message.userId === currentUserId || message.userName === '我' || message.userNickname === '我';
     };
 
@@ -243,7 +260,7 @@ export default {
     };
 
     const extractImageUrl = (content) => {
-      // 从 CQ 码中提取图片 URL
+      // 处理本地存储的图片路径
       if (!content) {
         console.log('extractImageUrl: content is empty');
         return '';
@@ -251,6 +268,13 @@ export default {
       
       console.log('extractImageUrl: content =', content.substring(0, 100));
       
+      // 如果 content 已经是本地图片路径（以 /images/ 开头），直接返回
+      if (content.startsWith('/images/')) {
+        console.log('extractImageUrl: local image path =', content);
+        return content;
+      }
+      
+      // 从 CQ 码中提取图片 URL
       // 匹配 [CQ:image,...url=xxx...,file_size=...]
       // URL 可能包含逗号，所以匹配到 ,file_size= 或 ]
       const urlMatch = content.match(/url=([^\]]+?)(?:,file_size=|$)/);
@@ -306,19 +330,52 @@ export default {
         messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight;
       }
     };
+    
+    // 启动自动刷新消息
+    const startAutoRefresh = () => {
+      // 先清除已有的定时器
+      stopAutoRefresh();
+      // 每5秒自动刷新一次消息（不显示加载状态，避免闪屏）
+      autoRefreshInterval = setInterval(() => {
+        if (groupId.value) {
+          loadMessages(false);
+        }
+      }, 5000);
+    };
+    
+    // 停止自动刷新消息
+    const stopAutoRefresh = () => {
+      if (autoRefreshInterval) {
+        clearInterval(autoRefreshInterval);
+        autoRefreshInterval = null;
+      }
+    };
 
     // 监听 props.groupId 变化
     watch(() => props.groupId, (newGroupId) => {
       if (newGroupId) {
         groupId.value = newGroupId;
         loadMessages();
+        // 启动自动刷新
+        startAutoRefresh();
       } else {
-        // 当没有群聊ID时，清空消息和群聊名称
-        groupId.value = '';
-        messages.value = [];
-        currentGroupName.value = '';
+        // 停止自动刷新
+        stopAutoRefresh();
       }
     }, { immediate: true });
+    
+    // 组件挂载时，如果有 groupId 则加载消息
+    onMounted(() => {
+      if (groupId.value) {
+        loadMessages();
+        startAutoRefresh();
+      }
+    });
+    
+    // 组件卸载时停止自动刷新
+    onUnmounted(() => {
+      stopAutoRefresh();
+    });
 
     return {
       groupId,
@@ -450,6 +507,15 @@ export default {
 .message-wrapper {
   display: flex;
   margin-bottom: 10px;
+  width: 100%;
+}
+
+.message-wrapper.message-self {
+  justify-content: flex-end;
+}
+
+.message-wrapper.message-other {
+  justify-content: flex-start;
 }
 
 .message-bubble {
@@ -458,21 +524,22 @@ export default {
   border-radius: 18px;
   display: flex;
   gap: 10px;
+  align-items: flex-start;
 }
 
 .message-left {
   background-color: #f1f3f4;
   border-bottom-left-radius: 4px;
-  align-self: flex-start;
+  flex-direction: row;
+  margin-right: auto;
 }
 
 .message-right {
   background-color: #3498db;
   color: white;
   border-bottom-right-radius: 4px;
-  align-self: flex-end;
-  margin-left: auto;
   flex-direction: row-reverse;
+  margin-left: auto;
 }
 
 .message-avatar-img {

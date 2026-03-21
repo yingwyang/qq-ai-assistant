@@ -7,9 +7,10 @@ import java.time.LocalDateTime;
  * 群聊实体 - 记录群聊信息
  */
 @Entity
-@Table(name = "groups", indexes = {
+@Table(name = "chat_groups", indexes = {
     @Index(name = "idx_group_id", columnList = "groupId"),
-    @Index(name = "idx_group_name", columnList = "groupName")
+    @Index(name = "idx_group_name", columnList = "groupName"),
+    @Index(name = "idx_owner_qq", columnList = "ownerQq")
 })
 public class Group {
     
@@ -17,8 +18,11 @@ public class Group {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
     
-    @Column(nullable = false, unique = true, length = 50)
+    @Column(nullable = false, length = 50)
     private String groupId;  // 群号
+    
+    @Column(nullable = false, length = 20)
+    private String ownerQq;  // 登录者QQ号（哪个账号加入的群）
     
     @Column(length = 200)
     private String groupName;  // 群名称
@@ -48,6 +52,9 @@ public class Group {
     
     public String getGroupId() { return groupId; }
     public void setGroupId(String groupId) { this.groupId = groupId; }
+    
+    public String getOwnerQq() { return ownerQq; }
+    public void setOwnerQq(String ownerQq) { this.ownerQq = ownerQq; }
     
     public String getGroupName() { return groupName; }
     public void setGroupName(String groupName) { this.groupName = groupName; }

@@ -61,6 +61,12 @@ public class Message {
     
     private boolean processed = false;  // 是否已处理
     
+    @Column(nullable = false)
+    private boolean isSelfMessage = false;  // 是否是登录账号发送的消息
+    
+    @Column(length = 20)
+    private String selfQq;  // 登录账号的QQ号（接收这条消息的机器人QQ号）
+    
     @PrePersist
     protected void onCreate() {
         createdAt = LocalDateTime.now();
@@ -129,4 +135,10 @@ public class Message {
     
     public boolean isProcessed() { return processed; }
     public void setProcessed(boolean processed) { this.processed = processed; }
+    
+    public boolean isSelfMessage() { return isSelfMessage; }
+    public void setSelfMessage(boolean selfMessage) { isSelfMessage = selfMessage; }
+    
+    public String getSelfQq() { return selfQq; }
+    public void setSelfQq(String selfQq) { this.selfQq = selfQq; }
 }

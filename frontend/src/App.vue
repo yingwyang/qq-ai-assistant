@@ -13,37 +13,52 @@
       
       <!-- 主内容区 -->
       <main class="chat-main">
-        <!-- 最近对话 -->
-        <template v-if="activeTab === 'recent'">
-          <ChatInterface :groupId="selectedGroupId" />
+        <!-- 未登录状态显示登录提示 -->
+        <template v-if="!isLoggedIn">
+          <div class="login-prompt">
+            <div class="login-prompt-content">
+              <div class="login-icon">🔐</div>
+              <h2>请先登录</h2>
+              <p>登录后即可查看群聊消息</p>
+              <button class="login-btn" @click="showLoginModal = true">立即登录</button>
+            </div>
+          </div>
         </template>
         
-        <!-- 我的智能体 -->
-        <template v-else-if="activeTab === 'agents'">
-          <div class="agents-page">
-            <h2>我的智能体</h2>
-            <div class="agents-list">
-              <div class="agent-card">
-                <div class="agent-avatar">🤖</div>
-                <div class="agent-info">
-                  <h3>AstrBot 助手</h3>
-                  <p>基于 AstrBot 的 AI 聊天助手</p>
+        <!-- 已登录状态显示内容 -->
+        <template v-else>
+          <!-- 最近对话 -->
+          <template v-if="activeTab === 'recent'">
+            <ChatInterface :groupId="selectedGroupId" />
+          </template>
+          
+          <!-- 我的智能体 -->
+          <template v-else-if="activeTab === 'agents'">
+            <div class="agents-page">
+              <h2>我的智能体</h2>
+              <div class="agents-list">
+                <div class="agent-card">
+                  <div class="agent-avatar">🤖</div>
+                  <div class="agent-info">
+                    <h3>AstrBot 助手</h3>
+                    <p>基于 AstrBot 的 AI 聊天助手</p>
+                  </div>
+                  <div class="agent-status active">运行中</div>
                 </div>
-                <div class="agent-status active">运行中</div>
-              </div>
-              
-              <div class="agent-card">
-                <div class="agent-avatar">🎙️</div>
-                <div class="agent-info">
-                  <h3>GPT-SoVITS</h3>
-                  <p>语音合成服务</p>
-                </div>
-                <div class="agent-status" :class="{ active: gptSovitsRunning }">
-                  {{ gptSovitsRunning ? '运行中' : '未启动' }}
+                
+                <div class="agent-card">
+                  <div class="agent-avatar">🎙️</div>
+                  <div class="agent-info">
+                    <h3>GPT-SoVITS</h3>
+                    <p>语音合成服务</p>
+                  </div>
+                  <div class="agent-status" :class="{ active: gptSovitsRunning }">
+                    {{ gptSovitsRunning ? '运行中' : '未启动' }}
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
+          </template>
         </template>
       </main>
     </div>
@@ -57,7 +72,7 @@
 </template>
 
 <script>
-import { ref } from 'vue';
+import { ref, onMounted } from 'vue';
 import Sidebar from './components/Sidebar.vue';
 import ChatInterface from './components/ChatInterface.vue';
 import LoginModal from './components/LoginModal.vue';
@@ -76,8 +91,24 @@ export default {
     const showLoginModal = ref(false);
     const selectedGroupId = ref('');
 
+    // 从 localStorage 恢复登录状态和群号
+    onMounted(() => {
+      const savedLoginStatus = localStorage.getItem('isLoggedIn');
+      const savedGroupId = localStorage.getItem('selectedGroupId');
+      
+      if (savedLoginStatus === 'true') {
+        isLoggedIn.value = true;
+      }
+      
+      if (savedGroupId) {
+        selectedGroupId.value = savedGroupId;
+      }
+    });
+
     const handleLoginStatusChanged = (status) => {
       isLoggedIn.value = status;
+      // 保存登录状态到 localStorage
+      localStorage.setItem('isLoggedIn', status ? 'true' : 'false');
     };
 
     const handleTabChange = (tab) => {
@@ -86,10 +117,16 @@ export default {
 
     const handleLogout = () => {
       isLoggedIn.value = false;
+      selectedGroupId.value = '';
+      // 清除 localStorage
+      localStorage.removeItem('isLoggedIn');
+      localStorage.removeItem('selectedGroupId');
     };
 
     const handleSelectGroup = (groupId) => {
       selectedGroupId.value = groupId;
+      // 保存群号到 localStorage
+      localStorage.setItem('selectedGroupId', groupId);
       // 切换到最近对话标签
       if (activeTab.value !== 'recent') {
         activeTab.value = 'recent';
@@ -215,6 +252,54 @@ body {
 .agent-status.active {
   background-color: #d4edda;
   color: #155724;
+}
+
+/* 登录提示样式 */
+.login-prompt {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 60vh;
+}
+
+.login-prompt-content {
+  text-align: center;
+  padding: 40px;
+  background-color: white;
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.login-icon {
+  font-size: 64px;
+  margin-bottom: 20px;
+}
+
+.login-prompt-content h2 {
+  color: #2c3e50;
+  margin-bottom: 10px;
+  font-size: 24px;
+}
+
+.login-prompt-content p {
+  color: #7f8c8d;
+  margin-bottom: 24px;
+  font-size: 16px;
+}
+
+.login-btn {
+  background-color: #3498db;
+  color: white;
+  border: none;
+  padding: 12px 32px;
+  border-radius: 6px;
+  font-size: 16px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.login-btn:hover {
+  background-color: #2980b9;
 }
 
 /* 响应式设计 */

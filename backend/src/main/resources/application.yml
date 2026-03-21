@@ -34,6 +34,7 @@ napcat:
   api-url: http://localhost:6099
   token: ***REMOVED***
   webhook-token: ***REMOVED***
+  self-qq: 3649735451  # 登录账号的QQ号，用于区分登录账号发送的消息
 
 # GPT-SoVITS配置
 gpt-sovits:
@@ -58,6 +59,8 @@ file:
     temp-path: ./uploads/temp
     # 归档存储路径
     archive-path: ./uploads/archive
+    # 本地图片存储路径
+    local-path: ./uploads/images
 
 # 消息归档配置
 archive:

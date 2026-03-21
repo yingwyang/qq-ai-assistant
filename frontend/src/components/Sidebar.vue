@@ -11,30 +11,33 @@
     <nav class="sidebar-nav">
       <div class="nav-section">
         <ul class="nav-list">
-          <li class="nav-item" :class="{ active: activeTab === 'recent' }" @click="selectTab('recent')">
+          <li class="nav-item" :class="{ active: activeTab === 'recent' }" @click="toggleRecentGroups">
             <span class="nav-icon">💬</span>
             <span v-if="!isCollapsed" class="nav-text">对话</span>
+            <span v-if="!isCollapsed" class="expand-icon">{{ isRecentExpanded ? '▼' : '▶' }}</span>
           </li>
           
-          <!-- 最近对话列表 -->
-          <li 
-            v-for="group in recentGroups" 
-            :key="group.groupId"
-            class="nav-item group-item"
-            @click="selectGroup(group.groupId)"
-          >
-            <div class="group-avatar">
-              <img 
-                :src="getGroupAvatar(group.groupId)" 
-                :alt="group.groupName"
-                @error="handleAvatarError"
-              />
-            </div>
-            <div v-if="!isCollapsed" class="group-info">
-              <div class="group-name">{{ group.groupName || '群聊 ' + group.groupId }}</div>
-              <div class="group-id">{{ group.groupId }}</div>
-            </div>
-          </li>
+          <!-- 最近对话列表 - 仅在登录状态下且展开时显示 -->
+          <template v-if="isLoggedIn && isRecentExpanded">
+            <li 
+              v-for="group in recentGroups" 
+              :key="group.groupId"
+              class="nav-item group-item"
+              @click="selectGroup(group.groupId)"
+            >
+              <div class="group-avatar">
+                <img 
+                  :src="getGroupAvatar(group)" 
+                  :alt="group.groupName"
+                  @error="handleAvatarError"
+                />
+              </div>
+              <div v-if="!isCollapsed" class="group-info">
+                <div class="group-name">{{ group.groupName || '群聊 ' + group.groupId }}</div>
+                <div class="group-id">{{ group.groupId }}</div>
+              </div>
+            </li>
+          </template>
         </ul>
       </div>
       
@@ -66,7 +69,7 @@
 </template>
 
 <script>
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, onUnmounted, watch, computed } from 'vue';
 import { messageApi } from '../services/api';
 
 export default {
@@ -82,9 +85,23 @@ export default {
     const isCollapsed = ref(false);
     const activeTab = ref('recent');
     const recentGroups = ref([]);
+    const isRecentExpanded = ref(true); // 默认展开群列表
+    let refreshInterval = null;
+    
+    // 使用 computed 确保响应式
+    const isLoggedInComputed = computed(() => props.isLoggedIn);
 
     const toggleSidebar = () => {
       isCollapsed.value = !isCollapsed.value;
+    };
+
+    const toggleRecentGroups = () => {
+      isRecentExpanded.value = !isRecentExpanded.value;
+      // 同时触发 tab 切换
+      activeTab.value = 'recent';
+      emit('tab-change', 'recent');
+      // 刷新群聊列表
+      loadRecentGroups();
     };
 
     const selectTab = (tab) => {
@@ -109,15 +126,33 @@ export default {
       e.target.src = 'https://q.qlogo.cn/headimg_dl?dst_uin=0&spec=100';
     };
 
-    const getGroupAvatar = (groupId) => {
-      // 使用 QQ 群头像 API
-      if (groupId) {
-        return `https://q.qlogo.cn/headimg_dl?dst_uin=${groupId}&spec=100`;
+    const getGroupAvatar = (group) => {
+      // 优先使用后端返回的 avatar 字段（本地存储路径）
+      if (group && group.avatar) {
+        // 如果 avatar 已经是完整 URL，直接返回
+        if (group.avatar.startsWith('http')) {
+          return group.avatar;
+        }
+        // 如果 avatar 是相对路径，添加 API 基础 URL
+        if (group.avatar.startsWith('/images/')) {
+          return `http://localhost:8081${group.avatar}`;
+        }
+        return group.avatar;
       }
-      return 'https://q.qlogo.cn/headimg_dl?dst_uin=0&spec=100';
+      // 如果没有 avatar，使用 QQ 群头像 API（正确的群头像地址）
+      if (group && group.groupId) {
+        return `https://p.qlogo.cn/gh/${group.groupId}/${group.groupId}/100`;
+      }
+      return 'https://p.qlogo.cn/gh/0/0/100';
     };
 
     const loadRecentGroups = async () => {
+      // 仅在登录状态下加载群聊列表
+      if (!props.isLoggedIn) {
+        recentGroups.value = [];
+        return;
+      }
+      
       try {
         // 从 API 获取最近对话的群聊
         // 暂时传递null，后续从登录状态中获取userId
@@ -135,14 +170,40 @@ export default {
 
     onMounted(() => {
       loadRecentGroups();
+      
+      // 每30秒自动刷新群聊列表
+      refreshInterval = setInterval(() => {
+        if (props.isLoggedIn) {
+          loadRecentGroups();
+        }
+      }, 30000);
+    });
+    
+    // 组件卸载时清除定时器
+    onUnmounted(() => {
+      if (refreshInterval) {
+        clearInterval(refreshInterval);
+      }
+    });
+
+    // 监听登录状态变化，当登录状态改变时重新加载群聊列表
+    watch(() => props.isLoggedIn, (newValue) => {
+      console.log('登录状态变化:', newValue);
+      if (newValue) {
+        loadRecentGroups();
+      } else {
+        recentGroups.value = [];
+      }
     });
 
     return {
       isCollapsed,
       activeTab,
       recentGroups,
-      isLoggedIn: props.isLoggedIn,
+      isRecentExpanded,
+      isLoggedIn: isLoggedInComputed,
       toggleSidebar,
+      toggleRecentGroups,
       selectTab,
       logout,
       openLoginModal,
@@ -257,6 +318,14 @@ export default {
   white-space: nowrap;
   overflow: hidden;
   font-size: 14px;
+  flex: 1;
+}
+
+.expand-icon {
+  font-size: 12px;
+  color: #95a5a6;
+  margin-left: auto;
+  transition: transform 0.2s;
 }
 
 /* 群聊项样式 */
