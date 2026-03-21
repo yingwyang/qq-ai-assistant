@@ -9,6 +9,82 @@
         <!-- 系统控制模块 -->
         <div class="system-control-section">
           <h3>系统控制</h3>
+          
+          <!-- 组件状态显示 -->
+          <div class="component-status">
+            <div class="status-item" :class="{ active: componentStatus.astrbot?.running }">
+              <span class="status-dot"></span>
+              <span>AstrBot</span>
+              <span class="status-text">{{ componentStatus.astrbot?.running ? '运行中' : '已停止' }}</span>
+            </div>
+            <div class="status-item" :class="{ active: componentStatus.napcat?.running }">
+              <span class="status-dot"></span>
+              <span>NapCat</span>
+              <span class="status-text">{{ componentStatus.napcat?.running ? '运行中' : '已停止' }}</span>
+            </div>
+            <div class="status-item" :class="{ active: componentStatus.gptsovits?.running }">
+              <span class="status-dot"></span>
+              <span>GPT-SoVITS</span>
+              <span class="status-text">{{ componentStatus.gptsovits?.running ? '运行中' : '已停止' }}</span>
+            </div>
+          </div>
+
+          <!-- 分别控制按钮 -->
+          <div class="component-buttons">
+            <div class="component-row">
+              <span class="component-name">AstrBot</span>
+              <button 
+                @click="startAstrBot" 
+                class="btn-component"
+                :disabled="isStartingAstrBot || componentStatus.astrbot?.running"
+              >
+                {{ isStartingAstrBot ? '启动中...' : '启动' }}
+              </button>
+              <button 
+                @click="stopAstrBot" 
+                class="btn-component btn-stop"
+                :disabled="isStoppingAstrBot || !componentStatus.astrbot?.running"
+              >
+                {{ isStoppingAstrBot ? '停止中...' : '停止' }}
+              </button>
+            </div>
+            <div class="component-row">
+              <span class="component-name">NapCat</span>
+              <button 
+                @click="startNapCat" 
+                class="btn-component"
+                :disabled="isStartingNapCat || componentStatus.napcat?.running"
+              >
+                {{ isStartingNapCat ? '启动中...' : '启动' }}
+              </button>
+              <button 
+                @click="stopNapCat" 
+                class="btn-component btn-stop"
+                :disabled="isStoppingNapCat || !componentStatus.napcat?.running"
+              >
+                {{ isStoppingNapCat ? '停止中...' : '停止' }}
+              </button>
+            </div>
+            <div class="component-row">
+              <span class="component-name">GPT-SoVITS</span>
+              <button 
+                @click="startGptSovits" 
+                class="btn-component"
+                :disabled="isStartingGptSovits || componentStatus.gptsovits?.running"
+              >
+                {{ isStartingGptSovits ? '启动中...' : '启动' }}
+              </button>
+              <button 
+                @click="stopGptSovits" 
+                class="btn-component btn-stop"
+                :disabled="isStoppingGptSovits || !componentStatus.gptsovits?.running"
+              >
+                {{ isStoppingGptSovits ? '停止中...' : '停止' }}
+              </button>
+            </div>
+          </div>
+
+          <!-- 一键控制按钮 -->
           <div class="system-buttons">
             <button 
               @click="startAllComponents" 
@@ -79,6 +155,22 @@ export default {
     const isStopping = ref(false);
     const systemMessage = ref('');
     const systemMessageType = ref('');
+    
+    // 组件状态
+    const componentStatus = ref({
+      astrbot: { running: false },
+      napcat: { running: false },
+      gptsovits: { running: false }
+    });
+    
+    // 分别控制的状态
+    const isStartingAstrBot = ref(false);
+    const isStoppingAstrBot = ref(false);
+    const isStartingNapCat = ref(false);
+    const isStoppingNapCat = ref(false);
+    const isStartingGptSovits = ref(false);
+    const isStoppingGptSovits = ref(false);
+    
     let checkStatusInterval = null;
 
     const getQrCode = async () => {
@@ -152,11 +244,126 @@ export default {
         systemMessageType.value = 'success';
         isLoggedIn.value = false;
         emit('login-status-changed', false);
+        await getComponentStatus();
       } catch (error) {
         systemMessage.value = '停止失败: ' + error.message;
         systemMessageType.value = 'error';
       } finally {
         isStopping.value = false;
+      }
+    };
+
+    // 获取组件状态
+    const getComponentStatus = async () => {
+      try {
+        const response = await systemApi.getComponentStatus();
+        componentStatus.value = response;
+      } catch (error) {
+        console.error('获取组件状态失败:', error);
+      }
+    };
+
+    // 分别控制各个组件
+    const startAstrBot = async () => {
+      isStartingAstrBot.value = true;
+      systemMessage.value = '';
+      try {
+        const response = await systemApi.startAstrBot();
+        systemMessage.value = response.message || 'AstrBot 启动成功';
+        systemMessageType.value = 'success';
+        await getComponentStatus();
+      } catch (error) {
+        systemMessage.value = 'AstrBot 启动失败: ' + error.message;
+        systemMessageType.value = 'error';
+      } finally {
+        isStartingAstrBot.value = false;
+      }
+    };
+
+    const stopAstrBot = async () => {
+      isStoppingAstrBot.value = true;
+      systemMessage.value = '';
+      try {
+        const response = await systemApi.stopAstrBot();
+        systemMessage.value = response.message || 'AstrBot 停止成功';
+        systemMessageType.value = 'success';
+        await getComponentStatus();
+      } catch (error) {
+        systemMessage.value = 'AstrBot 停止失败: ' + error.message;
+        systemMessageType.value = 'error';
+      } finally {
+        isStoppingAstrBot.value = false;
+      }
+    };
+
+    const startNapCat = async () => {
+      isStartingNapCat.value = true;
+      systemMessage.value = '';
+      try {
+        const response = await systemApi.startNapCat();
+        systemMessage.value = response.message || 'NapCat 启动成功';
+        systemMessageType.value = 'success';
+        await getComponentStatus();
+        // 等待服务启动后刷新二维码
+        setTimeout(() => {
+          checkServiceHealth();
+          getQrCode();
+        }, 3000);
+      } catch (error) {
+        systemMessage.value = 'NapCat 启动失败: ' + error.message;
+        systemMessageType.value = 'error';
+      } finally {
+        isStartingNapCat.value = false;
+      }
+    };
+
+    const stopNapCat = async () => {
+      isStoppingNapCat.value = true;
+      systemMessage.value = '';
+      try {
+        const response = await systemApi.stopNapCat();
+        systemMessage.value = response.message || 'NapCat 停止成功';
+        systemMessageType.value = 'success';
+        isLoggedIn.value = false;
+        emit('login-status-changed', false);
+        await getComponentStatus();
+      } catch (error) {
+        systemMessage.value = 'NapCat 停止失败: ' + error.message;
+        systemMessageType.value = 'error';
+      } finally {
+        isStoppingNapCat.value = false;
+      }
+    };
+
+    const startGptSovits = async () => {
+      isStartingGptSovits.value = true;
+      systemMessage.value = '';
+      try {
+        const response = await systemApi.startGptSovits();
+        systemMessage.value = response.message || 'GPT-SoVITS 启动成功';
+        systemMessageType.value = 'success';
+        await getComponentStatus();
+      } catch (error) {
+        systemMessage.value = 'GPT-SoVITS 启动失败: ' + error.message;
+        systemMessageType.value = 'error';
+      } finally {
+        isStartingGptSovits.value = false;
+      }
+    };
+
+    const stopGptSovits = async () => {
+      isStoppingGptSovits.value = true;
+      systemMessage.value = '';
+      try {
+        const response = await systemApi.stopGptSovits();
+        systemMessage.value = response.message || 'GPT-SoVITS 停止成功';
+        systemMessageType.value = 'success';
+        await getComponentStatus();
+      } catch (error) {
+        systemMessage.value = 'GPT-SoVITS 停止失败: ' + error.message;
+        systemMessageType.value = 'error';
+      } finally {
+        isStoppingGptSovits.value = false;
       }
     };
 
@@ -166,6 +373,7 @@ export default {
 
     const initModal = async () => {
       if (props.visible) {
+        await getComponentStatus();
         await checkServiceHealth();
         if (serviceAvailable.value) {
           await checkLoginStatus();
@@ -208,9 +416,22 @@ export default {
       isStopping,
       systemMessage,
       systemMessageType,
+      componentStatus,
+      isStartingAstrBot,
+      isStoppingAstrBot,
+      isStartingNapCat,
+      isStoppingNapCat,
+      isStartingGptSovits,
+      isStoppingGptSovits,
       refreshQrCode,
       startAllComponents,
       stopAllComponents,
+      startAstrBot,
+      stopAstrBot,
+      startNapCat,
+      stopNapCat,
+      startGptSovits,
+      stopGptSovits,
       closeModal
     };
   }
@@ -415,5 +636,103 @@ export default {
 
 .btn-confirm:hover {
   background-color: #219a52;
+}
+
+/* 组件状态显示 */
+.component-status {
+  display: flex;
+  gap: 15px;
+  margin-bottom: 15px;
+  padding: 10px;
+  background-color: #f8f9fa;
+  border-radius: 4px;
+}
+
+.status-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #666;
+}
+
+.status-item.active {
+  color: #27ae60;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: #e74c3c;
+}
+
+.status-item.active .status-dot {
+  background-color: #27ae60;
+}
+
+.status-text {
+  font-size: 12px;
+  color: #999;
+}
+
+.status-item.active .status-text {
+  color: #27ae60;
+}
+
+/* 分别控制按钮 */
+.component-buttons {
+  margin-bottom: 20px;
+}
+
+.component-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+  padding: 8px;
+  background-color: #f8f9fa;
+  border-radius: 4px;
+}
+
+.component-name {
+  flex: 1;
+  font-size: 14px;
+  font-weight: 500;
+  color: #2c3e50;
+}
+
+.btn-component {
+  padding: 6px 12px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  transition: all 0.2s;
+  min-width: 60px;
+}
+
+.btn-component:not(:disabled) {
+  background-color: #3498db;
+  color: white;
+}
+
+.btn-component:not(:disabled):hover {
+  background-color: #2980b9;
+}
+
+.btn-component.btn-stop:not(:disabled) {
+  background-color: #e74c3c;
+}
+
+.btn-component.btn-stop:not(:disabled):hover {
+  background-color: #c0392b;
+}
+
+.btn-component:disabled {
+  background-color: #bdc3c7;
+  color: #7f8c8d;
+  cursor: not-allowed;
 }
 </style>

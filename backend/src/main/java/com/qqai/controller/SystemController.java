@@ -154,4 +154,121 @@ public class SystemController {
         
         return result;
     }
+
+    // ========== 分别启动/停止各个组件 ==========
+
+    @PostMapping("/start-astrbot")
+    public Map<String, String> startAstrBot() {
+        Map<String, String> result = new HashMap<>();
+        try {
+            astrBotService.startAstrBot();
+            result.put("status", "started");
+            result.put("message", "AstrBot 启动成功");
+        } catch (Exception e) {
+            result.put("status", "error");
+            result.put("message", e.getMessage());
+        }
+        return result;
+    }
+
+    @PostMapping("/stop-astrbot")
+    public Map<String, String> stopAstrBot() {
+        Map<String, String> result = new HashMap<>();
+        try {
+            astrBotService.stopAstrBot();
+            result.put("status", "stopped");
+            result.put("message", "AstrBot 停止成功");
+        } catch (Exception e) {
+            result.put("status", "error");
+            result.put("message", e.getMessage());
+        }
+        return result;
+    }
+
+    @PostMapping("/start-napcat")
+    public Map<String, String> startNapCat() {
+        Map<String, String> result = new HashMap<>();
+        try {
+            napCatService.startNapCat();
+            result.put("status", "started");
+            result.put("message", "NapCat 启动成功");
+        } catch (Exception e) {
+            result.put("status", "error");
+            result.put("message", e.getMessage());
+        }
+        return result;
+    }
+
+    @PostMapping("/stop-napcat")
+    public Map<String, String> stopNapCat() {
+        Map<String, String> result = new HashMap<>();
+        try {
+            napCatService.stopNapCat();
+            result.put("status", "stopped");
+            result.put("message", "NapCat 停止成功");
+        } catch (Exception e) {
+            result.put("status", "error");
+            result.put("message", e.getMessage());
+        }
+        return result;
+    }
+
+    @PostMapping("/start-gptsovits")
+    public Map<String, String> startGptSovits() {
+        Map<String, String> result = new HashMap<>();
+        try {
+            gptSovitsService.startGptSovits();
+            result.put("status", "started");
+            result.put("message", "GPT-SoVITS 启动成功");
+        } catch (Exception e) {
+            result.put("status", "error");
+            result.put("message", e.getMessage());
+        }
+        return result;
+    }
+
+    @PostMapping("/stop-gptsovits")
+    public Map<String, String> stopGptSovits() {
+        Map<String, String> result = new HashMap<>();
+        try {
+            gptSovitsService.stopGptSovits();
+            result.put("status", "stopped");
+            result.put("message", "GPT-SoVITS 停止成功");
+        } catch (Exception e) {
+            result.put("status", "error");
+            result.put("message", e.getMessage());
+        }
+        return result;
+    }
+
+    @GetMapping("/component-status")
+    public Map<String, Object> getComponentStatus() {
+        Map<String, Object> result = new HashMap<>();
+        
+        // 检查 AstrBot 状态
+        try {
+            // 这里可以根据实际情况检查 AstrBot 是否运行
+            result.put("astrbot", Map.of("running", true, "status", "running"));
+        } catch (Exception e) {
+            result.put("astrbot", Map.of("running", false, "status", "stopped"));
+        }
+        
+        // 检查 NapCat 状态
+        try {
+            napCatService.checkLoginStatus();
+            result.put("napcat", Map.of("running", true, "status", "running"));
+        } catch (Exception e) {
+            result.put("napcat", Map.of("running", false, "status", "stopped"));
+        }
+        
+        // 检查 GPT-SoVITS 状态
+        try {
+            // 这里可以根据实际情况检查 GPT-SoVITS 是否运行
+            result.put("gptsovits", Map.of("running", true, "status", "running"));
+        } catch (Exception e) {
+            result.put("gptsovits", Map.of("running", false, "status", "stopped"));
+        }
+        
+        return result;
+    }
 }

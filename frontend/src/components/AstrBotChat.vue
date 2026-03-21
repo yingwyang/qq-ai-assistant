@@ -44,8 +44,8 @@
           placeholder="输入消息..."
           @keyup.enter="sendMessage"
         />
-        <button class="send-btn" @click="sendMessage" :disabled="!inputMessage.trim()">
-          发送
+        <button class="send-btn" @click="sendMessage" :disabled="!inputMessage.trim() || isLoading">
+          {{ isLoading ? '发送中...' : '发送' }}
         </button>
       </div>
     </div>
@@ -54,6 +54,7 @@
 
 <script>
 import { ref, nextTick } from 'vue';
+import { astrBotApi } from '../services/api';
 
 export default {
   name: 'AstrBotChat',
@@ -62,39 +63,89 @@ export default {
     const inputMessage = ref('');
     const messagesContainer = ref(null);
     const inputRef = ref(null);
+    const isLoading = ref(false);
 
     const sendMessage = async () => {
-      if (!inputMessage.value.trim()) return;
+      if (!inputMessage.value.trim() || isLoading.value) return;
+      
+      const userMessage = inputMessage.value.trim();
       
       // 添加用户消息
       messages.value.push({
-        text: inputMessage.value,
+        text: userMessage,
         sender: '我',
         isSelf: true,
         time: new Date()
       });
       
-      const userMessage = inputMessage.value;
       inputMessage.value = '';
+      isLoading.value = true;
       
       // 滚动到底部
       nextTick(() => {
         scrollToBottom();
       });
       
-      // TODO: 调用 AstrBot API 获取回复
-      // 模拟 AstrBot 回复
-      setTimeout(() => {
+      // 调用后端 API 发送消息给 AstrBot
+      try {
+        let response;
+        
+        // 检测是否是群聊分析请求
+        // 支持多种格式：总结群聊"xxx"、分析群聊'xxx'、总结群聊 xxx
+        const analyzeMatch = userMessage.match(/(?:总结|分析).*群聊["'"']?([^"'"']+)["'"']?/i);
+        if (analyzeMatch) {
+          // 提取群聊名称/ID
+          const groupId = analyzeMatch[1].trim();
+          console.log('检测到群聊分析请求，群ID:', groupId);
+          response = await astrBotApi.analyzeGroup(groupId, 50, 'summary');
+          if (response && response.analysis) {
+            messages.value.push({
+              text: response.analysis,
+              sender: 'AstrBot',
+              isSelf: false,
+              time: new Date()
+            });
+          } else {
+            messages.value.push({
+              text: '抱歉，分析群聊失败，请稍后重试。',
+              sender: 'AstrBot',
+              isSelf: false,
+              time: new Date()
+            });
+          }
+        } else {
+          // 普通对话
+          response = await astrBotApi.sendMessage(userMessage);
+          if (response && response.data) {
+            messages.value.push({
+              text: response.data,
+              sender: 'AstrBot',
+              isSelf: false,
+              time: new Date()
+            });
+          } else {
+            messages.value.push({
+              text: '抱歉，获取回复失败，请稍后重试。',
+              sender: 'AstrBot',
+              isSelf: false,
+              time: new Date()
+            });
+          }
+        }
+      } catch (error) {
+        console.error('发送消息失败:', error);
         messages.value.push({
-          text: `这是 AstrBot 对 "${userMessage}" 的回复`,
+          text: '抱歉，网络错误，请稍后重试。',
           sender: 'AstrBot',
           isSelf: false,
           time: new Date()
         });
+      } finally {
+        isLoading.value = false;
         nextTick(() => {
           scrollToBottom();
         });
-      }, 1000);
+      }
     };
 
     const scrollToBottom = () => {
@@ -117,6 +168,7 @@ export default {
       inputMessage,
       messagesContainer,
       inputRef,
+      isLoading,
       sendMessage,
       formatTime
     };

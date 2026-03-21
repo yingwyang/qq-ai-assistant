@@ -110,17 +110,49 @@ public class NapCatService {
     public boolean checkLoginStatus() throws Exception {
         System.out.println("Checking NapCat login status...");
         
-        // 方法0: 首先检查是否有未过期的二维码（如果有二维码，说明未登录）
+        // 方法1: 首先检查 NapCat API 是否可访问（优先检查实际登录状态）
+        System.out.println("Method 1: Checking NapCat API accessibility...");
+        if (isNapCatApiAccessible()) {
+            // API 可访问，再检查配置文件
+            try {
+                String configPath = getNapCatConfigPath();
+                File configDir = new File(configPath);
+                
+                if (configDir.exists() && configDir.isDirectory()) {
+                    File[] configFiles = configDir.listFiles((dir, name) -> {
+                        return name.startsWith("napcat_") 
+                            && !name.startsWith("napcat_protocol_") 
+                            && !name.startsWith("onebot11_")
+                            && name.endsWith(".json");
+                    });
+                    
+                    if (configFiles != null && configFiles.length > 0) {
+                        for (File configFile : configFiles) {
+                            String fileName = configFile.getName();
+                            String qqNumber = fileName.replace("napcat_", "").replace(".json", "");
+                            if (qqNumber.matches("\\d+")) {
+                                System.out.println("✅ NapCat is logged in with QQ: " + qqNumber);
+                                return true;
+                            }
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                System.out.println("Config check failed: " + e.getMessage());
+            }
+        }
+        
+        // 方法2: 检查是否有未过期的二维码（如果有最近生成的二维码，说明正在等待登录）
+        System.out.println("Method 2: Checking QR code status...");
         try {
             String qrCodePath = getNapCatQrCodePath();
             File qrCodeFile = new File(qrCodePath);
             if (qrCodeFile.exists()) {
-                // 检查二维码文件是否在5分钟内生成（如果是，说明正在等待扫码）
                 long lastModified = qrCodeFile.lastModified();
                 long now = System.currentTimeMillis();
                 long fiveMinutes = 5 * 60 * 1000;
                 if (now - lastModified < fiveMinutes) {
-                    System.out.println("Method 0: QR code exists and is recent, NapCat is waiting for login");
+                    System.out.println("Method 2: QR code is recent, NapCat is waiting for login");
                     return false;
                 }
             }
@@ -128,54 +160,8 @@ public class NapCatService {
             System.out.println("QR code check failed: " + e.getMessage());
         }
         
-        // 方法1: 检查 NapCat 配置文件 + 验证 NapCat API 可访问
-        // 登录成功后 NapCat 会创建 napcat_<qq号>.json 配置文件
-        try {
-            String configPath = getNapCatConfigPath();
-            File configDir = new File(configPath);
-            System.out.println("Method 1: Checking NapCat config directory: " + configPath);
-            
-            if (configDir.exists() && configDir.isDirectory()) {
-                File[] configFiles = configDir.listFiles((dir, name) -> {
-                    // 查找 napcat_<qq号>.json 格式的文件，排除 napcat_protocol_ 和 onebot11_
-                    return name.startsWith("napcat_") 
-                        && !name.startsWith("napcat_protocol_") 
-                        && !name.startsWith("onebot11_")
-                        && name.endsWith(".json");
-                });
-                
-                System.out.println("Found " + (configFiles != null ? configFiles.length : 0) + " config files");
-                
-                if (configFiles != null && configFiles.length > 0) {
-                    for (File configFile : configFiles) {
-                        String fileName = configFile.getName();
-                        
-                        // 从文件名提取 QQ 号: napcat_<qq号>.json
-                        String qqNumber = fileName.replace("napcat_", "").replace(".json", "");
-                        
-                        // 检查是否是纯数字（有效的 QQ 号）
-                        if (qqNumber.matches("\\d+")) {
-                            // 配置文件存在，再验证 NapCat API 是否可访问
-                            if (isNapCatApiAccessible()) {
-                                System.out.println("✅ Method 1 SUCCESS: Found valid QQ config and API is accessible: " + qqNumber);
-                                return true;
-                            } else {
-                                System.out.println("Config file exists but NapCat API is not accessible, may need re-login");
-                                return false;
-                            }
-                        }
-                    }
-                }
-            } else {
-                System.out.println("Config directory does not exist: " + configPath);
-            }
-        } catch (Exception e) {
-            System.out.println("Config check failed: " + e.getMessage());
-            e.printStackTrace();
-        }
-        
-        // 方法2: 尝试调用 NapCat API 检查登录状态
-        System.out.println("Method 2: Trying API endpoints...");
+        // 方法3: 尝试调用 NapCat API 检查登录状态（备用方案）
+        System.out.println("Method 3: Trying API endpoints...");
         CloseableHttpClient httpClient = HttpClients.createDefault();
         
         // NapCat 使用 URL 参数传递 token: ?token=xxx
@@ -265,13 +251,13 @@ public class NapCatService {
     private boolean isNapCatApiAccessible() {
         try {
             CloseableHttpClient httpClient = HttpClients.createDefault();
-            // 尝试访问 NapCat 的健康检查端点
-            HttpGet httpGet = new HttpGet(napcatApiUrl + "/api/health");
-            httpGet.setHeader("Authorization", "Bearer " + napcatToken);
+            // 尝试访问 NapCat 的 WebUI 端点，使用 URL 参数传递 token
+            HttpGet httpGet = new HttpGet(napcatApiUrl + "/api/QQLogin/CheckLoginStatus?token=" + napcatToken);
             
             try (CloseableHttpResponse response = httpClient.execute(httpGet)) {
                 int statusCode = response.getCode();
                 httpClient.close();
+                System.out.println("NapCat API check status: " + statusCode);
                 return statusCode == 200;
             }
         } catch (Exception e) {

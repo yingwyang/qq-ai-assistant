@@ -54,6 +54,7 @@ import Sidebar from './components/Sidebar.vue';
 import ChatInterface from './components/ChatInterface.vue';
 import AstrBotChat from './components/AstrBotChat.vue';
 import LoginModal from './components/LoginModal.vue';
+import { systemApi } from './services/api';
 
 export default {
   name: 'App',
@@ -70,17 +71,31 @@ export default {
     const showLoginModal = ref(false);
     const selectedGroupId = ref('');
 
-    // 从 localStorage 恢复登录状态和群号
-    onMounted(() => {
-      const savedLoginStatus = localStorage.getItem('isLoggedIn');
+    // 从 localStorage 恢复登录状态和群号，并检查 NapCat 登录状态
+    onMounted(async () => {
       const savedGroupId = localStorage.getItem('selectedGroupId');
-      
-      if (savedLoginStatus === 'true') {
-        isLoggedIn.value = true;
-      }
       
       if (savedGroupId) {
         selectedGroupId.value = savedGroupId;
+      }
+      
+      // 检查 NapCat 实际登录状态
+      try {
+        const response = await systemApi.checkNapCatLoginStatus();
+        if (response && response.loggedIn) {
+          isLoggedIn.value = true;
+          localStorage.setItem('isLoggedIn', 'true');
+        } else {
+          isLoggedIn.value = false;
+          localStorage.removeItem('isLoggedIn');
+        }
+      } catch (error) {
+        console.log('检查登录状态失败:', error);
+        // 如果检查失败，使用 localStorage 的缓存状态
+        const savedLoginStatus = localStorage.getItem('isLoggedIn');
+        if (savedLoginStatus === 'true') {
+          isLoggedIn.value = true;
+        }
       }
     });
 

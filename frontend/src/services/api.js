@@ -6,7 +6,8 @@ async function request(endpoint, options = {}) {
   const url = `${API_BASE_URL}${endpoint}`;
   const defaultOptions = {
     headers: {
-      'Content-Type': 'application/json',
+      'Content-Type': 'application/json; charset=UTF-8',
+      'Accept': 'application/json; charset=UTF-8',
     },
   };
   
@@ -121,10 +122,48 @@ export const systemApi = {
   stopAllComponents: () => request('/system/stop-all', {
     method: 'POST',
   }),
+  // 分别启动各个组件
+  startAstrBot: () => request('/system/start-astrbot', {
+    method: 'POST',
+  }),
+  stopAstrBot: () => request('/system/stop-astrbot', {
+    method: 'POST',
+  }),
+  startNapCat: () => request('/system/start-napcat', {
+    method: 'POST',
+  }),
+  stopNapCat: () => request('/system/stop-napcat', {
+    method: 'POST',
+  }),
+  startGptSovits: () => request('/system/start-gptsovits', {
+    method: 'POST',
+  }),
+  stopGptSovits: () => request('/system/stop-gptsovits', {
+    method: 'POST',
+  }),
+  getComponentStatus: () => request('/system/component-status'),
   getNapCatQrCode: () => request('/system/napcat/qrcode'),
   getNapCatQrCodePath: () => request('/system/napcat/qrcode-path'),
   checkNapCatLoginStatus: () => request('/system/napcat/login-status'),
   healthCheck: () => request('/system/health'),
+};
+
+// AstrBot 相关API
+export const astrBotApi = {
+  // 发送消息给 AstrBot
+  sendMessage: (message, groupId) => request('/astrbot/send', {
+    method: 'POST',
+    body: JSON.stringify({ message, groupId }),
+  }),
+  
+  // 让 AstrBot 分析群聊消息
+  analyzeGroup: (groupId, messageCount = 50, type = 'summary') => request('/astrbot/analyze', {
+    method: 'POST',
+    body: JSON.stringify({ groupId, messageCount, type }),
+  }),
+  
+  // 获取 AstrBot 状态
+  getStatus: () => request('/astrbot/status'),
 };
 
 // 文件类型检测

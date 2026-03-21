@@ -27,7 +27,7 @@ server:
 # AstrBot配置
 astrbot:
   api-url: http://localhost:6185
-  token: your-astrbot-token
+  token: abk_T7_xLlW5kGaCTTbtR61ibyE4D775mnmtYXNwU6p6FWg
 
 # NapCat配置
 napcat:
