@@ -14,6 +14,8 @@
 - **系统组件一键控制** - 一键启动/停止 AstrBot、NapCat、GPT-SoVITS
 - **NapCat二维码登录** - 嵌入 NapCat 扫码登录功能
 - **消息归档与清理** - 自动归档历史消息，定期清理旧数据
+- **多媒体消息支持** - 支持图片、语音、视频、表情消息显示
+- **语音自动转换** - AMR语音自动转换为MP3格式播放
 
 ## 技术架构
 
@@ -22,7 +24,7 @@
 - **Spring Boot 3.2.0** - 核心框架
 - **Spring Data JPA** - 数据持久化
 - **MySQL 8.0** - 主数据库，存储消息元数据
-- **MinIO** - 对象存储，存储图片/视频/音频等大文件
+- **FFmpeg** - 语音格式转换（AMR转MP3）
 - **WebSocket** - 实时消息推送
 - **Maven** - 项目构建
 
@@ -38,6 +40,7 @@
 - **AstrBot** - AI聊天与消息总结
 - **NapCat** - QQ消息监听与OneBot协议实现
 - **GPT-SoVITS** - 语音合成
+- **FFmpeg** - 音视频处理
 
 ## 项目结构
 
@@ -54,6 +57,8 @@ qq-ai-assistant/
 │   ├── src/main/resources/
 │   │   ├── application.yml    # 应用配置
 │   │   └── init-mysql.sql     # 数据库初始化脚本
+│   ├── uploads/               # 本地文件存储目录
+│   │   └── images/            # 图片、语音、视频存储
 │   └── pom.xml                # Maven配置
 ├── frontend/                   # Vue3前端
 │   ├── src/
@@ -63,6 +68,7 @@ qq-ai-assistant/
 │   │   └── main.js            # 入口文件
 │   ├── package.json           # NPM配置
 │   └── vite.config.js         # Vite配置
+├── ffmpeg-8.1-essentials_build/  # FFmpeg工具（语音转换）
 └── README.md                  # 项目说明
 ```
 
@@ -73,22 +79,20 @@ qq-ai-assistant/
 1. **messages** - 消息表
    - 存储QQ消息的元数据
    - 支持消息归档和状态跟踪
+   - 存储本地文件路径（图片/语音/视频）
 
 2. **users** - 用户表
    - 记录登录账号信息
    - 存储用户头像和昵称
 
-3. **groups** - 群聊表
+3. **chat_groups** - 群聊表
    - 记录群聊信息
    - 存储群聊头像和成员数量
+   - 支持多用户独立群聊记录（owner_qq字段）
 
-4. **user_groups** - 用户群聊关联表
-   - 记录用户和群聊的关联关系
-   - 支持多对多关系
-
-5. **file_records** - 文件记录表
+4. **file_records** - 文件记录表
    - 存储文件元数据
-   - 支持MinIO对象存储
+   - 支持本地文件存储
 
 ## 快速开始
 
@@ -97,7 +101,7 @@ qq-ai-assistant/
 - Java 17+
 - Node.js 18+
 - MySQL 8.0+
-- MinIO (可选，用于文件存储)
+- FFmpeg（用于语音转换）
 
 ### 1. 克隆项目
 
@@ -106,14 +110,28 @@ git clone <repository-url>
 cd qq-ai-assistant
 ```
 
-### 2. 配置数据库
+### 2. 配置FFmpeg
+
+将 FFmpeg 放置在项目根目录：
+```
+qq-ai-assistant/
+├── backend/
+├── frontend/
+└── ffmpeg-8.1-essentials_build/    <-- FFmpeg目录
+    └── bin/
+        └── ffmpeg.exe
+```
+
+或修改后端代码中的 FFmpeg 路径为你系统的实际路径。
+
+### 3. 配置数据库
 
 ```bash
 # 创建数据库
 mysql -u root -p < backend/src/main/resources/init-mysql.sql
 ```
 
-### 3. 启动后端
+### 4. 启动后端
 
 ```bash
 cd backend
@@ -123,7 +141,7 @@ java -jar target/qq-ai-assistant-1.0-SNAPSHOT.jar
 
 后端服务将运行在 http://localhost:8081
 
-### 4. 启动前端
+### 5. 启动前端
 
 ```bash
 cd frontend
@@ -133,7 +151,7 @@ npm run dev
 
 前端服务将运行在 http://localhost:5173
 
-### 5. 配置 NapCat
+### 6. 配置 NapCat
 
 1. 启动 NapCat 并登录QQ
 2. 在 NapCat WebUI 中配置 HTTP 上报：
@@ -141,14 +159,14 @@ npm run dev
    - Token: 配置文件中设置的 token
    - 启用 `reportSelfMessage` 以接收发送的消息
 
-### 6. 启动 AstrBot (可选)
+### 7. 启动 AstrBot (可选)
 
 ```bash
 cd astrbot
 python main.py
 ```
 
-### 7. 启动 GPT-SoVITS (可选)
+### 8. 启动 GPT-SoVITS (可选)
 
 ```bash
 cd GPT-SoVITS-v2pro-20250604-nvidia50
@@ -170,12 +188,23 @@ runtime\python.exe -I api_v2.py -a 127.0.0.1 -p 8000
 1. 从左侧导航栏的"最近对话"中选择群聊
 2. 或手动输入群聊ID并点击"加载消息"
 3. 消息会自动加载并显示在聊天界面
+4. 收到新消息时，如果在底部会自动滚动，否则保持当前位置
 
 ### 消息显示规则
 
-- **用户消息**（发送的消息）- 右对齐显示
-- **群消息**（接收的消息）- 左对齐显示
+- **用户消息**（发送的消息）- 右对齐显示，蓝色气泡
+- **群消息**（接收的消息）- 左对齐显示，灰色气泡
 - **AI总结** - 左对齐显示，带有特殊标识
+- **图片消息** - 点击可预览
+- **语音消息** - QQ样式，点击播放，播放时显示波形动画
+- **视频消息** - 显示视频播放器
+- **表情消息** - 显示表情标识
+
+### 语音消息说明
+
+- 语音消息会自动从 AMR 格式转换为 MP3 格式
+- 转换后的语音文件存储在 `backend/uploads/images/voice/` 目录
+- 浏览器可直接播放 MP3 格式
 
 ## API文档
 
@@ -183,7 +212,8 @@ runtime\python.exe -I api_v2.py -a 127.0.0.1 -p 8000
 
 - `GET /api/messages/group/{groupId}` - 获取群聊消息
 - `GET /api/messages/recent-groups` - 获取最近对话的群聊
-- `POST /api/messages/webhook` - 接收NapCat消息推送
+- `POST /` - 接收NapCat消息推送（根路径）
+- `POST /api/napcat` - 接收NapCat消息推送（备用路径）
 - `POST /api/messages/archive` - 手动触发消息归档
 
 ### 系统控制API
@@ -215,11 +245,10 @@ spring:
     hibernate:
       ddl-auto: update
 
-minio:
-  endpoint: http://localhost:9000
-  access-key: minioadmin
-  secret-key: minioadmin
-  bucket-name: qq-chat
+# 本地文件存储路径
+file:
+  storage:
+    local-path: ./uploads/images
 ```
 
 ### NapCat配置
@@ -246,22 +275,24 @@ minio:
 
 ## 消息存储策略
 
-### 分表策略
+### 本地文件存储
 
-- 按月份自动分表存储消息
-- 支持按群聊ID分表（可配置）
+- **图片** - 存储在 `uploads/images/{groupId}/{date}/{uuid}.jpg`
+- **语音** - 存储在 `uploads/images/voice/{groupId}/{date}/{uuid}.mp3`
+- **视频** - 存储在 `uploads/images/video/{groupId}/{date}/{uuid}.mp4`
+- **群头像** - 存储在 `uploads/images/avatars/group_{groupId}.jpg`
+
+### 语音转换
+
+- 接收的 AMR 格式语音自动转换为 MP3
+- 使用 FFmpeg 进行转换
+- 转换成功后删除原始 AMR 文件
 
 ### 归档策略
 
 - 自动归档90天前的消息
 - 归档后的消息移动到历史表
 - 支持手动触发归档
-
-### 文件存储
-
-- 小文件（元数据）- 存储在MySQL
-- 大文件（图片/视频/音频）- 存储在MinIO
-- 文件元数据记录在file_records表
 
 ## 开发计划
 
@@ -271,12 +302,18 @@ minio:
 - [x] 群聊消息展示
 - [x] 用户头像显示
 - [x] 图片消息解析与显示
+- [x] 语音消息接收与播放
+- [x] AMR转MP3自动转换
+- [x] 视频消息支持
+- [x] 表情消息支持
 - [x] 左侧导航栏最近对话
 - [x] 系统组件一键控制
 - [x] NapCat二维码登录
 - [x] 消息归档与清理
 - [x] 发送消息存储
 - [x] 用户-群聊关联关系
+- [x] 本地文件存储
+- [x] 收到新消息自动滚动（仅在底部时）
 
 ### 待实现功能
 
@@ -301,7 +338,13 @@ minio:
 - QQ头像API需要外网访问
 - 检查浏览器控制台是否有错误
 
-### 3. 系统组件启动失败
+### 3. 语音播放失败
+
+- 检查 FFmpeg 是否正确安装
+- 检查 FFmpeg 路径配置是否正确
+- 查看后端日志获取详细错误信息
+
+### 4. 系统组件启动失败
 
 - 检查组件路径配置是否正确
 - 检查端口是否被占用
