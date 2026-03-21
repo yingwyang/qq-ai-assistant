@@ -1,20 +1,28 @@
 spring:
   datasource:
-    url: jdbc:h2:mem:qqai
-    username: sa
-    password: password
-    driver-class-name: org.h2.Driver
+    url: jdbc:mysql://localhost:3306/qq_chat?useSSL=false&serverTimezone=Asia/Shanghai&characterEncoding=UTF-8&allowPublicKeyRetrieval=true
+    username: root
+    password: ***REMOVED***
+    driver-class-name: com.mysql.cj.jdbc.Driver
   jpa:
     hibernate:
-      ddl-auto: create-drop
+      ddl-auto: update
     show-sql: true
-  h2:
-    console:
-      enabled: true
-      path: /h2-console
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQLDialect
+        format_sql: true
+        jdbc:
+          batch_size: 50
+        order_inserts: true
+        order_updates: true
 
 server:
-  port: 8080
+  port: 8081
+  servlet:
+    multipart:
+      max-file-size: 100MB
+      max-request-size: 100MB
 
 # AstrBot配置
 astrbot:
@@ -25,8 +33,35 @@ astrbot:
 napcat:
   api-url: http://localhost:6099
   token: ***REMOVED***
+  webhook-token: ***REMOVED***
 
 # GPT-SoVITS配置
 gpt-sovits:
   api-url: http://localhost:7860
   token: your-gpt-sovits-token
+
+# MinIO配置
+minio:
+  endpoint: http://localhost:9000
+  access-key: admin
+  secret-key: password123
+  bucket-name: qq-chat-files
+  secure: false
+
+# 文件上传配置
+file:
+  upload:
+    max-size: 100MB
+    allowed-types: image/*,video/*,audio/*,application/*
+  storage:
+    # 本地临时存储路径
+    temp-path: ./uploads/temp
+    # 归档存储路径
+    archive-path: ./uploads/archive
+
+# 消息归档配置
+archive:
+  # 多少天前的消息需要归档
+  days-before: 90
+  # 每天几点执行归档任务
+  cron: 0 0 2 * * ?

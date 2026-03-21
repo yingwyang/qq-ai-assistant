@@ -110,7 +110,25 @@ public class NapCatService {
     public boolean checkLoginStatus() throws Exception {
         System.out.println("Checking NapCat login status...");
         
-        // 方法1: 优先通过检查 NapCat 配置文件来判断登录状态（成功率最高）
+        // 方法0: 首先检查是否有未过期的二维码（如果有二维码，说明未登录）
+        try {
+            String qrCodePath = getNapCatQrCodePath();
+            File qrCodeFile = new File(qrCodePath);
+            if (qrCodeFile.exists()) {
+                // 检查二维码文件是否在5分钟内生成（如果是，说明正在等待扫码）
+                long lastModified = qrCodeFile.lastModified();
+                long now = System.currentTimeMillis();
+                long fiveMinutes = 5 * 60 * 1000;
+                if (now - lastModified < fiveMinutes) {
+                    System.out.println("Method 0: QR code exists and is recent, NapCat is waiting for login");
+                    return false;
+                }
+            }
+        } catch (Exception e) {
+            System.out.println("QR code check failed: " + e.getMessage());
+        }
+        
+        // 方法1: 检查 NapCat 配置文件 + 验证 NapCat API 可访问
         // 登录成功后 NapCat 会创建 napcat_<qq号>.json 配置文件
         try {
             String configPath = getNapCatConfigPath();
@@ -137,8 +155,14 @@ public class NapCatService {
                         
                         // 检查是否是纯数字（有效的 QQ 号）
                         if (qqNumber.matches("\\d+")) {
-                            System.out.println("✅ Method 1 SUCCESS: Found valid QQ config: " + qqNumber);
-                            return true;
+                            // 配置文件存在，再验证 NapCat API 是否可访问
+                            if (isNapCatApiAccessible()) {
+                                System.out.println("✅ Method 1 SUCCESS: Found valid QQ config and API is accessible: " + qqNumber);
+                                return true;
+                            } else {
+                                System.out.println("Config file exists but NapCat API is not accessible, may need re-login");
+                                return false;
+                            }
                         }
                     }
                 }
@@ -230,6 +254,30 @@ public class NapCatService {
         
         System.out.println("❌ All methods failed, returning false");
         return false;
+    }
+    
+    private String getNapCatQrCodePath() throws Exception {
+        String projectRoot = System.getProperty("user.dir");
+        String qrCodePath = projectRoot + File.separator + ".." + File.separator + ".." + File.separator + "napcat" + File.separator + "NapCat.Shell" + File.separator + "cache" + File.separator + "qrcode.png";
+        return new File(qrCodePath).getCanonicalFile().getAbsolutePath();
+    }
+    
+    private boolean isNapCatApiAccessible() {
+        try {
+            CloseableHttpClient httpClient = HttpClients.createDefault();
+            // 尝试访问 NapCat 的健康检查端点
+            HttpGet httpGet = new HttpGet(napcatApiUrl + "/api/health");
+            httpGet.setHeader("Authorization", "Bearer " + napcatToken);
+            
+            try (CloseableHttpResponse response = httpClient.execute(httpGet)) {
+                int statusCode = response.getCode();
+                httpClient.close();
+                return statusCode == 200;
+            }
+        } catch (Exception e) {
+            System.out.println("NapCat API accessibility check failed: " + e.getMessage());
+            return false;
+        }
     }
     
     private String getNapCatConfigPath() throws Exception {

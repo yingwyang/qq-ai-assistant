@@ -1,79 +1,111 @@
 <template>
   <div class="app">
-    <header class="app-header">
-      <h1>铃音QQ对话</h1>
+    <!-- 聊天页面 -->
+    <div class="chat-page">
+      <!-- 左侧导航栏 -->
+      <Sidebar 
+        :is-logged-in="isLoggedIn"
+        @tab-change="handleTabChange" 
+        @logout="handleLogout"
+        @open-login-modal="showLoginModal = true"
+        @select-group="handleSelectGroup"
+      />
       
-    </header>
-    
-    <main class="app-main">
-      <!-- 登录页面 -->
-      <template v-if="currentPage === 'login'">
-        <section class="section">
-          <NapCatLogin @login-status-changed="handleLoginStatusChanged" />
-        </section>
+      <!-- 主内容区 -->
+      <main class="chat-main">
+        <!-- 最近对话 -->
+        <template v-if="activeTab === 'recent'">
+          <ChatInterface :groupId="selectedGroupId" />
+        </template>
         
-        <section class="section">
-          <ProjectIntro />
-        </section>
-        
-        <section class="section">
-          <SystemControl />
-        </section>
-      </template>
-      
-      <!-- 消息页面 -->
-      <template v-else-if="currentPage === 'messages'">
-        <section class="section">
-          <SystemControl />
-        </section>
-        
-        <section class="section" style="grid-column: 1 / -1;">
-          <MessageDisplay />
-        </section>
-        
-        <section class="section" style="grid-column: 1 / -1;">
-          <button @click="currentPage = 'login'" class="btn-back">返回登录页面</button>
-        </section>
-      </template>
-    </main>
-    
-    <footer class="app-footer">
-      <p>© 2026 QQ智能聊天辅助系统</p>
-    </footer>
+        <!-- 我的智能体 -->
+        <template v-else-if="activeTab === 'agents'">
+          <div class="agents-page">
+            <h2>我的智能体</h2>
+            <div class="agents-list">
+              <div class="agent-card">
+                <div class="agent-avatar">🤖</div>
+                <div class="agent-info">
+                  <h3>AstrBot 助手</h3>
+                  <p>基于 AstrBot 的 AI 聊天助手</p>
+                </div>
+                <div class="agent-status active">运行中</div>
+              </div>
+              
+              <div class="agent-card">
+                <div class="agent-avatar">🎙️</div>
+                <div class="agent-info">
+                  <h3>GPT-SoVITS</h3>
+                  <p>语音合成服务</p>
+                </div>
+                <div class="agent-status" :class="{ active: gptSovitsRunning }">
+                  {{ gptSovitsRunning ? '运行中' : '未启动' }}
+                </div>
+              </div>
+            </div>
+          </div>
+        </template>
+      </main>
+    </div>
+
+    <!-- 登录/系统控制模态框 -->
+    <LoginModal 
+      v-model:visible="showLoginModal" 
+      @login-status-changed="handleLoginStatusChanged" 
+    />
   </div>
 </template>
 
 <script>
 import { ref } from 'vue';
-import SystemControl from './components/SystemControl.vue';
-import NapCatLogin from './components/NapCatLogin.vue';
-import MessageDisplay from './components/MessageDisplay.vue';
-import ProjectIntro from './components/ProjectIntro.vue';
+import Sidebar from './components/Sidebar.vue';
+import ChatInterface from './components/ChatInterface.vue';
+import LoginModal from './components/LoginModal.vue';
 
 export default {
   name: 'App',
   components: {
-    SystemControl,
-    NapCatLogin,
-    MessageDisplay,
-    ProjectIntro
+    Sidebar,
+    ChatInterface,
+    LoginModal
   },
   setup() {
     const isLoggedIn = ref(false);
-    const currentPage = ref('login');
+    const activeTab = ref('recent');
+    const gptSovitsRunning = ref(false);
+    const showLoginModal = ref(false);
+    const selectedGroupId = ref('');
 
     const handleLoginStatusChanged = (status) => {
       isLoggedIn.value = status;
-      if (status) {
-        // 登录成功后跳转到消息页面
-        currentPage.value = 'messages';
+    };
+
+    const handleTabChange = (tab) => {
+      activeTab.value = tab;
+    };
+
+    const handleLogout = () => {
+      isLoggedIn.value = false;
+    };
+
+    const handleSelectGroup = (groupId) => {
+      selectedGroupId.value = groupId;
+      // 切换到最近对话标签
+      if (activeTab.value !== 'recent') {
+        activeTab.value = 'recent';
       }
     };
 
     return {
       isLoggedIn,
-      currentPage,
-      handleLoginStatusChanged
+      activeTab,
+      gptSovitsRunning,
+      showLoginModal,
+      selectedGroupId,
+      handleLoginStatusChanged,
+      handleTabChange,
+      handleLogout,
+      handleSelectGroup
     };
   }
 };
@@ -87,87 +119,112 @@ export default {
 }
 
 body {
-  font-family: Arial, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   line-height: 1.6;
   color: #333;
   background-color: #f5f5f5;
 }
 
-.app {
-  max-width: 1200px;
+/* 聊天页面样式 */
+.chat-page {
+  min-height: 100vh;
+  display: flex;
+}
+
+.chat-main {
+  flex: 1;
+  margin-left: 240px; /* 与 sidebar 宽度一致 */
+  padding: 20px;
+  transition: margin-left 0.3s ease;
+  background-color: #f5f5f5;
+}
+
+/* 当侧边栏收起时 */
+.sidebar.collapsed + .chat-main {
+  margin-left: 60px;
+}
+
+/* 智能体页面样式 */
+.agents-page {
+  max-width: 800px;
   margin: 0 auto;
-  padding: 20px;
 }
 
-.app-header {
-  text-align: center;
-  margin-bottom: 40px;
-  padding: 20px;
-  background-color: #2196F3;
-  color: white;
-  border-radius: 8px;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+.agents-page h2 {
+  margin-bottom: 20px;
+  color: #2c3e50;
 }
 
-.app-header h1 {
-  font-size: 2.5em;
-  margin-bottom: 10px;
-}
-
-.app-header p {
-  font-size: 1.2em;
-  opacity: 0.9;
-}
-
-.app-main {
+.agents-list {
   display: grid;
-  grid-template-columns: 1fr;
-  gap: 30px;
-  margin-bottom: 40px;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 20px;
 }
 
-@media (min-width: 992px) {
-  .app-main {
-    grid-template-columns: 1fr 1fr;
+.agent-card {
+  background-color: white;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  padding: 20px;
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.agent-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+}
+
+.agent-avatar {
+  font-size: 48px;
+  width: 60px;
+  height: 60px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: #f8f9fa;
+  border-radius: 8px;
+}
+
+.agent-info {
+  flex: 1;
+}
+
+.agent-info h3 {
+  margin: 0 0 5px 0;
+  color: #2c3e50;
+}
+
+.agent-info p {
+  margin: 0;
+  color: #7f8c8d;
+  font-size: 14px;
+}
+
+.agent-status {
+  padding: 6px 12px;
+  border-radius: 16px;
+  font-size: 12px;
+  font-weight: 500;
+  background-color: #f1f3f4;
+  color: #5f6368;
+}
+
+.agent-status.active {
+  background-color: #d4edda;
+  color: #155724;
+}
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+  .chat-main {
+    margin-left: 60px;
   }
   
-  .app-main .section:nth-child(3),
-  .app-main .section:last-child {
-    grid-column: 1 / -1;
+  .agents-list {
+    grid-template-columns: 1fr;
   }
-}
-
-.section {
-  padding: 20px;
-  border: 1px solid #e0e0e0;
-  border-radius: 8px;
-  background-color: #f9f9f9;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-  overflow: hidden;
-}
-
-.app-footer {
-  text-align: center;
-  padding: 20px;
-  background-color: #333;
-  color: white;
-  border-radius: 8px;
-  margin-top: 40px;
-}
-
-.btn-back {
-  display: block;
-  margin: 0 auto;
-  padding: 10px 20px;
-  background-color: #2196F3;
-  color: white;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 16px;
-}
-
-.btn-back:hover {
-  background-color: #1976D2;
 }
 </style>
