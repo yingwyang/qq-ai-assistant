@@ -224,10 +224,7 @@ export default {
   display: flex;
   flex-direction: column;
   transition: width 0.3s ease;
-  position: fixed;
-  left: 0;
-  top: 0;
-  z-index: 1000;
+  flex-shrink: 0;
   overflow-y: auto;
 }
 

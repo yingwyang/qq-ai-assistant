@@ -54,12 +54,8 @@
                 <span class="message-user">{{ message.userNickname || message.userName || '未知用户' }}</span>
                 <span class="message-time">{{ formatTime(message.sendTime || message.timestamp) }}</span>
               </div>
-              <!-- 文本消息 -->
-              <div v-if="!isImageMessage(message)" class="message-text">{{ message.content }}</div>
-              <!-- 图片消息 -->
-              <div v-else class="message-image">
-                <img :src="extractImageUrl(message.content)" @click="openImage(extractImageUrl(message.content))" />
-              </div>
+              <!-- 消息内容 -->
+              <MessageContent :message="message" />
               <!-- AI 总结（左对齐） -->
               <div v-if="message.aiSummary" class="ai-summary">
                 <div class="ai-summary-header">
@@ -83,41 +79,14 @@
                 <span class="message-time">{{ formatTime(message.sendTime || message.timestamp) }}</span>
                 <span class="message-user">{{ message.userNickname || message.userName || '我' }}</span>
               </div>
-              <!-- 文本消息 -->
-              <div v-if="!isImageMessage(message)" class="message-text">{{ message.content }}</div>
-              <!-- 图片消息 -->
-              <div v-else class="message-image">
-                <img :src="extractImageUrl(message.content)" @click="openImage(extractImageUrl(message.content))" />
-              </div>
+              <!-- 消息内容 -->
+              <MessageContent :message="message" />
             </div>
           </div>
         </div>
       </div>
     </div>
     
-    <!-- 底部输入区域 -->
-    <div class="input-area">
-      <div class="input-wrapper">
-        <textarea 
-          v-model="inputMessage"
-          placeholder="输入消息..."
-          class="message-input"
-          rows="1"
-          @keyup.enter.prevent="sendMessage"
-          @input="autoResize"
-          ref="inputRef"
-        ></textarea>
-        <button 
-          @click="sendMessage" 
-          class="btn-send"
-          :disabled="!inputMessage.trim()"
-        >
-          <span>发送</span>
-          <span class="send-icon">➤</span>
-        </button>
-      </div>
-    </div>
-
     <!-- 图片预览弹窗 -->
     <div v-if="previewImage" class="image-preview" @click="closeImagePreview">
       <img :src="previewImage" />
@@ -128,9 +97,13 @@
 <script>
 import { ref, nextTick, watch, onMounted, onUnmounted } from 'vue';
 import { messageApi } from '../services/api';
+import MessageContent from './MessageContent.vue';
 
 export default {
   name: 'ChatInterface',
+  components: {
+    MessageContent
+  },
   props: {
     groupId: {
       type: String,
@@ -141,17 +114,15 @@ export default {
     const groupId = ref(props.groupId);
     const messages = ref([]);
     const isLoading = ref(false);
-    const inputMessage = ref('');
     const currentGroupName = ref('');
     const messagesContainer = ref(null);
-    const inputRef = ref(null);
     const previewImage = ref(null);
     let autoRefreshInterval = null;
     
     // 假设当前用户ID，实际应该从登录信息获取
     const currentUserId = 'current_user';
 
-    const loadMessages = async (showLoading = true) => {
+    const loadMessages = async (showLoading = true, scrollToBottomFlag = true) => {
       if (!groupId.value) {
         alert('请输入群聊ID');
         return;
@@ -171,10 +142,12 @@ export default {
         });
         currentGroupName.value = response.length > 0 ? (response[0].groupName || '群聊 ' + groupId.value) : '群聊 ' + groupId.value;
         
-        // 滚动到底部
-        nextTick(() => {
-          scrollToBottom();
-        });
+        // 只有在需要时才滚动到底部
+        if (scrollToBottomFlag) {
+          nextTick(() => {
+            scrollToBottom();
+          });
+        }
       } catch (error) {
         console.error('加载消息失败:', error);
         if (showLoading) {
@@ -185,43 +158,6 @@ export default {
           isLoading.value = false;
         }
       }
-    };
-
-    const sendMessage = async () => {
-      if (!inputMessage.value.trim()) return;
-      if (!groupId.value) {
-        alert('请先输入群聊ID');
-        return;
-      }
-
-      // 创建新消息对象
-      const newMessage = {
-        id: Date.now(),
-        userId: currentUserId,
-        userName: '我',
-        userNickname: '我',
-        content: inputMessage.value.trim(),
-        timestamp: new Date().toISOString(),
-        sendTime: new Date().toISOString(),
-        groupId: groupId.value,
-        groupName: currentGroupName.value
-      };
-
-      // 添加到消息列表
-      messages.value.push(newMessage);
-      
-      // 清空输入框
-      inputMessage.value = '';
-      
-      // 重置输入框高度
-      if (inputRef.value) {
-        inputRef.value.style.height = 'auto';
-      }
-      
-      // 滚动到底部
-      nextTick(() => {
-        scrollToBottom();
-      });
     };
 
     const isSelfMessage = (message) => {
@@ -317,28 +253,37 @@ export default {
       });
     };
 
-    const autoResize = () => {
-      const textarea = inputRef.value;
-      if (textarea) {
-        textarea.style.height = 'auto';
-        textarea.style.height = Math.min(textarea.scrollHeight, 120) + 'px';
-      }
-    };
-
     const scrollToBottom = () => {
       if (messagesContainer.value) {
         messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight;
       }
     };
     
+    // 检查是否在底部（允许10px的误差）
+    const isAtBottom = () => {
+      if (!messagesContainer.value) return false;
+      const container = messagesContainer.value;
+      const threshold = 10;
+      return container.scrollHeight - container.scrollTop - container.clientHeight <= threshold;
+    };
+    
     // 启动自动刷新消息
     const startAutoRefresh = () => {
       // 先清除已有的定时器
       stopAutoRefresh();
-      // 每5秒自动刷新一次消息（不显示加载状态，避免闪屏）
-      autoRefreshInterval = setInterval(() => {
+      // 每5秒自动刷新一次消息（不显示加载状态，有新消息时自动滚动到底部）
+      autoRefreshInterval = setInterval(async () => {
         if (groupId.value) {
-          loadMessages(false);
+          const previousMessageCount = messages.value.length;
+          const wasAtBottom = isAtBottom();
+          await loadMessages(false, false);
+          // 如果之前在底部且有新消息，自动滚动到底部
+          if (wasAtBottom && messages.value.length > previousMessageCount) {
+            // 使用 setTimeout 确保 DOM 完全更新后再滚动
+            setTimeout(() => {
+              scrollToBottom();
+            }, 100);
+          }
         }
       }, 5000);
     };
@@ -381,22 +326,16 @@ export default {
       groupId,
       messages,
       isLoading,
-      inputMessage,
       currentGroupName,
       messagesContainer,
-      inputRef,
       previewImage,
       loadMessages,
-      sendMessage,
       isSelfMessage,
       getAvatar,
       handleAvatarError,
-      isImageMessage,
-      extractImageUrl,
       openImage,
       closeImagePreview,
-      formatTime,
-      autoResize
+      formatTime
     };
   }
 };
@@ -621,65 +560,6 @@ export default {
 .ai-summary-content {
   line-height: 1.4;
   color: #333;
-}
-
-.input-area {
-  padding: 20px;
-  border-top: 1px solid #e0e0e0;
-  background-color: #f8f9fa;
-}
-
-.input-wrapper {
-  display: flex;
-  gap: 10px;
-}
-
-.message-input {
-  flex: 1;
-  padding: 12px;
-  border: 1px solid #dee2e6;
-  border-radius: 20px;
-  resize: none;
-  font-size: 14px;
-  line-height: 1.4;
-  min-height: 40px;
-  max-height: 120px;
-  overflow-y: auto;
-}
-
-.message-input:focus {
-  outline: none;
-  border-color: #3498db;
-  box-shadow: 0 0 0 2px rgba(52, 152, 219, 0.2);
-}
-
-.btn-send {
-  padding: 0 24px;
-  background-color: #3498db;
-  color: white;
-  border: none;
-  border-radius: 20px;
-  cursor: pointer;
-  font-size: 14px;
-  font-weight: 500;
-  transition: background-color 0.2s;
-  display: flex;
-  align-items: center;
-  gap: 5px;
-}
-
-.btn-send:hover:not(:disabled) {
-  background-color: #2980b9;
-}
-
-.btn-send:disabled {
-  background-color: #bdc3c7;
-  cursor: not-allowed;
-}
-
-.send-icon {
-  font-size: 16px;
-  font-weight: bold;
 }
 
 .image-preview {

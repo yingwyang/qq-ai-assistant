@@ -11,7 +11,7 @@
         @select-group="handleSelectGroup"
       />
       
-      <!-- 主内容区 -->
+      <!-- 三栏布局主内容区 -->
       <main class="chat-main">
         <!-- 未登录状态显示登录提示 -->
         <template v-if="!isLoggedIn">
@@ -25,40 +25,17 @@
           </div>
         </template>
         
-        <!-- 已登录状态显示内容 -->
+        <!-- 已登录状态显示三栏布局 -->
         <template v-else>
-          <!-- 最近对话 -->
-          <template v-if="activeTab === 'recent'">
+          <!-- 中间：群消息列表 -->
+          <div class="center-panel">
             <ChatInterface :groupId="selectedGroupId" />
-          </template>
+          </div>
           
-          <!-- 我的智能体 -->
-          <template v-else-if="activeTab === 'agents'">
-            <div class="agents-page">
-              <h2>我的智能体</h2>
-              <div class="agents-list">
-                <div class="agent-card">
-                  <div class="agent-avatar">🤖</div>
-                  <div class="agent-info">
-                    <h3>AstrBot 助手</h3>
-                    <p>基于 AstrBot 的 AI 聊天助手</p>
-                  </div>
-                  <div class="agent-status active">运行中</div>
-                </div>
-                
-                <div class="agent-card">
-                  <div class="agent-avatar">🎙️</div>
-                  <div class="agent-info">
-                    <h3>GPT-SoVITS</h3>
-                    <p>语音合成服务</p>
-                  </div>
-                  <div class="agent-status" :class="{ active: gptSovitsRunning }">
-                    {{ gptSovitsRunning ? '运行中' : '未启动' }}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </template>
+          <!-- 右侧：AstrBot 对话框 -->
+          <div class="right-panel">
+            <AstrBotChat />
+          </div>
         </template>
       </main>
     </div>
@@ -75,6 +52,7 @@
 import { ref, onMounted } from 'vue';
 import Sidebar from './components/Sidebar.vue';
 import ChatInterface from './components/ChatInterface.vue';
+import AstrBotChat from './components/AstrBotChat.vue';
 import LoginModal from './components/LoginModal.vue';
 
 export default {
@@ -82,6 +60,7 @@ export default {
   components: {
     Sidebar,
     ChatInterface,
+    AstrBotChat,
     LoginModal
   },
   setup() {
@@ -155,30 +134,52 @@ export default {
   padding: 0;
 }
 
-body {
+html, body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   line-height: 1.6;
   color: #333;
   background-color: #f5f5f5;
+  margin: 0 !important;
+  padding: 0 !important;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+#app {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
 }
 
 /* 聊天页面样式 */
 .chat-page {
   min-height: 100vh;
   display: flex;
+  width: 100vw;
+  overflow: hidden;
 }
 
 .chat-main {
   flex: 1;
-  margin-left: 240px; /* 与 sidebar 宽度一致 */
-  padding: 20px;
-  transition: margin-left 0.3s ease;
   background-color: #f5f5f5;
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
 }
 
-/* 当侧边栏收起时 */
-.sidebar.collapsed + .chat-main {
-  margin-left: 60px;
+/* 中间面板：群消息 - 占50% */
+.center-panel {
+  flex: 0 0 50%;
+  border-right: 1px solid #e0e0e0;
+  overflow: hidden;
+}
+
+/* 右侧面板：AstrBot - 占50% */
+.right-panel {
+  flex: 0 0 50%;
+  overflow: hidden;
 }
 
 /* 智能体页面样式 */

@@ -206,21 +206,29 @@ public class RootWebhookController {
                 }
             }
 
-            // 如果 raw_message 中有 CQ 码，解析消息类型
-            String localImageUrl = null;
+            // 如果 raw_message 中有 CQ 码，解析消息类型并下载到本地
             if (rawMessage != null && rawMessage.contains("[CQ:")) {
                 if (rawMessage.contains("[CQ:image")) {
                     msgType = Message.MessageType.IMAGE;
                     // 下载图片到本地
-                    localImageUrl = downloadImageToLocal(rawMessage, String.valueOf(groupId));
-                    if (localImageUrl != null) {
-                        // 将本地路径存储到 content 字段
-                        rawMessage = localImageUrl;
+                    String localUrl = downloadMediaToLocal(rawMessage, String.valueOf(groupId), "images", ".jpg");
+                    if (localUrl != null) {
+                        rawMessage = localUrl;
                     }
                 } else if (rawMessage.contains("[CQ:record") || rawMessage.contains("[CQ:voice")) {
                     msgType = Message.MessageType.VOICE;
+                    // 下载语音到本地
+                    String localUrl = downloadMediaToLocal(rawMessage, String.valueOf(groupId), "voice", ".amr");
+                    if (localUrl != null) {
+                        rawMessage = localUrl;
+                    }
                 } else if (rawMessage.contains("[CQ:video")) {
                     msgType = Message.MessageType.VIDEO;
+                    // 下载视频到本地
+                    String localUrl = downloadMediaToLocal(rawMessage, String.valueOf(groupId), "video", ".mp4");
+                    if (localUrl != null) {
+                        rawMessage = localUrl;
+                    }
                 } else if (rawMessage.contains("[CQ:file")) {
                     msgType = Message.MessageType.FILE;
                 }
@@ -349,37 +357,39 @@ public class RootWebhookController {
     }
     
     /**
-     * 下载图片到本地存储
+     * 下载媒体文件到本地存储
      * @param cqMessage CQ码格式的消息
      * @param groupId 群号
+     * @param mediaType 媒体类型（images/voice/video）
+     * @param defaultExt 默认文件扩展名
      * @return 本地文件路径，下载失败返回null
      */
-    private String downloadImageToLocal(String cqMessage, String groupId) {
+    private String downloadMediaToLocal(String cqMessage, String groupId, String mediaType, String defaultExt) {
         try {
-            // 从CQ码中提取图片URL
-            String imageUrl = extractImageUrlFromCQ(cqMessage);
-            if (imageUrl == null || imageUrl.isEmpty()) {
-                System.err.println("无法从CQ码中提取图片URL: " + cqMessage);
+            // 从CQ码中提取URL
+            String mediaUrl = extractUrlFromCQ(cqMessage);
+            if (mediaUrl == null || mediaUrl.isEmpty()) {
+                System.err.println("无法从CQ码中提取URL: " + cqMessage);
                 return null;
             }
             
-            // 创建本地存储目录
+            // 创建本地存储目录，按群号和日期组织
             String dateFolder = LocalDateTime.now().toLocalDate().toString();
-            Path groupDir = Paths.get(localImagePath, groupId, dateFolder);
+            Path groupDir = Paths.get(localImagePath, mediaType, groupId, dateFolder);
             if (!Files.exists(groupDir)) {
                 Files.createDirectories(groupDir);
             }
             
-            // 生成文件名
-            String fileName = UUID.randomUUID().toString() + ".jpg";
+            // 生成文件名（使用UUID避免重名）
+            String fileName = UUID.randomUUID().toString() + defaultExt;
             Path localPath = groupDir.resolve(fileName);
             
-            // 下载图片
-            URL url = new URL(imageUrl);
+            // 下载文件
+            URL url = new URL(mediaUrl);
             HttpURLConnection connection = (HttpURLConnection) url.openConnection();
             connection.setRequestMethod("GET");
             connection.setConnectTimeout(10000);
-            connection.setReadTimeout(30000);
+            connection.setReadTimeout(60000); // 视频可能需要更长时间
             connection.setRequestProperty("User-Agent", "Mozilla/5.0");
             
             int responseCode = connection.getResponseCode();
@@ -393,39 +403,56 @@ public class RootWebhookController {
                         outputStream.write(buffer, 0, bytesRead);
                     }
                     
-                    // 返回相对于静态资源根目录的路径，格式为 /images/{groupId}/{date}/{fileName}
-                    String relativePath = "/images/" + groupId + "/" + dateFolder + "/" + fileName;
-                    System.out.println("图片下载成功: " + localPath.toString() + " -> 访问路径: " + relativePath);
+                    // 如果是语音文件，转换为MP3格式
+                    if ("voice".equals(mediaType) && ".amr".equalsIgnoreCase(defaultExt)) {
+                        String mp3Path = convertAmrToMp3(localPath.toString());
+                        if (mp3Path != null) {
+                            // 返回MP3文件路径
+                            Path mp3FileName = Paths.get(mp3Path).getFileName();
+                            String relativePath = "/images/" + mediaType + "/" + groupId + "/" + dateFolder + "/" + mp3FileName.toString();
+                            System.out.println("语音转换成功: " + mp3Path + " -> 访问路径: " + relativePath);
+                            // 尝试删除原始AMR文件（如果失败也不影响返回MP3路径）
+                            try {
+                                Files.deleteIfExists(localPath);
+                            } catch (Exception e) {
+                                System.out.println("删除AMR文件失败（不影响使用）: " + e.getMessage());
+                            }
+                            return relativePath;
+                        }
+                    }
+                    
+                    // 返回相对于静态资源根目录的路径
+                    String relativePath = "/images/" + mediaType + "/" + groupId + "/" + dateFolder + "/" + fileName;
+                    System.out.println(mediaType + "下载成功: " + localPath.toString() + " -> 访问路径: " + relativePath);
                     return relativePath;
                 }
             } else {
-                System.err.println("下载图片失败，HTTP状态码: " + responseCode);
+                System.err.println("下载" + mediaType + "失败，HTTP状态码: " + responseCode);
                 return null;
             }
         } catch (Exception e) {
-            System.err.println("下载图片到本地时出错: " + e.getMessage());
+            System.err.println("下载" + mediaType + "到本地时出错: " + e.getMessage());
             e.printStackTrace();
             return null;
         }
     }
     
     /**
-     * 从CQ码中提取图片URL
+     * 从CQ码中提取URL（通用方法）
      */
-    private String extractImageUrlFromCQ(String cqMessage) {
+    private String extractUrlFromCQ(String cqMessage) {
         try {
-            // 匹配 [CQ:image,file=xxx,url=xxx] 格式的CQ码
-            Pattern pattern = Pattern.compile("\\[CQ:image,[^\\]]*url=([^,\\]]+)");
+            // 尝试匹配 url=`...` 格式（带反引号）
+            Pattern pattern = Pattern.compile("url=`([^`]+)`");
             Matcher matcher = pattern.matcher(cqMessage);
             if (matcher.find()) {
                 String url = matcher.group(1);
-                // 处理HTML实体编码
                 url = url.replace("&amp;", "&");
                 return url;
             }
             
-            // 尝试其他格式
-            pattern = Pattern.compile("url=([^\\]]+)");
+            // 匹配 url=xxx 格式（不带反引号）
+            pattern = Pattern.compile("url=([^,\\]]+)");
             matcher = pattern.matcher(cqMessage);
             if (matcher.find()) {
                 String url = matcher.group(1);
@@ -433,9 +460,101 @@ public class RootWebhookController {
                 return url;
             }
         } catch (Exception e) {
-            System.err.println("提取图片URL时出错: " + e.getMessage());
+            System.err.println("提取URL时出错: " + e.getMessage());
         }
         return null;
+    }
+    
+    /**
+     * 下载图片到本地存储（兼容旧方法）
+     * @param cqMessage CQ码格式的图片消息
+     * @param groupId 群号
+     * @return 本地文件路径，下载失败返回null
+     */
+    private String downloadImageToLocal(String cqMessage, String groupId) {
+        return downloadMediaToLocal(cqMessage, groupId, "images", ".jpg");
+    }
+    
+    /**
+     * 将AMR语音文件转换为MP3格式
+     * @param amrPath AMR文件路径
+     * @return MP3文件路径，转换失败返回null
+     */
+    private String convertAmrToMp3(String amrPath) {
+        try {
+            // 检查文件是否存在
+            Path amrFile = Paths.get(amrPath);
+            if (!Files.exists(amrFile)) {
+                System.err.println("AMR文件不存在: " + amrPath);
+                return null;
+            }
+            
+            String mp3Path = amrPath.replace(".amr", ".mp3");
+            System.out.println("开始转换AMR到MP3: " + amrPath + " -> " + mp3Path);
+            
+            // 使用项目内的FFmpeg进行转换（使用绝对路径）
+            String ffmpegPath = "D:\\ai\\Documents\\qq-web\\ffmpeg-8.1-essentials_build\\bin\\ffmpeg.exe";
+            
+            System.out.println("FFmpeg路径: " + ffmpegPath);
+            
+            // 检查FFmpeg是否存在
+            File ffmpegFile = new File(ffmpegPath);
+            System.out.println("FFmpeg文件是否存在: " + ffmpegFile.exists());
+            if (!ffmpegFile.exists()) {
+                System.err.println("FFmpeg不存在: " + ffmpegPath);
+                // 尝试使用系统PATH中的ffmpeg
+                ffmpegPath = "ffmpeg";
+                System.out.println("尝试使用系统PATH中的ffmpeg");
+            } else {
+                System.out.println("使用FFmpeg: " + ffmpegPath);
+            }
+            
+            ProcessBuilder pb = new ProcessBuilder(
+                ffmpegPath,
+                "-i", amrPath,
+                "-acodec", "libmp3lame",
+                "-q:a", "2",
+                "-y", // 覆盖已存在的文件
+                mp3Path
+            );
+            
+            pb.redirectErrorStream(true);
+            Process process = pb.start();
+            
+            // 读取输出
+            StringBuilder output = new StringBuilder();
+            try (java.io.BufferedReader reader = new java.io.BufferedReader(
+                    new java.io.InputStreamReader(process.getInputStream()))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    output.append(line).append("\n");
+                }
+            }
+            
+            int exitCode = process.waitFor();
+            System.out.println("FFmpeg输出: " + output.toString());
+            
+            if (exitCode == 0) {
+                // 检查MP3文件是否生成成功
+                Path mp3File = Paths.get(mp3Path);
+                if (Files.exists(mp3File)) {
+                    long mp3Size = Files.size(mp3File);
+                    System.out.println("AMR转MP3成功: " + mp3Path + " (大小: " + mp3Size + " bytes)");
+                    return mp3Path;
+                } else {
+                    System.err.println("AMR转MP3失败: MP3文件未生成");
+                    return null;
+                }
+            } else {
+                System.err.println("AMR转MP3失败，退出码: " + exitCode);
+                System.err.println("FFmpeg错误输出: " + output.toString());
+                return null;
+            }
+        } catch (Exception e) {
+            System.err.println("AMR转MP3时出错: " + e.getMessage());
+            e.printStackTrace();
+            return null;
+        }
     }
     
     /**
