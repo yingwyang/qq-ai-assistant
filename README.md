@@ -194,6 +194,17 @@ qq-ai-assistant/
 | time_created | LocalDateTime | 创建时间 |
 | time_updated | LocalDateTime | 更新时间 |
 
+#### 7. **user_settings** - 用户设置表
+
+| 字段名 | 类型 | 说明 |
+|--------|------|------|
+| id | Long | 主键ID |
+| user_qq | String | 用户QQ号（唯一） |
+| bot_name | String | Bot显示名称 |
+| bot_avatar | String | Bot头像URL或Base64 |
+| user_avatar | String | 用户头像URL或Base64 |
+| updated_at | LocalDateTime | 更新时间 |
+
 ## 快速开始
 
 ### 环境要求
@@ -314,6 +325,23 @@ runtime\python.exe -I api_v2.py -a 127.0.0.1 -p 7860
 - 右侧栏为 AstrBot AI 对话界面
 - 可以向 AI 询问群聊消息相关问题
 - 支持 AI 自动分析群聊内容并生成总结
+- 支持多轮对话存储和管理
+- 自动过滤工具调用的 JSON 内容
+
+### 消息选择分析
+
+- 点击"选择消息"进入选择模式
+- 支持单选/多选切换
+- 选中消息后点击"🤖 AI 分析"
+- 分析结果会显示在右侧 AstrBot 对话框中
+- 自动显示选中的消息摘要
+
+### 头像自定义
+
+- 点击 ⚙️ 设置按钮打开设置面板
+- 支持上传本地图片或输入图片 URL
+- 可自定义 Bot 名称、Bot 头像、用户头像
+- 设置自动保存到后端，跨浏览器同步
 
 ## API文档
 
@@ -353,6 +381,13 @@ runtime\python.exe -I api_v2.py -a 127.0.0.1 -p 7860
 | POST | `/api/astrbot/conversations/{conversationId}/archive` | 归档对话 |
 | DELETE | `/api/astrbot/conversations/{conversationId}` | 删除对话 |
 | GET | `/api/astrbot/conversations/{conversationId}/stats` | 获取对话统计 |
+
+### 用户设置API
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/user/settings?userQq={qq}` | 获取用户设置 |
+| POST | `/api/user/settings` | 保存用户设置 |
 
 ### NapCat相关API
 
@@ -553,6 +588,18 @@ uploads/images/
   - [x] 自动标题生成
   - [x] Token使用量统计
   - [x] 对话归档和清理
+- [x] **消息选择分析功能** - 选择多条消息进行AI分析
+  - [x] 消息选择模式（单选/多选）
+  - [x] 选中消息摘要显示
+  - [x] AI分析结果展示
+- [x] **头像自定义功能** - 支持自定义头像和名称
+  - [x] 本地图片上传
+  - [x] URL输入支持
+  - [x] 后端持久化存储
+  - [x] 跨浏览器同步
+- [x] **JSON内容过滤** - 自动过滤工具调用的JSON
+  - [x] 独立的消息过滤模块
+  - [x] 支持多种JSON格式过滤
 
 ### 待实现功能
 
