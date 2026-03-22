@@ -44,7 +44,7 @@
       <div class="nav-section">
         <div v-if="!isCollapsed" class="nav-section-title"></div>
         <ul class="nav-list">
-          <li class="nav-item" :class="{ active: activeTab === 'agents' }" @click="selectTab('agents')">
+          <li class="nav-item" @click="openAstrBot">
             <span class="nav-icon">🤖</span>
             <span v-if="!isCollapsed" class="nav-text">我的智能体</span>
           </li>
@@ -115,6 +115,10 @@ export default {
 
     const openLoginModal = () => {
       emit('open-login-modal');
+    };
+
+    const openAstrBot = () => {
+      window.open('http://localhost:6185', '_blank');
     };
 
     const selectGroup = (groupId) => {
@@ -207,6 +211,7 @@ export default {
       selectTab,
       logout,
       openLoginModal,
+      openAstrBot,
       selectGroup,
       handleAvatarError,
       getGroupAvatar

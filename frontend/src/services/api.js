@@ -150,20 +150,81 @@ export const systemApi = {
 
 // AstrBot 相关API
 export const astrBotApi = {
-  // 发送消息给 AstrBot
-  sendMessage: (message, groupId) => request('/astrbot/send', {
+  // 发送消息给 AstrBot（支持对话存储）
+  sendMessage: (params) => request('/astrbot/send', {
     method: 'POST',
-    body: JSON.stringify({ message, groupId }),
+    body: JSON.stringify(params),
   }),
-  
+
   // 让 AstrBot 分析群聊消息
   analyzeGroup: (groupId, messageCount = 50, type = 'summary') => request('/astrbot/analyze', {
     method: 'POST',
     body: JSON.stringify({ groupId, messageCount, type }),
   }),
-  
+
   // 获取 AstrBot 状态
   getStatus: () => request('/astrbot/status'),
+
+  // ==================== 对话管理 API ====================
+
+  // 获取对话列表
+  getConversations: (params = {}) => {
+    const queryParams = new URLSearchParams();
+    if (params.groupId) queryParams.append('groupId', params.groupId);
+    if (params.userQq) queryParams.append('userQq', params.userQq);
+    if (params.page) queryParams.append('page', params.page);
+    if (params.size) queryParams.append('size', params.size);
+    const query = queryParams.toString();
+    return request(`/astrbot/conversations${query ? '?' + query : ''}`);
+  },
+
+  // 获取单个对话详情
+  getConversation: (conversationId) => request(`/astrbot/conversations/${conversationId}`),
+
+  // 获取对话的消息列表
+  getConversationMessages: (conversationId, page = 0, size = 50) =>
+    request(`/astrbot/conversations/${conversationId}/messages?page=${page}&size=${size}`),
+
+  // 创建新对话
+  createConversation: (params) => request('/astrbot/conversations', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  }),
+
+  // 更新对话标题
+  updateConversationTitle: (conversationId, title) =>
+    request(`/astrbot/conversations/${conversationId}/title`, {
+      method: 'PUT',
+      body: JSON.stringify({ title }),
+    }),
+
+  // 归档对话
+  archiveConversation: (conversationId) =>
+    request(`/astrbot/conversations/${conversationId}/archive`, {
+      method: 'POST',
+    }),
+
+  // 删除对话
+  deleteConversation: (conversationId) =>
+    request(`/astrbot/conversations/${conversationId}`, {
+      method: 'DELETE',
+    }),
+
+  // 获取对话统计信息
+  getConversationStats: (conversationId) =>
+    request(`/astrbot/conversations/${conversationId}/stats`),
+};
+
+// 用户设置 API
+export const userApi = {
+  // 获取用户设置
+  getSettings: (userQq) => request(`/user/settings?userQq=${userQq}`),
+  
+  // 保存用户设置
+  saveSettings: (params) => request('/user/settings', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  }),
 };
 
 // 文件类型检测

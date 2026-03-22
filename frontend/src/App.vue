@@ -29,12 +29,18 @@
         <template v-else>
           <!-- 中间：群消息列表 -->
           <div class="center-panel">
-            <ChatInterface :groupId="selectedGroupId" />
+            <ChatInterface 
+              :groupId="selectedGroupId" 
+              @analysis-result="handleAnalysisResult"
+            />
           </div>
           
           <!-- 右侧：AstrBot 对话框 -->
           <div class="right-panel">
-            <AstrBotChat />
+            <AstrBotChat 
+              ref="astrBotChatRef"
+              :groupId="selectedGroupId"
+            />
           </div>
         </template>
       </main>
@@ -70,6 +76,7 @@ export default {
     const gptSovitsRunning = ref(false);
     const showLoginModal = ref(false);
     const selectedGroupId = ref('');
+    const astrBotChatRef = ref(null);
 
     // 从 localStorage 恢复登录状态和群号，并检查 NapCat 登录状态
     onMounted(async () => {
@@ -127,16 +134,25 @@ export default {
       }
     };
 
+    // 处理分析结果 - 转发给 AstrBotChat
+    const handleAnalysisResult = (data) => {
+      if (astrBotChatRef.value && data.type === 'request') {
+        astrBotChatRef.value.handleAnalysisRequest(data);
+      }
+    };
+
     return {
       isLoggedIn,
       activeTab,
       gptSovitsRunning,
       showLoginModal,
       selectedGroupId,
+      astrBotChatRef,
       handleLoginStatusChanged,
       handleTabChange,
       handleLogout,
-      handleSelectGroup
+      handleSelectGroup,
+      handleAnalysisResult
     };
   }
 };

@@ -2,7 +2,10 @@ package com.qqai.controller;
 
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
+import com.qqai.entity.AstrBotConversation;
+import com.qqai.entity.AstrBotMessage;
 import com.qqai.entity.Message;
+import com.qqai.service.AstrBotConversationService;
 import com.qqai.service.MessageService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -14,9 +17,8 @@ import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
-import java.util.stream.Collectors;
+import java.util.Optional;
+import java.util.ArrayList;
 
 /**
  * AstrBot 控制器 - 处理 AstrBot 消息和 AI 分析
@@ -30,6 +32,9 @@ public class AstrBotController {
 
     @Autowired
     private MessageService messageService;
+
+    @Autowired
+    private AstrBotConversationService conversationService;
 
     @Autowired
     private jakarta.persistence.EntityManager entityManager;
@@ -266,19 +271,35 @@ public class AstrBotController {
     }
 
     /**
-     * 发送消息给 AstrBot 并获取回复
+     * 发送消息给 AstrBot 并获取回复（带对话存储）
+     * 支持 conversationId 参数来维持对话上下文
      */
     @PostMapping("/send")
     public ResponseEntity<?> sendMessage(@RequestBody Map<String, Object> request) {
         String message = (String) request.get("message");
         String groupId = (String) request.get("groupId");
+        String userQq = (String) request.get("userQq");
+        String userNickname = (String) request.get("userNickname");
+        String conversationId = (String) request.get("conversationId");
+        String model = (String) request.getOrDefault("model", "default");
 
         if (message == null || message.trim().isEmpty()) {
             return ResponseEntity.badRequest().body("{\"error\":\"消息不能为空\"}");
         }
 
         try {
-            // 调用 AstrBot HTTP API (禁用流式输出)
+            // 1. 获取或创建对话
+            AstrBotConversation conversation = conversationService.getOrCreateConversation(
+                    conversationId, groupId, userQq, userNickname, model);
+            String currentConversationId = conversation.getConversationId();
+
+            // 2. 保存用户消息到数据库
+            conversationService.addUserMessage(currentConversationId, message, null);
+
+            // 3. 构建对话上下文（最近10条消息）
+            List<Map<String, String>> context = conversationService.buildConversationContext(currentConversationId, 10);
+
+            // 4. 调用 AstrBot HTTP API
             String url = astrBotApiUrl + "/api/v1/chat";
             
             HttpHeaders headers = new HttpHeaders();
@@ -288,10 +309,14 @@ public class AstrBotController {
             
             Map<String, Object> body = new HashMap<>();
             body.put("message", message);
-            body.put("username", "web_user");
-            body.put("enable_streaming", false);  // 禁用流式输出
+            body.put("username", userQq != null ? userQq : "web_user");
+            body.put("enable_streaming", false);
             if (groupId != null) {
                 body.put("session_id", groupId);
+            }
+            // 如果有上下文，传递给 AstrBot
+            if (!context.isEmpty()) {
+                body.put("context", context);
             }
             
             HttpEntity<Map<String, Object>> entity = new HttpEntity<>(body, headers);
@@ -299,8 +324,8 @@ public class AstrBotController {
             // 使用 SimpleClientHttpRequestFactory 设置超时
             org.springframework.http.client.SimpleClientHttpRequestFactory factory = 
                 new org.springframework.http.client.SimpleClientHttpRequestFactory();
-            factory.setConnectTimeout(30000);  // 连接超时 30 秒
-            factory.setReadTimeout(60000);     // 读取超时 60 秒
+            factory.setConnectTimeout(30000);
+            factory.setReadTimeout(60000);
             
             // 配置消息转换器，使用 UTF-8 编码
             java.util.List<org.springframework.http.converter.HttpMessageConverter<?>> converters = 
@@ -316,9 +341,12 @@ public class AstrBotController {
             
             ResponseEntity<String> response = restTemplateWithTimeout.postForEntity(url, entity, String.class);
             
-            // 解析响应
+            // 5. 解析响应
             String responseBody = response.getBody();
             StringBuilder replyText = new StringBuilder();
+            Integer promptTokens = null;
+            Integer completionTokens = null;
+            Integer totalTokens = null;
             
             if (responseBody != null) {
                 System.out.println("AstrBot 原始响应: " + responseBody.substring(0, Math.min(500, responseBody.length())));
@@ -336,9 +364,22 @@ public class AstrBotController {
                                 String data = json.getString("data");
                                 if (data != null) {
                                     // 过滤掉工具调用的 JSON 内容
-                                    if (!data.contains("\"id\"") || !data.contains("\"name\"")) {
+                                    // 检查是否是工具调用结果（包含 id + ts + result 或 id + name 等特征）
+                                    boolean isToolResult = (data.contains("\"id\"") && data.contains("\"ts\"") && data.contains("\"result\""))
+                                        || (data.contains("\"id\"") && data.contains("\"name\"") && data.contains("\"parameters\""))
+                                        || (data.startsWith("{") && data.contains("\"static\"") && data.contains("\"content\""));
+                                    if (!isToolResult) {
                                         replyText.append(data);
                                     }
+                                }
+                            }
+                            // 尝试解析 token 使用量
+                            if (json.containsKey("usage")) {
+                                JSONObject usage = json.getJSONObject("usage");
+                                if (usage != null) {
+                                    promptTokens = usage.getInteger("prompt_tokens");
+                                    completionTokens = usage.getInteger("completion_tokens");
+                                    totalTokens = usage.getInteger("total_tokens");
                                 }
                             }
                         } catch (Exception e) {
@@ -355,15 +396,25 @@ public class AstrBotController {
             
             System.out.println("AstrBot 最终回复: " + finalReply);
             
-            // 构建 JSON 响应，正确处理中文
+            // 6. 保存 AI 回复到数据库
+            conversationService.addAssistantMessage(
+                    currentConversationId, finalReply, model, 
+                    totalTokens, promptTokens, completionTokens);
+
+            // 7. 如果是新对话，自动生成标题
+            if (conversation.getMessageCount() <= 2 && conversation.getTitle().equals("新对话")) {
+                conversationService.autoGenerateTitle(currentConversationId);
+            }
+            
+            // 8. 构建 JSON 响应
             JSONObject result = new JSONObject();
             result.put("status", "ok");
             result.put("data", finalReply);
+            result.put("conversationId", currentConversationId);
+            result.put("messageCount", conversation.getMessageCount() + 2); // +2 因为刚保存了两条消息
             
-            // 使用 UTF-8 编码返回
-            return ResponseEntity.ok()
-                .header("Content-Type", "application/json; charset=UTF-8")
-                .body(result.toJSONString());
+            // 直接返回 JSONObject，让 Spring 自动转换为 JSON
+            return ResponseEntity.ok(result);
             
         } catch (Exception e) {
             System.err.println("发送消息到 AstrBot 失败: " + e.getMessage());
@@ -374,6 +425,183 @@ public class AstrBotController {
             return ResponseEntity.ok()
                 .header("Content-Type", "application/json; charset=UTF-8")
                 .body(error.toJSONString());
+        }
+    }
+
+    // ==================== 对话管理 API ====================
+
+    /**
+     * 获取对话列表
+     * 支持按 groupId 或 userQq 筛选，如果不提供则返回所有未归档的对话
+     */
+    @GetMapping("/conversations")
+    public ResponseEntity<?> getConversations(
+            @RequestParam(required = false) String groupId,
+            @RequestParam(required = false) String userQq,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        try {
+            List<AstrBotConversation> conversations;
+            if (groupId != null && !groupId.isEmpty()) {
+                conversations = conversationService.getGroupConversations(groupId);
+            } else if (userQq != null && !userQq.isEmpty()) {
+                conversations = conversationService.getUserConversations(userQq);
+            } else {
+                // 如果没有提供参数，返回所有未归档的对话
+                conversations = conversationService.getAllActiveConversations();
+            }
+
+            JSONObject result = new JSONObject();
+            result.put("status", "ok");
+            result.put("data", conversations);
+            return ResponseEntity.ok(result.toJSONString());
+        } catch (Exception e) {
+            JSONObject error = new JSONObject();
+            error.put("status", "error");
+            error.put("message", e.getMessage());
+            return ResponseEntity.ok(error.toJSONString());
+        }
+    }
+
+    /**
+     * 获取单个对话详情
+     */
+    @GetMapping("/conversations/{conversationId}")
+    public ResponseEntity<?> getConversation(@PathVariable String conversationId) {
+        try {
+            Optional<AstrBotConversation> conversation = conversationService.getConversation(conversationId);
+            if (conversation.isPresent()) {
+                JSONObject result = new JSONObject();
+                result.put("status", "ok");
+                result.put("data", conversation.get());
+                return ResponseEntity.ok(result.toJSONString());
+            } else {
+                return ResponseEntity.status(404).body("{\"error\":\"对话不存在\"}");
+            }
+        } catch (Exception e) {
+            JSONObject error = new JSONObject();
+            error.put("status", "error");
+            error.put("message", e.getMessage());
+            return ResponseEntity.ok(error.toJSONString());
+        }
+    }
+
+    /**
+     * 获取对话的消息列表
+     */
+    @GetMapping("/conversations/{conversationId}/messages")
+    public ResponseEntity<?> getConversationMessages(
+            @PathVariable String conversationId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "50") int size) {
+        try {
+            List<AstrBotMessage> messages = conversationService.getConversationMessages(conversationId);
+            JSONObject result = new JSONObject();
+            result.put("status", "ok");
+            result.put("data", messages);
+            return ResponseEntity.ok(result.toJSONString());
+        } catch (Exception e) {
+            JSONObject error = new JSONObject();
+            error.put("status", "error");
+            error.put("message", e.getMessage());
+            return ResponseEntity.ok(error.toJSONString());
+        }
+    }
+
+    /**
+     * 创建新对话
+     */
+    @PostMapping("/conversations")
+    public ResponseEntity<?> createConversation(@RequestBody Map<String, Object> request) {
+        try {
+            String groupId = (String) request.get("groupId");
+            String userQq = (String) request.get("userQq");
+            String userNickname = (String) request.get("userNickname");
+            String title = (String) request.get("title");
+            String model = (String) request.get("model");
+
+            AstrBotConversation conversation = conversationService.createConversation(
+                    groupId, userQq, userNickname, title, model);
+
+            JSONObject result = new JSONObject();
+            result.put("status", "ok");
+            result.put("data", conversation);
+            return ResponseEntity.ok(result.toJSONString());
+        } catch (Exception e) {
+            JSONObject error = new JSONObject();
+            error.put("status", "error");
+            error.put("message", e.getMessage());
+            return ResponseEntity.ok(error.toJSONString());
+        }
+    }
+
+    /**
+     * 更新对话标题
+     */
+    @PutMapping("/conversations/{conversationId}/title")
+    public ResponseEntity<?> updateConversationTitle(
+            @PathVariable String conversationId,
+            @RequestBody Map<String, String> request) {
+        try {
+            String title = request.get("title");
+            conversationService.updateConversationTitle(conversationId, title);
+            return ResponseEntity.ok("{\"status\":\"ok\"}");
+        } catch (Exception e) {
+            JSONObject error = new JSONObject();
+            error.put("status", "error");
+            error.put("message", e.getMessage());
+            return ResponseEntity.ok(error.toJSONString());
+        }
+    }
+
+    /**
+     * 归档对话
+     */
+    @PostMapping("/conversations/{conversationId}/archive")
+    public ResponseEntity<?> archiveConversation(@PathVariable String conversationId) {
+        try {
+            conversationService.archiveConversation(conversationId);
+            return ResponseEntity.ok("{\"status\":\"ok\"}");
+        } catch (Exception e) {
+            JSONObject error = new JSONObject();
+            error.put("status", "error");
+            error.put("message", e.getMessage());
+            return ResponseEntity.ok(error.toJSONString());
+        }
+    }
+
+    /**
+     * 删除对话
+     */
+    @DeleteMapping("/conversations/{conversationId}")
+    public ResponseEntity<?> deleteConversation(@PathVariable String conversationId) {
+        try {
+            conversationService.deleteConversation(conversationId);
+            return ResponseEntity.ok("{\"status\":\"ok\"}");
+        } catch (Exception e) {
+            JSONObject error = new JSONObject();
+            error.put("status", "error");
+            error.put("message", e.getMessage());
+            return ResponseEntity.ok(error.toJSONString());
+        }
+    }
+
+    /**
+     * 获取对话统计信息
+     */
+    @GetMapping("/conversations/{conversationId}/stats")
+    public ResponseEntity<?> getConversationStats(@PathVariable String conversationId) {
+        try {
+            Map<String, Object> stats = conversationService.getConversationStats(conversationId);
+            JSONObject result = new JSONObject();
+            result.put("status", "ok");
+            result.put("data", stats);
+            return ResponseEntity.ok(result.toJSONString());
+        } catch (Exception e) {
+            JSONObject error = new JSONObject();
+            error.put("status", "error");
+            error.put("message", e.getMessage());
+            return ResponseEntity.ok(error.toJSONString());
         }
     }
 }

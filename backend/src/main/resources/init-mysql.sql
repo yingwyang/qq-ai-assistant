@@ -59,9 +59,52 @@ CREATE TABLE IF NOT EXISTS messages (
 -- GRANT ALL PRIVILEGES ON qq_chat.* TO 'qq_chat_user'@'localhost';
 -- FLUSH PRIVILEGES;
 
+-- AstrBot 对话会话表
+CREATE TABLE IF NOT EXISTS astrbot_conversations (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    conversation_id VARCHAR(64) UNIQUE NOT NULL COMMENT '对话唯一ID',
+    group_id VARCHAR(50) COMMENT '关联的群号',
+    user_qq VARCHAR(20) COMMENT '用户QQ',
+    user_nickname VARCHAR(100) COMMENT '用户昵称',
+    title VARCHAR(255) COMMENT '对话标题',
+    model VARCHAR(50) COMMENT '使用的AI模型',
+    message_count INT DEFAULT 0 COMMENT '消息数量',
+    total_tokens INT DEFAULT 0 COMMENT '总Token数',
+    context_json TEXT COMMENT '上下文JSON数据',
+    archived BOOLEAN DEFAULT FALSE COMMENT '是否已归档',
+    time_created TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    time_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    time_archived TIMESTAMP NULL COMMENT '归档时间',
+    INDEX idx_conv_group_user (group_id, user_qq),
+    INDEX idx_conv_time (time_updated),
+    INDEX idx_conv_archived (archived)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='AstrBot对话会话表';
+
+-- AstrBot 对话消息表
+CREATE TABLE IF NOT EXISTS astrbot_messages (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    message_id VARCHAR(64) UNIQUE NOT NULL COMMENT '消息唯一ID',
+    conversation_id VARCHAR(64) NOT NULL COMMENT '所属对话ID',
+    role ENUM('USER', 'ASSISTANT', 'SYSTEM') NOT NULL COMMENT '消息角色',
+    content TEXT COMMENT '消息内容',
+    data TEXT COMMENT '扩展数据JSON',
+    model VARCHAR(50) COMMENT '使用的模型',
+    tokens INT COMMENT 'Token数',
+    prompt_tokens INT COMMENT '提示Token数',
+    completion_tokens INT COMMENT '完成Token数',
+    time_created TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    time_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    INDEX idx_msg_conversation (conversation_id, time_created),
+    INDEX idx_msg_role (role),
+    INDEX idx_msg_time (time_created),
+    FOREIGN KEY (conversation_id) REFERENCES astrbot_conversations(conversation_id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='AstrBot对话消息表';
+
 -- 查看创建的表
 SHOW TABLES;
 
 -- 查看表结构
 DESCRIBE file_records;
 DESCRIBE messages;
+DESCRIBE astrbot_conversations;
+DESCRIBE astrbot_messages;

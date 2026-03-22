@@ -14,9 +14,36 @@
           <span v-if="isLoading">加载中...</span>
           <span v-else>加载消息</span>
         </button>
+        <button 
+          @click="toggleSelectionMode" 
+          :class="['btn-selection', { active: isSelectionMode }]"
+        >
+          {{ isSelectionMode ? '退出选择' : '选择消息' }}
+        </button>
       </div>
       <div v-if="currentGroupName" class="current-group">
         {{ currentGroupName }}
+      </div>
+    </div>
+    
+    <!-- 选择模式操作栏 -->
+    <div v-if="isSelectionMode" class="selection-toolbar">
+      <div class="selection-info">
+        <span class="selected-count">已选择 {{ selectedMessages.length }} 条消息</span>
+        <label class="selection-mode-label">
+          <input type="checkbox" v-model="isMultiSelect" />
+          多选模式
+        </label>
+      </div>
+      <div class="selection-actions">
+        <button @click="clearSelection" class="btn-clear">清空</button>
+        <button 
+          @click="analyzeSelected" 
+          :disabled="selectedMessages.length === 0"
+          class="btn-analyze"
+        >
+          🤖 AI 分析
+        </button>
       </div>
     </div>
     
@@ -39,9 +66,21 @@
           class="message-wrapper"
           :class="{ 
             'message-self': isSelfMessage(message),
-            'message-other': !isSelfMessage(message)
+            'message-other': !isSelfMessage(message),
+            'message-selected': isSelected(message.id),
+            'selection-mode': isSelectionMode
           }"
+          @click="isSelectionMode && toggleMessageSelection(message.id)"
         >
+          <!-- 选择框 -->
+          <div v-if="isSelectionMode" class="message-checkbox" @click.stop>
+            <input 
+              type="checkbox" 
+              :checked="isSelected(message.id)"
+              @change="toggleMessageSelection(message.id)"
+            />
+          </div>
+          
           <!-- 群消息（左对齐） -->
           <div v-if="!isSelfMessage(message)" class="message-bubble message-left">
             <img 
@@ -91,12 +130,13 @@
     <div v-if="previewImage" class="image-preview" @click="closeImagePreview">
       <img :src="previewImage" />
     </div>
+    
   </div>
 </template>
 
 <script>
-import { ref, nextTick, watch, onMounted, onUnmounted } from 'vue';
-import { messageApi } from '../services/api';
+import { ref, nextTick, watch, onMounted, onUnmounted, computed } from 'vue';
+import { messageApi, astrBotApi } from '../services/api';
 import MessageContent from './MessageContent.vue';
 
 export default {
@@ -110,7 +150,9 @@ export default {
       default: ''
     }
   },
-  setup(props) {
+  emits: ['analysis-result'],
+  
+  setup(props, { emit }) {
     const groupId = ref(props.groupId);
     const messages = ref([]);
     const isLoading = ref(false);
@@ -121,6 +163,19 @@ export default {
     
     // 假设当前用户ID，实际应该从登录信息获取
     const currentUserId = 'current_user';
+    
+    // 选择模式相关状态
+    const isSelectionMode = ref(false);
+    const isMultiSelect = ref(false);
+    const selectedMessageIds = ref(new Set());
+    
+    // 计算选中的消息数量
+    const selectedMessages = computed(() => Array.from(selectedMessageIds.value));
+    
+    // 计算选中的消息数据
+    const selectedMessagesData = computed(() => {
+      return messages.value.filter(msg => selectedMessageIds.value.has(msg.id));
+    });
 
     const loadMessages = async (showLoading = true, scrollToBottomFlag = true) => {
       if (!groupId.value) {
@@ -321,6 +376,73 @@ export default {
     onUnmounted(() => {
       stopAutoRefresh();
     });
+    
+    // 切换选择模式
+    const toggleSelectionMode = () => {
+      isSelectionMode.value = !isSelectionMode.value;
+      if (!isSelectionMode.value) {
+        // 退出选择模式时清空选择
+        clearSelection();
+      }
+    };
+    
+    // 切换消息选择状态
+    const toggleMessageSelection = (messageId) => {
+      if (!isMultiSelect.value) {
+        // 单选模式：只保留当前选中的消息
+        if (selectedMessageIds.value.has(messageId)) {
+          selectedMessageIds.value.clear();
+        } else {
+          selectedMessageIds.value.clear();
+          selectedMessageIds.value.add(messageId);
+        }
+      } else {
+        // 多选模式：切换选中状态
+        if (selectedMessageIds.value.has(messageId)) {
+          selectedMessageIds.value.delete(messageId);
+        } else {
+          selectedMessageIds.value.add(messageId);
+        }
+      }
+    };
+    
+    // 检查消息是否被选中
+    const isSelected = (messageId) => {
+      return selectedMessageIds.value.has(messageId);
+    };
+    
+    // 清空选择
+    const clearSelection = () => {
+      selectedMessageIds.value.clear();
+    };
+    
+    // 分析选中的消息
+    const analyzeSelected = async () => {
+      if (selectedMessages.value.length === 0) {
+        alert('请先选择要分析的消息');
+        return;
+      }
+      
+      // 构建选中的消息数据
+      const selectedData = selectedMessagesData.value.map(msg => ({
+        user: msg.userNickname || msg.userName || '未知用户',
+        content: msg.content || '[无内容]'
+      }));
+      
+      // 构建消息内容
+      const messageContents = selectedData.map(msg => `${msg.user}: ${msg.content}`).join('\n');
+      
+      // 发送分析请求事件给父组件
+      emit('analysis-result', {
+        type: 'request',
+        messages: selectedData,
+        prompt: `请分析以下群聊消息，总结主要内容、讨论话题和关键信息：\n\n${messageContents}`
+      });
+      
+      // 退出选择模式
+      isSelectionMode.value = false;
+      clearSelection();
+    };
 
     return {
       groupId,
@@ -335,7 +457,17 @@ export default {
       handleAvatarError,
       openImage,
       closeImagePreview,
-      formatTime
+      formatTime,
+      // 选择模式相关
+      isSelectionMode,
+      isMultiSelect,
+      selectedMessages,
+      selectedMessagesData,
+      toggleSelectionMode,
+      toggleMessageSelection,
+      isSelected,
+      clearSelection,
+      analyzeSelected
     };
   }
 };
@@ -602,6 +734,139 @@ export default {
   background: #a8a8a8;
 }
 
+/* 选择模式按钮 */
+.btn-selection {
+  padding: 10px 16px;
+  background-color: #9b59b6;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.btn-selection:hover {
+  background-color: #8e44ad;
+}
+
+.btn-selection.active {
+  background-color: #e74c3c;
+}
+
+/* 选择工具栏 */
+.selection-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 20px;
+  background-color: #f8f9fa;
+  border-bottom: 1px solid #e0e0e0;
+  gap: 15px;
+  flex-wrap: wrap;
+}
+
+.selection-info {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.selected-count {
+  font-weight: 500;
+  color: #2c3e50;
+}
+
+.selection-mode-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  color: #666;
+  font-size: 14px;
+}
+
+.selection-mode-label input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+.selection-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.btn-clear {
+  padding: 8px 16px;
+  background-color: #95a5a6;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background-color 0.2s;
+}
+
+.btn-clear:hover {
+  background-color: #7f8c8d;
+}
+
+.btn-analyze {
+  padding: 8px 16px;
+  background-color: #27ae60;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn-analyze:hover:not(:disabled) {
+  background-color: #219a52;
+}
+
+.btn-analyze:disabled {
+  background-color: #bdc3c7;
+  cursor: not-allowed;
+}
+
+/* 消息选择框 */
+.message-checkbox {
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  cursor: pointer;
+}
+
+.message-checkbox input[type="checkbox"] {
+  width: 20px;
+  height: 20px;
+  cursor: pointer;
+  accent-color: #3498db;
+}
+
+/* 选择模式下的消息样式 */
+.message-wrapper.selection-mode {
+  cursor: pointer;
+  transition: background-color 0.2s;
+  border-radius: 8px;
+}
+
+.message-wrapper.selection-mode:hover {
+  background-color: rgba(52, 152, 219, 0.1);
+}
+
+.message-wrapper.message-selected {
+  background-color: rgba(52, 152, 219, 0.15);
+  border-radius: 8px;
+}
+
 /* 响应式设计 */
 @media (max-width: 768px) {
   .message-bubble {
@@ -617,6 +882,17 @@ export default {
   .group-selector {
     width: 100%;
     max-width: none;
+  }
+  
+  .selection-toolbar {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+  }
+  
+  .selection-actions {
+    width: 100%;
+    justify-content: flex-end;
   }
 }
 </style>
