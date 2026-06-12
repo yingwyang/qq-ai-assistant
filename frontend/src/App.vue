@@ -1,18 +1,22 @@
 <template>
-  <div class="app">
+  <div class="app" :class="layoutMode">
     <!-- 聊天页面 -->
     <div class="chat-page">
       <!-- 左侧导航栏 -->
       <Sidebar 
         :is-logged-in="isLoggedIn"
+        :user-info="userInfo"
+        :is-collapsed="shouldCollapseSidebar"
         @tab-change="handleTabChange" 
         @logout="handleLogout"
         @open-login-modal="showLoginModal = true"
+        @open-system-modal="showSystemModal = true"
+        @open-user-profile="openUserProfile"
         @select-group="handleSelectGroup"
       />
       
       <!-- 三栏布局主内容区 -->
-      <main class="chat-main">
+      <main class="chat-main" :class="{ 'mobile': isMobile, 'tablet': isTablet, 'desktop': isDesktop }">
         <!-- 未登录状态显示登录提示 -->
         <template v-if="!isLoggedIn">
           <div class="login-prompt">
@@ -25,32 +29,106 @@
           </div>
         </template>
         
-        <!-- 已登录状态显示三栏布局 -->
+        <!-- 已登录状态显示布局 -->
         <template v-else>
-          <!-- 中间：群消息列表 -->
-          <div class="center-panel">
-            <ChatInterface 
-              :groupId="selectedGroupId" 
-              @analysis-result="handleAnalysisResult"
-            />
-          </div>
+          <!-- 移动端：标签页切换 -->
+          <template v-if="isMobile">
+            <div class="mobile-tabs">
+              <button 
+                :class="['mobile-tab', { active: activeMobileTab === 'chat' }]"
+                @click="activeMobileTab = 'chat'"
+              >
+                群聊
+              </button>
+              <button 
+                :class="['mobile-tab', { active: activeMobileTab === 'ai' }]"
+                @click="activeMobileTab = 'ai'"
+              >
+                AI助手
+              </button>
+            </div>
+            <div class="mobile-content">
+              <div v-show="activeMobileTab === 'chat'" class="mobile-panel">
+                <ChatInterface 
+                  :groupId="selectedGroupId" 
+                  @analysis-result="handleAnalysisResult"
+                />
+              </div>
+              <div v-show="activeMobileTab === 'ai'" class="mobile-panel">
+                <AstrBotChat 
+                  ref="astrBotChatRef"
+                  :groupId="selectedGroupId"
+                />
+              </div>
+            </div>
+          </template>
           
-          <!-- 右侧：AstrBot 对话框 -->
-          <div class="right-panel">
-            <AstrBotChat 
-              ref="astrBotChatRef"
-              :groupId="selectedGroupId"
-            />
-          </div>
+          <!-- 平板：可切换的双栏 -->
+          <template v-else-if="isTablet">
+            <div class="tablet-layout">
+              <div class="tablet-chat" :class="{ 'hidden': showAIPanel }">
+                <ChatInterface 
+                  :groupId="selectedGroupId" 
+                  @analysis-result="handleAnalysisResult"
+                />
+              </div>
+              <div class="tablet-ai" :class="{ 'hidden': !showAIPanel }">
+                <AstrBotChat 
+                  ref="astrBotChatRef"
+                  :groupId="selectedGroupId"
+                />
+              </div>
+              <button class="tablet-toggle" @click="showAIPanel = !showAIPanel">
+                {{ showAIPanel ? '← 返回群聊' : 'AI助手 →' }}
+              </button>
+            </div>
+          </template>
+          
+          <!-- 桌面端：三栏布局 -->
+          <template v-else>
+            <!-- 中间：群消息列表 -->
+            <div class="center-panel">
+              <ChatInterface 
+                :groupId="selectedGroupId" 
+                @analysis-result="handleAnalysisResult"
+              />
+            </div>
+            
+            <!-- 右侧：AstrBot 对话框 -->
+            <div class="right-panel">
+              <AstrBotChat 
+                ref="astrBotChatRef"
+                :groupId="selectedGroupId"
+              />
+            </div>
+          </template>
         </template>
       </main>
     </div>
 
-    <!-- 登录/系统控制模态框 -->
-    <LoginModal 
+    <!-- 用户登录模态框 -->
+    <UserLogin 
       v-model:visible="showLoginModal" 
-      @login-status-changed="handleLoginStatusChanged" 
+      @login-success="handleLoginSuccess" 
     />
+    
+    <!-- 系统控制模态框（NapCat登录） -->
+    <LoginModal 
+      v-model:visible="showSystemModal" 
+      @login-status-changed="handleNapCatStatusChanged" 
+    />
+    
+    <!-- 用户个人信息页面 -->
+    <UserProfile
+      v-model:visible="showUserProfile"
+      @profile-updated="handleProfileUpdated"
+    />
+    
+    <!-- 全局 Toast 通知 -->
+    <Toast />
+    
+    <!-- 全局确认对话框 -->
+    <ConfirmDialog />
   </div>
 </template>
 
@@ -60,7 +138,12 @@ import Sidebar from './components/Sidebar.vue';
 import ChatInterface from './components/ChatInterface.vue';
 import AstrBotChat from './components/AstrBotChat.vue';
 import LoginModal from './components/LoginModal.vue';
-import { systemApi } from './services/api';
+import UserLogin from './components/UserLogin.vue';
+import UserProfile from './components/UserProfile.vue';
+import Toast from './components/Toast.vue';
+import ConfirmDialog from './components/ConfirmDialog.vue';
+import { useResponsive } from './composables/useResponsive';
+import { systemApi, authApi } from './services/api';
 
 export default {
   name: 'App',
@@ -68,48 +151,74 @@ export default {
     Sidebar,
     ChatInterface,
     AstrBotChat,
-    LoginModal
+    LoginModal,
+    UserLogin,
+    UserProfile,
+    Toast,
+    ConfirmDialog
   },
   setup() {
     const isLoggedIn = ref(false);
     const activeTab = ref('recent');
     const gptSovitsRunning = ref(false);
     const showLoginModal = ref(false);
+    const showSystemModal = ref(false);
+    const showUserProfile = ref(false);
     const selectedGroupId = ref('');
     const astrBotChatRef = ref(null);
+    const userInfo = ref(null);
+    
+    // 响应式布局
+    const { isMobile, isTablet, isDesktop, layoutMode, shouldCollapseSidebar } = useResponsive();
+    
+    // 移动端标签页状态
+    const activeMobileTab = ref('chat');
+    
+    // 平板端AI面板显示状态
+    const showAIPanel = ref(false);
 
-    // 从 localStorage 恢复登录状态和群号，并检查 NapCat 登录状态
+    // 从 localStorage 恢复登录状态和群号
     onMounted(async () => {
       const savedGroupId = localStorage.getItem('selectedGroupId');
+      const savedUserInfo = localStorage.getItem('user_info');
+      const token = localStorage.getItem('auth_token');
       
       if (savedGroupId) {
         selectedGroupId.value = savedGroupId;
       }
       
-      // 检查 NapCat 实际登录状态
-      try {
-        const response = await systemApi.checkNapCatLoginStatus();
-        if (response && response.loggedIn) {
+      // 检查用户登录状态
+      if (token) {
+        try {
+          // 验证token有效性
+          const userData = await authApi.getCurrentUser();
+          userInfo.value = userData;
           isLoggedIn.value = true;
           localStorage.setItem('isLoggedIn', 'true');
-        } else {
-          isLoggedIn.value = false;
-          localStorage.removeItem('isLoggedIn');
+        } catch (error) {
+          console.log('Token验证失败:', error);
+          // Token无效，清除登录状态
+          handleLogout();
         }
-      } catch (error) {
-        console.log('检查登录状态失败:', error);
-        // 如果检查失败，使用 localStorage 的缓存状态
-        const savedLoginStatus = localStorage.getItem('isLoggedIn');
-        if (savedLoginStatus === 'true') {
-          isLoggedIn.value = true;
-        }
+      } else {
+        isLoggedIn.value = false;
       }
     });
 
-    const handleLoginStatusChanged = (status) => {
-      isLoggedIn.value = status;
-      // 保存登录状态到 localStorage
-      localStorage.setItem('isLoggedIn', status ? 'true' : 'false');
+    const handleLoginSuccess = (userData) => {
+      userInfo.value = {
+        username: userData.username,
+        nickname: userData.nickname,
+        role: userData.role,
+        avatar: userData.avatar
+      };
+      isLoggedIn.value = true;
+      localStorage.setItem('isLoggedIn', 'true');
+    };
+
+    const handleNapCatStatusChanged = (status) => {
+      // NapCat登录状态变化，可以在这里处理相关逻辑
+      console.log('NapCat登录状态:', status);
     };
 
     const handleTabChange = (tab) => {
@@ -118,8 +227,11 @@ export default {
 
     const handleLogout = () => {
       isLoggedIn.value = false;
+      userInfo.value = null;
       selectedGroupId.value = '';
       // 清除 localStorage
+      localStorage.removeItem('auth_token');
+      localStorage.removeItem('user_info');
       localStorage.removeItem('isLoggedIn');
       localStorage.removeItem('selectedGroupId');
     };
@@ -141,18 +253,54 @@ export default {
       }
     };
 
+    // 打开用户个人信息页面
+    const openUserProfile = () => {
+      showUserProfile.value = true;
+    };
+
+    // 处理个人信息更新
+    const handleProfileUpdated = async () => {
+      // 刷新用户信息
+      try {
+        const userData = await authApi.getCurrentUser();
+        userInfo.value = {
+          username: userData.username,
+          nickname: userData.nickname,
+          role: userData.role,
+          avatar: userData.avatar
+        };
+      } catch (error) {
+        console.error('刷新用户信息失败:', error);
+      }
+    };
+
     return {
       isLoggedIn,
       activeTab,
       gptSovitsRunning,
       showLoginModal,
+      showSystemModal,
+      showUserProfile,
       selectedGroupId,
       astrBotChatRef,
-      handleLoginStatusChanged,
+      userInfo,
+      // 响应式布局
+      isMobile,
+      isTablet,
+      isDesktop,
+      layoutMode,
+      shouldCollapseSidebar,
+      activeMobileTab,
+      showAIPanel,
+      // 方法
+      handleLoginSuccess,
+      handleNapCatStatusChanged,
       handleTabChange,
       handleLogout,
       handleSelectGroup,
-      handleAnalysisResult
+      handleAnalysisResult,
+      openUserProfile,
+      handleProfileUpdated
     };
   }
 };
@@ -291,7 +439,9 @@ html, body {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 60vh;
+  width: 100%;
+  height: 100%;
+  min-height: 100%;
 }
 
 .login-prompt-content {
@@ -334,12 +484,147 @@ html, body {
   background-color: #2980b9;
 }
 
-/* 响应式设计 */
-@media (max-width: 768px) {
-  .chat-main {
-    margin-left: 60px;
+/* ==================== 响应式布局样式 ==================== */
+
+/* 移动端布局 (< 768px) */
+.app.mobile .chat-main {
+  flex-direction: column;
+}
+
+.mobile-tabs {
+  display: flex;
+  background: #fff;
+  border-bottom: 1px solid #e0e0e0;
+  flex-shrink: 0;
+}
+
+.mobile-tab {
+  flex: 1;
+  padding: 12px;
+  border: none;
+  background: #f5f5f5;
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.2s;
+}
+
+.mobile-tab.active {
+  background: #fff;
+  color: #1890ff;
+  border-bottom: 2px solid #1890ff;
+}
+
+.mobile-content {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+}
+
+.mobile-panel {
+  height: 100%;
+  overflow: hidden;
+}
+
+/* 平板布局 (768px - 1023px) */
+.app.tablet .chat-main {
+  position: relative;
+}
+
+.tablet-layout {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  position: relative;
+}
+
+.tablet-chat,
+.tablet-ai {
+  flex: 1;
+  height: 100%;
+  overflow: hidden;
+  transition: transform 0.3s ease;
+}
+
+.tablet-chat.hidden {
+  display: none;
+}
+
+.tablet-ai.hidden {
+  display: none;
+}
+
+.tablet-toggle {
+  position: absolute;
+  bottom: 20px;
+  right: 20px;
+  padding: 10px 20px;
+  background: #1890ff;
+  color: white;
+  border: none;
+  border-radius: 20px;
+  cursor: pointer;
+  font-size: 14px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  z-index: 100;
+  transition: all 0.2s;
+}
+
+.tablet-toggle:hover {
+  background: #40a9ff;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+/* 桌面端布局 (>= 1024px) */
+.app.desktop .chat-main {
+  flex-direction: row;
+}
+
+/* 大屏幕优化 (>= 1280px) */
+@media (min-width: 1280px) {
+  .center-panel {
+    flex: 0 0 55%;
   }
   
+  .right-panel {
+    flex: 0 0 45%;
+  }
+}
+
+/* 超大屏幕优化 (>= 1536px) */
+@media (min-width: 1536px) {
+  .center-panel {
+    flex: 0 0 60%;
+  }
+  
+  .right-panel {
+    flex: 0 0 40%;
+  }
+}
+
+/* 小屏幕优化 (< 640px) */
+@media (max-width: 640px) {
+  .login-prompt-content {
+    padding: 24px;
+    margin: 16px;
+  }
+  
+  .login-icon {
+    font-size: 48px;
+  }
+  
+  .login-prompt-content h2 {
+    font-size: 20px;
+  }
+  
+  .mobile-tab {
+    padding: 10px;
+    font-size: 13px;
+  }
+}
+
+/* 响应式设计 */
+@media (max-width: 768px) {
   .agents-list {
     grid-template-columns: 1fr;
   }

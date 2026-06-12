@@ -35,6 +35,7 @@
 <script>
 import { ref } from 'vue';
 import { messageApi } from '../services/api';
+import { showToast } from './Toast.vue';
 
 export default {
   name: 'MessageDisplay',
@@ -46,10 +47,10 @@ export default {
 
     const loadMessages = async () => {
       if (!groupId.value) {
-        alert('请输入群聊ID');
+        showToast('请输入群聊ID', 'warning');
         return;
       }
-      
+
       isLoading.value = true;
       hasAttemptedLoad.value = true;
       try {
@@ -57,7 +58,7 @@ export default {
         messages.value = response;
       } catch (error) {
         console.error('加载消息失败:', error);
-        alert('加载消息失败: ' + error.message);
+        showToast('加载消息失败: ' + error.message, 'error');
       } finally {
         isLoading.value = false;
       }

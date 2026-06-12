@@ -8,6 +8,18 @@
       <h3 v-if="!isCollapsed" class="sidebar-title">铃音QQ对话</h3>
     </div>
     
+    <!-- 用户信息区域 -->
+    <div v-if="isLoggedIn && userInfo" class="user-info" @click="openUserProfile">
+      <div class="user-avatar">
+        <img :src="(userInfo.avatar ? (userInfo.avatar.startsWith('http') ? userInfo.avatar : 'http://localhost:8081' + userInfo.avatar) : 'https://q.qlogo.cn/headimg_dl?dst_uin=0&spec=100')" alt="avatar" />
+      </div>
+      <div v-if="!isCollapsed" class="user-details">
+        <div class="user-nickname">{{ userInfo.nickname || userInfo.username }}</div>
+        <div class="user-role">{{ userInfo.role === 'ADMIN' ? '管理员' : '用户' }}</div>
+      </div>
+      <div v-if="!isCollapsed" class="profile-arrow">›</div>
+    </div>
+    
     <nav class="sidebar-nav">
       <div class="nav-section">
         <ul class="nav-list">
@@ -53,10 +65,16 @@
     </nav>
     
     <div class="sidebar-footer">
-      <!-- 登录/系统控制按钮 -->
-      <button class="nav-item login-btn" @click="openLoginModal">
+      <!-- 系统控制按钮（仅已登录用户可见） -->
+      <button v-if="isLoggedIn" class="nav-item system-btn" @click="openSystemModal">
+        <span class="nav-icon">⚙️</span>
+        <span v-if="!isCollapsed" class="nav-text">系统控制</span>
+      </button>
+      
+      <!-- 登录按钮（仅未登录用户可见） -->
+      <button v-if="!isLoggedIn" class="nav-item login-btn" @click="openLoginModal">
         <span class="nav-icon">🔐</span>
-        <span v-if="!isCollapsed" class="nav-text">{{ isLoggedIn ? '系统控制' : '登录' }}</span>
+        <span v-if="!isCollapsed" class="nav-text">登录</span>
       </button>
       
       <!-- 退出登录按钮 -->
@@ -78,11 +96,19 @@ export default {
     isLoggedIn: {
       type: Boolean,
       default: false
+    },
+    userInfo: {
+      type: Object,
+      default: null
+    },
+    isCollapsed: {
+      type: Boolean,
+      default: false
     }
   },
-  emits: ['tab-change', 'logout', 'open-login-modal', 'select-group'],
+  emits: ['tab-change', 'logout', 'open-login-modal', 'open-system-modal', 'open-user-profile', 'select-group'],
   setup(props, { emit }) {
-    const isCollapsed = ref(false);
+    const isCollapsedLocal = ref(false);
     const activeTab = ref('recent');
     const recentGroups = ref([]);
     const isRecentExpanded = ref(true); // 默认展开群列表
@@ -90,9 +116,12 @@ export default {
     
     // 使用 computed 确保响应式
     const isLoggedInComputed = computed(() => props.isLoggedIn);
+    
+    // 合并外部传入的 isCollapsed 和本地状态
+    const isCollapsed = computed(() => props.isCollapsed || isCollapsedLocal.value);
 
     const toggleSidebar = () => {
-      isCollapsed.value = !isCollapsed.value;
+      isCollapsedLocal.value = !isCollapsedLocal.value;
     };
 
     const toggleRecentGroups = () => {
@@ -115,6 +144,14 @@ export default {
 
     const openLoginModal = () => {
       emit('open-login-modal');
+    };
+
+    const openSystemModal = () => {
+      emit('open-system-modal');
+    };
+
+    const openUserProfile = () => {
+      emit('open-user-profile');
     };
 
     const openAstrBot = () => {
@@ -158,10 +195,9 @@ export default {
       }
       
       try {
-        // 从 API 获取最近对话的群聊
-        // 暂时传递null，后续从登录状态中获取userId
+        // 从 API 获取最近对话的群聊（后端从JWT自动获取用户ID）
         console.log('开始加载最近对话...');
-        const groups = await messageApi.getRecentGroups(null);
+        const groups = await messageApi.getRecentGroups();
         console.log('获取到的群聊数据:', groups);
         recentGroups.value = groups;
         console.log('recentGroups.value:', recentGroups.value);
@@ -211,6 +247,8 @@ export default {
       selectTab,
       logout,
       openLoginModal,
+      openSystemModal,
+      openUserProfile,
       openAstrBot,
       selectGroup,
       handleAvatarError,
@@ -268,6 +306,69 @@ export default {
   overflow: hidden;
 }
 
+/* 用户信息区域 */
+.user-info {
+  padding: 15px 20px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border-bottom: 1px solid #34495e;
+  background-color: #34495e;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.user-info:hover {
+  background-color: #3d566e;
+}
+
+.profile-arrow {
+  font-size: 20px;
+  color: #95a5a6;
+  margin-left: auto;
+  transition: transform 0.2s;
+}
+
+.user-info:hover .profile-arrow {
+  transform: translateX(4px);
+  color: #ecf0f1;
+}
+
+.user-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  overflow: hidden;
+  flex-shrink: 0;
+  background-color: #2c3e50;
+}
+
+.user-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.user-details {
+  flex: 1;
+  min-width: 0;
+}
+
+.user-nickname {
+  font-size: 14px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #ecf0f1;
+}
+
+.user-role {
+  font-size: 12px;
+  color: #95a5a6;
+  margin-top: 2px;
+}
+
 .sidebar-nav {
   flex: 1;
   padding: 20px 0;
@@ -295,7 +396,7 @@ export default {
 .nav-item {
   display: flex;
   align-items: center;
-  padding: 12px 20px;
+  padding: 8px 20px;
   cursor: pointer;
   transition: all 0.2s;
   gap: 12px;
@@ -311,9 +412,12 @@ export default {
 }
 
 .nav-icon {
-  font-size: 20px;
+  font-size: 16px;
   min-width: 20px;
   text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .nav-text {
@@ -332,22 +436,26 @@ export default {
 
 /* 群聊项样式 */
 .group-item {
-  padding: 10px 20px;
+  padding: 6px 20px;
 }
 
 .group-avatar {
-  width: 32px;
-  height: 32px;
+  width: 24px;
+  height: 24px;
   border-radius: 50%;
   overflow: hidden;
   flex-shrink: 0;
   background-color: #34495e;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .group-avatar img {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  display: block;
 }
 
 .group-info {
@@ -388,6 +496,19 @@ export default {
 
 .login-btn:hover {
   background-color: #3498db;
+}
+
+.system-btn {
+  width: 100%;
+  background: none;
+  border: none;
+  color: #ecf0f1;
+  font-size: 14px;
+  margin-bottom: 10px;
+}
+
+.system-btn:hover {
+  background-color: #27ae60;
 }
 
 .logout-btn {

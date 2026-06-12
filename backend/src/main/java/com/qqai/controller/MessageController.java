@@ -2,18 +2,24 @@ package com.qqai.controller;
 
 import com.qqai.entity.FileRecord;
 import com.qqai.entity.Message;
+import com.qqai.entity.User;
+import com.qqai.entity.UserQqBinding;
+import com.qqai.repository.UserQqBindingRepository;
+import com.qqai.repository.UserRepository;
 import com.qqai.service.FileStorageService;
 import com.qqai.service.MessageService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/messages")
@@ -24,14 +30,79 @@ public class MessageController {
     @Autowired
     private FileStorageService fileStorageService;
 
+    @Autowired
+    private UserRepository userRepository;
+
+    @Autowired
+    private UserQqBindingRepository userQqBindingRepository;
+
+    /**
+     * 获取当前登录用户ID
+     */
+    private Long getCurrentUserId() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication != null && authentication.isAuthenticated()) {
+            String username = authentication.getName();
+            // 从数据库查询用户ID
+            Optional<User> userOpt = userRepository.findByQq(username);
+            return userOpt.map(User::getId).orElse(null);
+        }
+        return null;
+    }
+
+    /**
+     * 获取当前用户绑定的所有QQ账号
+     */
+    private List<String> getCurrentUserQqBindings() {
+        Long userId = getCurrentUserId();
+        if (userId == null) {
+            return Collections.emptyList();
+        }
+        
+        List<UserQqBinding> bindings = userQqBindingRepository.findByUserIdAndActiveTrue(userId);
+        return bindings.stream()
+                .map(UserQqBinding::getQqNumber)
+                .collect(Collectors.toList());
+    }
+
     @PostMapping
     public Message createMessage(@RequestBody Message message) {
         return messageService.saveMessage(message);
     }
 
     @GetMapping("/group/{groupId}")
-    public List<Message> getMessagesByGroupId(@PathVariable String groupId) {
-        return messageService.getMessagesByGroupId(groupId);
+    public ResponseEntity<?> getMessagesByGroupId(@PathVariable String groupId) {
+        Long userId = getCurrentUserId();
+        if (userId == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("error", "未登录", "code", 401));
+        }
+        
+        // 获取用户绑定的所有QQ账号
+        List<String> userQqList = getCurrentUserQqBindings();
+        if (userQqList.isEmpty()) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(Map.of("error", "请先绑定QQ账号", "code", 403));
+        }
+        
+        // 检查用户是否有权限访问该群聊（使用绑定的任意一个QQ号）
+        boolean hasAccess = false;
+        for (String qq : userQqList) {
+            List<String> userGroupIds = messageService.getUserGroupIds(qq);
+            if (userGroupIds.contains(groupId)) {
+                hasAccess = true;
+                break;
+            }
+        }
+        
+        if (!hasAccess) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(Map.of("error", "无权访问该群聊", "code", 403));
+        }
+        
+        // 使用用户绑定的QQ号列表查询消息
+        List<Message> messages = messageService.getMessagesByGroupIdAndUserQqList(groupId, userQqList);
+        return ResponseEntity.ok(messages);
     }
 
     @GetMapping("/group/{groupId}/paged")
@@ -39,9 +110,37 @@ public class MessageController {
             @PathVariable String groupId,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "50") int size) {
+        Long userId = getCurrentUserId();
+        if (userId == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("error", "未登录", "code", 401));
+        }
+        
+        // 获取用户绑定的所有QQ账号
+        List<String> userQqList = getCurrentUserQqBindings();
+        if (userQqList.isEmpty()) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(Map.of("error", "请先绑定QQ账号", "code", 403));
+        }
+        
+        // 检查用户是否有权限访问该群聊
+        boolean hasAccess = false;
+        for (String qq : userQqList) {
+            List<String> userGroupIds = messageService.getUserGroupIds(qq);
+            if (userGroupIds.contains(groupId)) {
+                hasAccess = true;
+                break;
+            }
+        }
+        
+        if (!hasAccess) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(Map.of("error", "无权访问该群聊", "code", 403));
+        }
+        
         Pageable pageable = PageRequest.of(page, size);
-        List<Message> messages = messageService.getMessagesByGroupIdPaged(groupId, pageable);
-        Long total = messageService.countMessagesByGroupId(groupId);
+        List<Message> messages = messageService.getMessagesByGroupIdPagedAndUserQqList(groupId, userQqList, pageable);
+        Long total = messageService.countMessagesByGroupIdAndUserQqList(groupId, userQqList);
         
         Map<String, Object> response = new HashMap<>();
         response.put("messages", messages);
@@ -147,14 +246,42 @@ public class MessageController {
 
     /**
      * 获取最近对话的群聊
+     * 基于用户绑定的QQ账号查询
      */
     @GetMapping("/recent-groups")
-    public ResponseEntity<?> getRecentGroups(@RequestParam(value = "userId", required = false) String userId) {
+    public ResponseEntity<?> getRecentGroups() {
         try {
-            List<Map<String, Object>> recentGroups = messageService.getRecentGroups(userId);
-            return ResponseEntity.ok(recentGroups);
+            Long userId = getCurrentUserId();
+            if (userId == null) {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                        .body(Map.of("error", "未登录", "code", 401));
+            }
+            
+            // 获取用户绑定的所有QQ账号
+            List<String> userQqList = getCurrentUserQqBindings();
+            if (userQqList.isEmpty()) {
+                return ResponseEntity.ok(Collections.emptyList());
+            }
+            
+            // 获取所有绑定QQ的群聊
+            List<Map<String, Object>> allGroups = new ArrayList<>();
+            Set<String> addedGroupIds = new HashSet<>();
+            
+            for (String qq : userQqList) {
+                List<Map<String, Object>> groups = messageService.getRecentGroups(qq);
+                for (Map<String, Object> group : groups) {
+                    String groupId = (String) group.get("groupId");
+                    if (!addedGroupIds.contains(groupId)) {
+                        addedGroupIds.add(groupId);
+                        allGroups.add(group);
+                    }
+                }
+            }
+            
+            return ResponseEntity.ok(allGroups);
         } catch (Exception e) {
-            return ResponseEntity.badRequest().body("获取最近对话失败: " + e.getMessage());
+            return ResponseEntity.badRequest()
+                    .body(Map.of("error", "获取最近对话失败: " + e.getMessage(), "code", 400));
         }
     }
 

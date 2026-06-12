@@ -29,6 +29,12 @@ public class User {
     @Column(length = 255)
     private String token;  // 认证令牌
     
+    @Column(nullable = false, length = 255)
+    private String password;  // 密码（加密存储）
+    
+    @Column(length = 50)
+    private String role = "USER";  // 用户角色：ADMIN, USER
+    
     private LocalDateTime lastLoginTime;  // 最后登录时间
     
     private LocalDateTime createdAt;
@@ -67,4 +73,10 @@ public class User {
     
     public boolean isActive() { return active; }
     public void setActive(boolean active) { this.active = active; }
+    
+    public String getPassword() { return password; }
+    public void setPassword(String password) { this.password = password; }
+    
+    public String getRole() { return role; }
+    public void setRole(String role) { this.role = role; }
 }

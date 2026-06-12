@@ -223,6 +223,7 @@
 import { ref, onMounted, nextTick, watch } from 'vue';
 import { astrBotApi, userApi } from '../services/api';
 import { filterToolJson, processAstrBotResponse } from '../utils/messageFilter';
+import { showToast } from './Toast.vue';
 
 export default {
   name: 'AstrBotChat',
@@ -468,11 +469,11 @@ export default {
           }
         } else {
           console.error('❌ API 返回错误:', response);
-          alert('删除失败: ' + (response?.message || '未知错误'));
+          showToast('删除失败: ' + (response?.message || '未知错误'), 'error');
         }
       } catch (error) {
         console.error('❌ 删除对话失败:', error);
-        alert('删除对话失败: ' + error.message);
+        showToast('删除对话失败: ' + error.message, 'error');
       } finally {
         isLoading.value = false;
         conversationToDelete.value = null;

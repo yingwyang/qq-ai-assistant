@@ -63,6 +63,27 @@ public class MessageService {
     public Long countMessagesByGroupId(String groupId) {
         return messageRepository.countActiveMessagesByGroupId(groupId);
     }
+    
+    // ==================== 按用户QQ过滤的查询方法 ====================
+    
+    public List<Message> getMessagesByGroupIdAndUser(String groupId, String selfQq) {
+        return messageRepository.findByGroupIdAndSelfQqOrderBySendTimeDesc(groupId, selfQq);
+    }
+
+    public List<Message> getMessagesByGroupIdPagedAndUser(String groupId, String selfQq, Pageable pageable) {
+        return messageRepository.findMessagesByGroupIdAndSelfQqWithLimit(groupId, selfQq, pageable);
+    }
+
+    public Long countMessagesByGroupIdAndUser(String groupId, String selfQq) {
+        return messageRepository.countActiveMessagesByGroupIdAndSelfQq(groupId, selfQq);
+    }
+    
+    /**
+     * 获取用户有消息的群聊列表
+     */
+    public List<String> getUserGroupIds(String selfQq) {
+        return messageRepository.findGroupIdsBySelfQq(selfQq);
+    }
 
     public List<Message> getUnprocessedMessages() {
         return messageRepository.findByProcessedFalse();
@@ -85,19 +106,18 @@ public class MessageService {
     /**
      * 获取最近对话的群聊
      * 从 chat_groups 表中获取指定登录者的群聊列表
+     * 如果提供了 userId，只返回该用户有权限查看的群聊
      */
     public List<Map<String, Object>> getRecentGroups(String userId) {
         List<Map<String, Object>> recentGroups = new ArrayList<>();
         
-        // 如果提供了 userId，查询该用户的群聊；否则查询所有群聊
-        List<Group> groups;
-        if (userId != null && !userId.isEmpty()) {
-            // 根据登录者QQ查询群聊，按加入时间倒序
-            groups = groupRepository.findByOwnerQqAndActiveTrue(userId);
-        } else {
-            // 查询所有活跃群聊（包括owner_qq为空的旧数据）
-            groups = groupRepository.findByActiveTrue();
+        // 必须提供 userId，否则返回空列表
+        if (userId == null || userId.isEmpty()) {
+            return recentGroups;
         }
+        
+        // 根据登录者QQ查询群聊，按加入时间倒序
+        List<Group> groups = groupRepository.findByOwnerQqAndActiveTrue(userId);
         
         // 按加入时间倒序排列
         groups.sort((g1, g2) -> {
@@ -124,5 +144,28 @@ public class MessageService {
         }
         
         return recentGroups;
+    }
+
+    // ==================== 按多个用户QQ过滤的查询方法 ====================
+
+    /**
+     * 根据群ID和多个QQ号查询消息
+     */
+    public List<Message> getMessagesByGroupIdAndUserQqList(String groupId, List<String> selfQqList) {
+        return messageRepository.findByGroupIdAndSelfQqInOrderBySendTimeDesc(groupId, selfQqList);
+    }
+
+    /**
+     * 分页查询群消息（按多个QQ号过滤）
+     */
+    public List<Message> getMessagesByGroupIdPagedAndUserQqList(String groupId, List<String> selfQqList, Pageable pageable) {
+        return messageRepository.findMessagesByGroupIdAndSelfQqInWithLimit(groupId, selfQqList, pageable);
+    }
+
+    /**
+     * 统计群消息数量（按多个QQ号过滤）
+     */
+    public Long countMessagesByGroupIdAndUserQqList(String groupId, List<String> selfQqList) {
+        return messageRepository.countActiveMessagesByGroupIdAndSelfQqIn(groupId, selfQqList);
     }
 }

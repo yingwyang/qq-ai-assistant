@@ -1,13 +1,19 @@
 // API服务配置
 const API_BASE_URL = '/api';
 
+// 获取存储的token
+const getToken = () => localStorage.getItem('auth_token');
+
 // 通用请求方法
 async function request(endpoint, options = {}) {
   const url = `${API_BASE_URL}${endpoint}`;
+  const token = getToken();
+  
   const defaultOptions = {
     headers: {
       'Content-Type': 'application/json; charset=UTF-8',
       'Accept': 'application/json; charset=UTF-8',
+      ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
     },
   };
   
@@ -22,10 +28,36 @@ async function request(endpoint, options = {}) {
 
   try {
     const response = await fetch(url, mergedOptions);
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+    
+    // 处理401未授权错误
+    if (response.status === 401) {
+      localStorage.removeItem('auth_token');
+      localStorage.removeItem('isLoggedIn');
+      window.location.reload();
+      throw new Error('登录已过期，请重新登录');
     }
-    return await response.json();
+    
+    // 获取响应文本，用于调试
+    const responseText = await response.text();
+    
+    if (!response.ok) {
+      // 尝试解析为 JSON，失败则使用文本
+      let errorData;
+      try {
+        errorData = JSON.parse(responseText);
+      } catch {
+        errorData = { message: responseText };
+      }
+      throw new Error(errorData.error || errorData.message || `HTTP error! status: ${response.status}`);
+    }
+    
+    // 尝试解析 JSON
+    try {
+      return JSON.parse(responseText);
+    } catch (parseError) {
+      console.error('JSON parse error. Response text:', responseText.substring(0, 200));
+      throw new Error(`服务器返回了无效的 JSON 数据: ${parseError.message}`);
+    }
   } catch (error) {
     console.error('API request failed:', error);
     throw error;
@@ -35,19 +67,47 @@ async function request(endpoint, options = {}) {
 // 文件上传请求（multipart/form-data）
 async function uploadRequest(endpoint, formData) {
   const url = `${API_BASE_URL}${endpoint}`;
-  
+  const token = getToken();
+
   try {
     const response = await fetch(url, {
       method: 'POST',
+      headers: token ? { 'Authorization': `Bearer ${token}` } : {},
       body: formData,
     });
-    
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+
+    // 处理401未授权错误
+    if (response.status === 401) {
+      localStorage.removeItem('auth_token');
+      localStorage.removeItem('isLoggedIn');
+      window.location.reload();
+      throw new Error('登录已过期，请重新登录');
     }
-    return await response.json();
+
+    // 获取响应文本
+    const responseText = await response.text();
+
+    if (!response.ok) {
+      let errorData;
+      try {
+        errorData = JSON.parse(responseText);
+      } catch {
+        errorData = { message: responseText };
+      }
+      throw new Error(errorData.error || errorData.message || `HTTP error! status: ${response.status}`);
+    }
+
+    try {
+      return JSON.parse(responseText);
+    } catch (parseError) {
+      console.error('JSON parse error. Response text:', responseText.substring(0, 200));
+      throw new Error(`服务器返回了无效的 JSON 数据: ${parseError.message}`);
+    }
   } catch (error) {
     console.error('Upload request failed:', error);
+    if (error.name === 'TypeError' && error.message === 'Failed to fetch') {
+      throw new Error('无法连接到服务器，请检查后端服务是否运行');
+    }
     throw error;
   }
 }
@@ -107,10 +167,9 @@ export const messageApi = {
     method: 'POST',
   }),
   
-  // 获取最近对话的群聊
-  getRecentGroups: (userId) => {
-    const params = userId ? `?userId=${userId}` : '';
-    return request(`/messages/recent-groups${params}`);
+  // 获取最近对话的群聊（后端从JWT获取用户ID，不需要传递参数）
+  getRecentGroups: () => {
+    return request('/messages/recent-groups');
   },
 };
 
@@ -224,6 +283,70 @@ export const userApi = {
   saveSettings: (params) => request('/user/settings', {
     method: 'POST',
     body: JSON.stringify(params),
+  }),
+  
+  // ==================== 用户个人信息 API ====================
+  
+  // 获取用户资料
+  getProfile: () => request('/user/profile'),
+  
+  // 更新用户资料
+  updateProfile: (params) => request('/user/profile', {
+    method: 'PUT',
+    body: JSON.stringify(params),
+  }),
+  
+  // 上传头像
+  uploadAvatar: (file) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return uploadRequest('/user/avatar', formData);
+  },
+  
+  // 获取QQ绑定列表
+  getQqBindings: () => request('/user/qq-bindings'),
+  
+  // 绑定QQ账号
+  bindQq: (params) => request('/user/qq-bindings', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  }),
+  
+  // 解绑QQ账号
+  unbindQq: (bindingId) => request(`/user/qq-bindings/${bindingId}`, {
+    method: 'DELETE',
+  }),
+  
+  // 设置默认QQ账号
+  setDefaultQq: (bindingId) => request(`/user/qq-bindings/${bindingId}/default`, {
+    method: 'PUT',
+  }),
+  
+  // 获取默认QQ账号
+  getDefaultQq: () => request('/user/qq-bindings/default'),
+};
+
+// 认证 API
+export const authApi = {
+  // 登录
+  login: (username, password) => request('/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ username, password }),
+  }),
+  
+  // 注册
+  register: (username, password, nickname) => request('/auth/register', {
+    method: 'POST',
+    body: JSON.stringify({ username, password, nickname }),
+  }),
+  
+  // 获取当前用户信息
+  getCurrentUser: () => request('/auth/me'),
+  
+  // 修改密码
+  changePassword: (oldPassword, newPassword) => request('/auth/change-password', {
+    method: 'POST',
+    body: JSON.stringify({ oldPassword, newPassword }),
   }),
 };
 

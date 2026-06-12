@@ -38,6 +38,7 @@
 
 <script>
 import { computed, ref } from 'vue';
+import { showToast } from './Toast.vue';
 
 export default {
   name: 'MessageContent',
@@ -213,7 +214,7 @@ export default {
       console.log('语音播放点击, voiceUrl:', voiceUrl.value);
       if (!voiceAudio.value) {
         console.error('音频元素未找到');
-        alert('音频元素未加载，请刷新页面重试');
+        showToast('音频元素未加载，请刷新页面重试', 'error');
         return;
       }
       if (isPlaying.value) {
@@ -225,7 +226,7 @@ export default {
         }).catch(e => {
           console.error('播放失败:', e);
           console.error('音频URL:', voiceUrl.value);
-          alert('语音播放失败: ' + e.message + '\nURL: ' + voiceUrl.value);
+          showToast('语音播放失败: ' + e.message, 'error');
         });
         isPlaying.value = true;
       }
@@ -242,10 +243,33 @@ export default {
     };
     
     const onVoiceError = (e) => {
+      const errorCode = voiceAudio.value?.error?.code;
+      const errorMessage = voiceAudio.value?.error?.message;
+      
       console.error('音频加载错误:', e);
       console.error('音频URL:', voiceUrl.value);
-      console.error('音频元素错误代码:', voiceAudio.value?.error?.code);
-      console.error('音频元素错误信息:', voiceAudio.value?.error?.message);
+      console.error('音频元素错误代码:', errorCode);
+      console.error('音频元素错误信息:', errorMessage);
+      
+      // 错误码说明: 1=ABORTED, 2=NETWORK, 3=DECODE, 4=SRC_NOT_SUPPORTED
+      let userMessage = '语音加载失败';
+      switch(errorCode) {
+        case 1:
+          userMessage = '语音加载被中断';
+          break;
+        case 2:
+          userMessage = '语音网络错误，请检查连接';
+          break;
+        case 3:
+          userMessage = '语音解码错误，文件可能损坏';
+          break;
+        case 4:
+          userMessage = '语音格式不支持或文件不存在';
+          break;
+      }
+      
+      showToast(userMessage, 'error');
+      isPlaying.value = false;
     };
     
     // 格式化时长

@@ -65,4 +65,50 @@ public interface MessageRepository extends JpaRepository<Message, Long> {
      */
     @Query("SELECT m.groupId, MAX(m.groupName) as groupName FROM Message m WHERE m.archived = false GROUP BY m.groupId ORDER BY MAX(m.sendTime) DESC LIMIT 10")
     List<Object[]> findRecentGroups();
+    
+    // ==================== 按用户QQ过滤的查询方法 ====================
+    
+    /**
+     * 根据群聊ID和登录者QQ查询消息（按时间倒序）
+     */
+    @Query("SELECT m FROM Message m WHERE m.groupId = :groupId AND m.selfQq = :selfQq ORDER BY m.sendTime DESC")
+    List<Message> findByGroupIdAndSelfQqOrderBySendTimeDesc(@Param("groupId") String groupId, @Param("selfQq") String selfQq);
+    
+    /**
+     * 根据群聊ID和登录者QQ查询未归档消息（分页）
+     */
+    @Query("SELECT m FROM Message m WHERE m.groupId = :groupId AND m.selfQq = :selfQq AND m.archived = false ORDER BY m.sendTime DESC")
+    List<Message> findMessagesByGroupIdAndSelfQqWithLimit(@Param("groupId") String groupId, @Param("selfQq") String selfQq, org.springframework.data.domain.Pageable pageable);
+    
+    /**
+     * 统计群聊消息数量（按登录者QQ过滤）
+     */
+    @Query("SELECT COUNT(m) FROM Message m WHERE m.groupId = :groupId AND m.selfQq = :selfQq AND m.archived = false")
+    Long countActiveMessagesByGroupIdAndSelfQq(@Param("groupId") String groupId, @Param("selfQq") String selfQq);
+    
+    /**
+     * 查询用户有消息的群聊列表
+     */
+    @Query("SELECT DISTINCT m.groupId FROM Message m WHERE m.selfQq = :selfQq AND m.archived = false")
+    List<String> findGroupIdsBySelfQq(@Param("selfQq") String selfQq);
+
+    // ==================== 按多个用户QQ过滤的查询方法 ====================
+
+    /**
+     * 根据群聊ID和多个登录者QQ查询消息（按时间倒序）
+     */
+    @Query("SELECT m FROM Message m WHERE m.groupId = :groupId AND m.selfQq IN :selfQqList ORDER BY m.sendTime DESC")
+    List<Message> findByGroupIdAndSelfQqInOrderBySendTimeDesc(@Param("groupId") String groupId, @Param("selfQqList") List<String> selfQqList);
+
+    /**
+     * 根据群聊ID和多个登录者QQ查询未归档消息（分页）
+     */
+    @Query("SELECT m FROM Message m WHERE m.groupId = :groupId AND m.selfQq IN :selfQqList AND m.archived = false ORDER BY m.sendTime DESC")
+    List<Message> findMessagesByGroupIdAndSelfQqInWithLimit(@Param("groupId") String groupId, @Param("selfQqList") List<String> selfQqList, org.springframework.data.domain.Pageable pageable);
+
+    /**
+     * 统计群聊消息数量（按多个登录者QQ过滤）
+     */
+    @Query("SELECT COUNT(m) FROM Message m WHERE m.groupId = :groupId AND m.selfQq IN :selfQqList AND m.archived = false")
+    Long countActiveMessagesByGroupIdAndSelfQqIn(@Param("groupId") String groupId, @Param("selfQqList") List<String> selfQqList);
 }

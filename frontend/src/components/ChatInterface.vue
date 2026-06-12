@@ -138,6 +138,7 @@
 import { ref, nextTick, watch, onMounted, onUnmounted, computed } from 'vue';
 import { messageApi, astrBotApi } from '../services/api';
 import MessageContent from './MessageContent.vue';
+import { showToast } from './Toast.vue';
 
 export default {
   name: 'ChatInterface',
@@ -179,7 +180,7 @@ export default {
 
     const loadMessages = async (showLoading = true, scrollToBottomFlag = true) => {
       if (!groupId.value) {
-        alert('请输入群聊ID');
+        showToast('请输入群聊ID', 'warning');
         return;
       }
       
@@ -206,7 +207,7 @@ export default {
       } catch (error) {
         console.error('加载消息失败:', error);
         if (showLoading) {
-          alert('加载消息失败: ' + error.message);
+          showToast('加载消息失败: ' + error.message, 'error');
         }
       } finally {
         if (showLoading) {
@@ -419,7 +420,7 @@ export default {
     // 分析选中的消息
     const analyzeSelected = async () => {
       if (selectedMessages.value.length === 0) {
-        alert('请先选择要分析的消息');
+        showToast('请先选择要分析的消息', 'warning');
         return;
       }
       
@@ -485,7 +486,7 @@ export default {
 }
 
 .chat-header {
-  padding: 20px;
+  padding: 12px 20px;
   border-bottom: 1px solid #e0e0e0;
   background-color: #f8f9fa;
   display: flex;

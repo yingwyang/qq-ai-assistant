@@ -33,5 +33,17 @@ public class WebMvcConfig implements WebMvcConfigurer {
                 .setCachePeriod(3600); // 缓存1小时
         
         System.out.println("静态资源映射配置: /images/** -> file:" + absolutePath + "/");
+        
+        // 配置头像上传目录映射
+        File avatarDir = new File("uploads/avatars");
+        String avatarPath = avatarDir.getAbsolutePath();
+        if (!avatarDir.exists()) {
+            avatarDir.mkdirs();
+        }
+        registry.addResourceHandler("/uploads/avatars/**")
+                .addResourceLocations("file:" + avatarPath + "/")
+                .setCachePeriod(3600);
+        
+        System.out.println("静态资源映射配置: /uploads/avatars/** -> file:" + avatarPath + "/");
     }
 }
