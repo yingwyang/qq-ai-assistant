@@ -259,13 +259,13 @@ export default {
       loadRecentGroups();
       loadQqBindings();
       
-      // 每30秒自动刷新群聊列表和QQ绑定
+      // 每60秒自动刷新群聊列表和QQ绑定
       refreshInterval = setInterval(() => {
         if (props.isLoggedIn) {
           loadRecentGroups();
           loadQqBindings();
         }
-      }, 30000);
+      }, 60000);
     });
     
     // 组件卸载时清除定时器

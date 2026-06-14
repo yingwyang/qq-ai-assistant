@@ -118,6 +118,12 @@ public interface MessageRepository extends JpaRepository<Message, Long> {
     boolean existsByMessageId(String messageId);
 
     /**
+     * 获取指定 ID 之后的新消息（增量拉取）
+     */
+    @Query("SELECT m FROM Message m WHERE m.groupId = :groupId AND m.selfQq IN :selfQqList AND m.archived = false AND m.id > :afterId ORDER BY m.sendTime ASC")
+    List<Message> findNewMessagesAfterId(@Param("groupId") String groupId, @Param("selfQqList") List<String> selfQqList, @Param("afterId") Long afterId);
+
+    /**
      * 统计指定时间范围内的消息数量
      */
     @Query("SELECT COUNT(m) FROM Message m WHERE m.sendTime >= :start AND m.sendTime < :end")

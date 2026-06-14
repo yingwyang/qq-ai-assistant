@@ -41,7 +41,8 @@
     </div>
     
     <!-- 消息列表区域 -->
-    <div class="messages-area" ref="messagesContainer">
+    <div class="messages-area" ref="messagesContainer" @scroll="handleScroll">
+      <div v-if="isLoadingMore" class="load-more-hint">加载更早的消息...</div>
       <div v-if="messages.length === 0 && !isLoading" class="empty-state">
         <div class="empty-icon"><Icon name="chat" :size="48" /></div>
         <p>请输入群聊ID开始对话</p>
@@ -130,9 +131,13 @@
 <script>
 import { ref, nextTick, watch, onMounted, onUnmounted, computed } from 'vue';
 import Icon from './Icon.vue';
-import { messageApi, astrBotApi } from '../services/api';
+import { messageApi } from '../services/api';
 import MessageContent from './MessageContent.vue';
 import { showToast } from './Toast.vue';
+import { useMessageWebSocket } from '../composables/useMessageWebSocket';
+
+const PAGE_SIZE = 50;
+const FALLBACK_POLL_MS = 30000;
 
 export default {
   name: 'ChatInterface',
@@ -155,9 +160,12 @@ export default {
     const currentGroupName = ref('');
     const messagesContainer = ref(null);
     const previewImage = ref(null);
-    let autoRefreshInterval = null;
+    const currentPage = ref(0);
+    const totalMessages = ref(0);
+    const hasMore = ref(true);
+    const isLoadingMore = ref(false);
+    let fallbackPollInterval = null;
     
-    // 假设当前用户ID，实际应该从登录信息获取
     const currentUserId = 'current_user';
     
     // 选择模式相关状态
@@ -173,57 +181,147 @@ export default {
       return messages.value.filter(msg => selectedMessageIds.value.has(msg.id));
     });
 
+    const sortMessagesAsc = (list) => [...list].sort((a, b) => {
+      return new Date(a.sendTime || a.timestamp) - new Date(b.sendTime || b.timestamp);
+    });
+
+    const mergeMessage = (incoming) => {
+      const idx = messages.value.findIndex(m => m.id === incoming.id);
+      if (idx >= 0) {
+        messages.value[idx] = { ...messages.value[idx], ...incoming };
+      } else {
+        messages.value.push(incoming);
+        messages.value = sortMessagesAsc(messages.value);
+      }
+    };
+
+    const getLastMessageId = () => {
+      if (messages.value.length === 0) return 0;
+      return Math.max(...messages.value.map(m => m.id || 0));
+    };
+
+    const resolveGroupId = async () => {
+      if (groupId.value) return groupId.value;
+      const recentGroups = await messageApi.getRecentGroups();
+      if (recentGroups?.length > 0) {
+        groupId.value = String(recentGroups[0].groupId || recentGroups[0].id || '');
+      }
+      return groupId.value;
+    };
+
     const loadMessages = async (showLoading = true, scrollToBottomFlag = true) => {
-      // 如果 groupId 为空，尝试自动获取最近群聊
-      if (!groupId.value) {
-        try {
-          const recentGroups = await messageApi.getRecentGroups();
-          if (recentGroups && recentGroups.length > 0) {
-            groupId.value = String(recentGroups[0].groupId || recentGroups[0].id || '');
-            if (!groupId.value) {
-              showToast('获取群聊信息异常', 'warning');
-              return;
-            }
-          } else {
-            showToast('暂无最近群聊，请输入群聊ID', 'warning');
-            return;
-          }
-        } catch (error) {
-          console.error('获取最近群聊失败:', error);
-          showToast('请输入群聊ID', 'warning');
+      try {
+        const gid = await resolveGroupId();
+        if (!gid) {
+          showToast('暂无最近群聊，请选择群聊', 'warning');
           return;
         }
-      }
-      
-      // 只有在需要显示加载状态时才设置 isLoading
-      if (showLoading) {
-        isLoading.value = true;
-      }
-      try {
-        const response = await messageApi.getMessagesByGroupId(groupId.value);
-        // 按时间正序排列（旧消息在前）
-        messages.value = response.sort((a, b) => {
-          const timeA = new Date(a.sendTime || a.timestamp);
-          const timeB = new Date(b.sendTime || b.timestamp);
-          return timeA - timeB;
-        });
-        currentGroupName.value = response.length > 0 ? (response[0].groupName || '群聊 ' + groupId.value) : '群聊 ' + groupId.value;
-        
-        // 只有在需要时才滚动到底部
+
+        if (showLoading) isLoading.value = true;
+        currentPage.value = 0;
+        hasMore.value = true;
+
+        const response = await messageApi.getMessagesByGroupIdPaged(gid, 0, PAGE_SIZE);
+        const list = sortMessagesAsc(response.messages || []);
+        messages.value = list;
+        totalMessages.value = response.total || list.length;
+        hasMore.value = list.length < totalMessages.value;
+        currentGroupName.value = list.length > 0
+          ? (list[0].groupName || `群聊 ${gid}`)
+          : `群聊 ${gid}`;
+
+        wsSubscribe(gid);
+        wsConnect();
+
         if (scrollToBottomFlag) {
-          nextTick(() => {
-            scrollToBottom();
-          });
+          nextTick(scrollToBottom);
         }
       } catch (error) {
         console.error('加载消息失败:', error);
-        if (showLoading) {
-          showToast('加载消息失败: ' + error.message, 'error');
-        }
+        if (showLoading) showToast(`加载消息失败: ${error.message}`, 'error');
       } finally {
-        if (showLoading) {
-          isLoading.value = false;
+        if (showLoading) isLoading.value = false;
+      }
+    };
+
+    const loadMoreMessages = async () => {
+      if (!hasMore.value || isLoadingMore.value || !groupId.value) return;
+      isLoadingMore.value = true;
+      const container = messagesContainer.value;
+      const prevScrollHeight = container?.scrollHeight || 0;
+
+      try {
+        currentPage.value += 1;
+        const response = await messageApi.getMessagesByGroupIdPaged(
+          groupId.value, currentPage.value, PAGE_SIZE
+        );
+        const older = sortMessagesAsc(response.messages || []);
+        if (older.length === 0) {
+          hasMore.value = false;
+          return;
         }
+        const existingIds = new Set(messages.value.map(m => m.id));
+        const unique = older.filter(m => !existingIds.has(m.id));
+        messages.value = [...unique, ...messages.value];
+        hasMore.value = messages.value.length < (response.total || totalMessages.value);
+
+        nextTick(() => {
+          if (container) {
+            container.scrollTop = container.scrollHeight - prevScrollHeight;
+          }
+        });
+      } catch (error) {
+        console.error('加载更多消息失败:', error);
+        currentPage.value -= 1;
+      } finally {
+        isLoadingMore.value = false;
+      }
+    };
+
+    const fetchIncremental = async () => {
+      if (!groupId.value || messages.value.length === 0) return;
+      try {
+        const afterId = getLastMessageId();
+        const newMessages = await messageApi.getMessagesSince(groupId.value, afterId);
+        if (!newMessages?.length) return;
+        const wasAtBottom = isAtBottom();
+        newMessages.forEach(mergeMessage);
+        if (wasAtBottom) nextTick(scrollToBottom);
+      } catch (error) {
+        console.warn('增量拉取失败:', error);
+      }
+    };
+
+    const handleWebSocketMessage = (data) => {
+      if (!data?.message || data.groupId !== groupId.value) return;
+      const wasAtBottom = isAtBottom();
+      if (data.type === 'new_message') {
+        mergeMessage(data.message);
+        if (wasAtBottom) nextTick(scrollToBottom);
+      } else if (data.type === 'message_update') {
+        mergeMessage(data.message);
+      }
+    };
+
+    const { connect: wsConnect, subscribe: wsSubscribe, unsubscribe: wsUnsubscribe, disconnect: wsDisconnect } =
+      useMessageWebSocket(handleWebSocketMessage);
+
+    const startFallbackPoll = () => {
+      stopFallbackPoll();
+      fallbackPollInterval = setInterval(fetchIncremental, FALLBACK_POLL_MS);
+    };
+
+    const stopFallbackPoll = () => {
+      if (fallbackPollInterval) {
+        clearInterval(fallbackPollInterval);
+        fallbackPollInterval = null;
+      }
+    };
+
+    const handleScroll = () => {
+      if (!messagesContainer.value || isLoadingMore.value) return;
+      if (messagesContainer.value.scrollTop < 80 && hasMore.value) {
+        loadMoreMessages();
       }
     };
 
@@ -250,56 +348,7 @@ export default {
     };
 
     const handleAvatarError = (e) => {
-      // 头像加载失败时使用默认头像
       e.target.src = 'https://q.qlogo.cn/headimg_dl?dst_uin=0&spec=100';
-    };
-
-    const isImageMessage = (message) => {
-      // 判断是否是图片消息
-      if (message.messageType === 'IMAGE') return true;
-      // 检查内容是否包含 CQ:image 码
-      if (message.content && message.content.includes('[CQ:image')) return true;
-      return false;
-    };
-
-    const extractImageUrl = (content) => {
-      // 处理本地存储的图片路径
-      if (!content) {
-        console.log('extractImageUrl: content is empty');
-        return '';
-      }
-      
-      console.log('extractImageUrl: content =', content.substring(0, 100));
-      
-      // 如果 content 已经是本地图片路径（以 /images/ 开头），直接返回
-      if (content.startsWith('/images/')) {
-        console.log('extractImageUrl: local image path =', content);
-        return content;
-      }
-      
-      // 从 CQ 码中提取图片 URL
-      // 匹配 [CQ:image,...url=xxx...,file_size=...]
-      // URL 可能包含逗号，所以匹配到 ,file_size= 或 ]
-      const urlMatch = content.match(/url=([^\]]+?)(?:,file_size=|$)/);
-      if (urlMatch && urlMatch[1]) {
-        // 解码 HTML 实体
-        let url = urlMatch[1].replace(/&amp;/g, '&');
-        // 移除末尾可能的逗号
-        url = url.replace(/,$/, '');
-        console.log('extractImageUrl: matched with file_size pattern, url =', url.substring(0, 100));
-        return url;
-      }
-      
-      // 备用方案：直接匹配 url= 到下一个逗号或右方括号
-      const simpleMatch = content.match(/url=([^,\]]+)/);
-      if (simpleMatch && simpleMatch[1]) {
-        let url = simpleMatch[1].replace(/&amp;/g, '&');
-        console.log('extractImageUrl: matched with simple pattern, url =', url.substring(0, 100));
-        return url;
-      }
-      
-      console.log('extractImageUrl: no match found');
-      return '';
     };
 
     const openImage = (url) => {
@@ -330,61 +379,31 @@ export default {
     const isAtBottom = () => {
       if (!messagesContainer.value) return false;
       const container = messagesContainer.value;
-      const threshold = 10;
-      return container.scrollHeight - container.scrollTop - container.clientHeight <= threshold;
-    };
-    
-    // 启动自动刷新消息
-    const startAutoRefresh = () => {
-      // 先清除已有的定时器
-      stopAutoRefresh();
-      // 每5秒自动刷新一次消息（不显示加载状态，有新消息时自动滚动到底部）
-      autoRefreshInterval = setInterval(async () => {
-        if (groupId.value) {
-          const previousMessageCount = messages.value.length;
-          const wasAtBottom = isAtBottom();
-          await loadMessages(false, false);
-          // 如果之前在底部且有新消息，自动滚动到底部
-          if (wasAtBottom && messages.value.length > previousMessageCount) {
-            // 使用 setTimeout 确保 DOM 完全更新后再滚动
-            setTimeout(() => {
-              scrollToBottom();
-            }, 100);
-          }
-        }
-      }, 5000);
-    };
-    
-    // 停止自动刷新消息
-    const stopAutoRefresh = () => {
-      if (autoRefreshInterval) {
-        clearInterval(autoRefreshInterval);
-        autoRefreshInterval = null;
-      }
+      return container.scrollHeight - container.scrollTop - container.clientHeight <= 10;
     };
 
-    // 监听 props.groupId 变化
-    watch(() => props.groupId, (newGroupId) => {
+    watch(() => props.groupId, (newGroupId, oldGroupId) => {
+      if (oldGroupId) wsUnsubscribe(oldGroupId);
       if (newGroupId) {
         groupId.value = newGroupId;
         loadMessages();
-        // 启动自动刷新
-        startAutoRefresh();
+        startFallbackPoll();
       } else {
-        // 停止自动刷新
-        stopAutoRefresh();
+        stopFallbackPoll();
+        messages.value = [];
       }
     }, { immediate: true });
     
-    // 组件挂载时自动尝试加载消息（无 groupId 时会自动获取最近群聊）
     onMounted(() => {
-      loadMessages();
-      startAutoRefresh();
+      if (props.groupId) {
+        loadMessages();
+      }
+      startFallbackPoll();
     });
     
-    // 组件卸载时停止自动刷新
     onUnmounted(() => {
-      stopAutoRefresh();
+      stopFallbackPoll();
+      wsDisconnect();
     });
     
     // 切换选择模式
@@ -461,7 +480,9 @@ export default {
       currentGroupName,
       messagesContainer,
       previewImage,
+      isLoadingMore,
       loadMessages,
+      handleScroll,
       isSelfMessage,
       getAvatar,
       handleAvatarError,
@@ -547,6 +568,13 @@ export default {
   flex: 1;
   overflow-y: auto;
   padding: 20px;
+}
+
+.load-more-hint {
+  text-align: center;
+  color: #888;
+  font-size: 13px;
+  padding: 8px 0 12px;
 }
 
 .empty-state, .loading-state {

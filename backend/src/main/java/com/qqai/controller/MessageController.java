@@ -151,6 +151,40 @@ public class MessageController {
         return ResponseEntity.ok(response);
     }
 
+    @GetMapping("/group/{groupId}/since")
+    public ResponseEntity<?> getMessagesSince(
+            @PathVariable String groupId,
+            @RequestParam Long afterId) {
+        Long userId = getCurrentUserId();
+        if (userId == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("error", "未登录", "code", 401));
+        }
+
+        List<String> userQqList = getCurrentUserQqBindings();
+        if (userQqList.isEmpty()) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(Map.of("error", "请先绑定QQ账号", "code", 403));
+        }
+
+        boolean hasAccess = false;
+        for (String qq : userQqList) {
+            List<String> userGroupIds = messageService.getUserGroupIds(qq);
+            if (userGroupIds.contains(groupId)) {
+                hasAccess = true;
+                break;
+            }
+        }
+
+        if (!hasAccess) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(Map.of("error", "无权访问该群聊", "code", 403));
+        }
+
+        List<Message> messages = messageService.getMessagesSinceId(groupId, userQqList, afterId);
+        return ResponseEntity.ok(messages);
+    }
+
     @PostMapping("/process")
     public void processAllMessages() {
         messageService.processAllUnprocessedMessages();

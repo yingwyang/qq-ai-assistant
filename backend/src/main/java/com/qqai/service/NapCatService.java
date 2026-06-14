@@ -1,12 +1,12 @@
 package com.qqai.service;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.apache.hc.client5.http.classic.methods.HttpGet;
 import org.apache.hc.client5.http.classic.methods.HttpPost;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpResponse;
-import org.apache.hc.client5.http.impl.classic.HttpClients;
 import org.apache.hc.core5.http.io.entity.StringEntity;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONArray;
@@ -26,6 +26,9 @@ public class NapCatService {
 
     @Value("${napcat.token}")
     private String napcatToken;
+
+    @Autowired
+    private CloseableHttpClient httpClient;
 
     private String credential;
 
@@ -55,7 +58,7 @@ public class NapCatService {
     }
 
     public String getLoginQrCode() throws Exception {
-        CloseableHttpClient httpClient = HttpClients.createDefault();
+        CloseableHttpClient httpClient = this.httpClient;
         
         // 尝试多个可能的 API 端点
         String[] possibleEndpoints = {
@@ -101,8 +104,6 @@ public class NapCatService {
                 System.out.println("QR endpoint " + endpoint + " failed: " + e.getMessage());
             }
         }
-        
-        httpClient.close();
         
         // 如果 API 调用都失败，返回本地二维码图片路径
         return "local:" + getQrCodePath();
@@ -163,7 +164,7 @@ public class NapCatService {
         
         // 方法3: 尝试调用 NapCat API 检查登录状态（备用方案）
         System.out.println("Method 3: Trying API endpoints...");
-        CloseableHttpClient httpClient = HttpClients.createDefault();
+        CloseableHttpClient httpClient = this.httpClient;
         
         // NapCat 使用 URL 参数传递 token: ?token=xxx
         String authParam = "?token=" + napcatToken;
@@ -237,8 +238,6 @@ public class NapCatService {
             }
         }
         
-        httpClient.close();
-        
         System.out.println("❌ All methods failed, returning false");
         return false;
     }
@@ -251,13 +250,12 @@ public class NapCatService {
     
     private boolean isNapCatApiAccessible() {
         try {
-            CloseableHttpClient httpClient = HttpClients.createDefault();
+            CloseableHttpClient httpClient = this.httpClient;
             // 尝试访问 NapCat 的 WebUI 端点，使用 URL 参数传递 token
             HttpGet httpGet = new HttpGet(napcatApiUrl + "/api/QQLogin/CheckLoginStatus?token=" + napcatToken);
             
             try (CloseableHttpResponse response = httpClient.execute(httpGet)) {
                 int statusCode = response.getCode();
-                httpClient.close();
                 System.out.println("NapCat API check status: " + statusCode);
                 return statusCode == 200;
             }
@@ -379,7 +377,7 @@ public class NapCatService {
      * 获取群列表
      */
     public JSONArray getGroupList() throws Exception {
-        CloseableHttpClient httpClient = HttpClients.createDefault();
+        CloseableHttpClient httpClient = this.httpClient;
         HttpPost httpPost = new HttpPost(napcatApiUrl + "/api/get_group_list");
         httpPost.setHeader("Content-Type", "application/json");
         httpPost.setHeader("Authorization", "Bearer " + napcatToken);
@@ -405,8 +403,6 @@ public class NapCatService {
                 return json.getJSONArray("data");
             }
             return new JSONArray();
-        } finally {
-            httpClient.close();
         }
     }
 
@@ -414,7 +410,7 @@ public class NapCatService {
      * 获取群历史消息
      */
     public JSONArray getGroupMessageHistory(long groupId, int count) throws Exception {
-        CloseableHttpClient httpClient = HttpClients.createDefault();
+        CloseableHttpClient httpClient = this.httpClient;
         HttpPost httpPost = new HttpPost(napcatApiUrl + "/api/get_group_msg_history");
         httpPost.setHeader("Content-Type", "application/json");
         httpPost.setHeader("Authorization", "Bearer " + napcatToken);
@@ -444,8 +440,6 @@ public class NapCatService {
                 }
             }
             return new JSONArray();
-        } finally {
-            httpClient.close();
         }
     }
 }

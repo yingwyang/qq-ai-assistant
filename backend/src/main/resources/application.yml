@@ -1,13 +1,13 @@
 spring:
   datasource:
-    url: jdbc:mysql://localhost:3306/qq_chat?useSSL=false&serverTimezone=Asia/Shanghai&characterEncoding=UTF-8&allowPublicKeyRetrieval=true
-    username: root
-    password: ***REMOVED***
+    url: ${DB_URL:jdbc:mysql://localhost:3306/qq_chat?useSSL=false&serverTimezone=Asia/Shanghai&characterEncoding=UTF-8&allowPublicKeyRetrieval=true}
+    username: ${DB_USERNAME:root}
+    password: ${DB_PASSWORD:***REMOVED***}
     driver-class-name: com.mysql.cj.jdbc.Driver
   jpa:
     hibernate:
       ddl-auto: update
-    show-sql: true
+    show-sql: ${JPA_SHOW_SQL:false}
     properties:
       hibernate:
         dialect: org.hibernate.dialect.MySQLDialect
@@ -24,33 +24,37 @@ spring:
       file-size-threshold: 0
 
 server:
-  port: 8081
+  port: ${SERVER_PORT:8081}
 
 # AstrBot配置
 astrbot:
-  api-url: http://localhost:6185
-  token: abk_6CJKaVnl8233_QVKJr_3ID1ns8cd5EIeCtSv31YjV84
-  data-path: D:/ai/Documents/qq-web/Astrbot/data
+  api-url: ${ASTRBOT_API_URL:http://localhost:6185}
+  token: ${ASTRBOT_TOKEN:abk_6CJKaVnl8233_QVKJr_3ID1ns8cd5EIeCtSv31YjV84}
+  data-path: ${ASTRBOT_DATA_PATH:D:/ai/Documents/qq-web/Astrbot/data}
 
 # NapCat配置
 napcat:
-  api-url: http://localhost:6099
-  token: ***REMOVED***
-  webhook-token: ***REMOVED***
-  self-qq: 3649735451  # 登录账号的QQ号，用于区分登录账号发送的消息
+  api-url: ${NAPCAT_API_URL:http://localhost:6099}
+  token: ${NAPCAT_TOKEN:***REMOVED***}
+  webhook-token: ${NAPCAT_WEBHOOK_TOKEN:***REMOVED***}
+  self-qq: ${NAPCAT_SELF_QQ:3649735451}
 
 # GPT-SoVITS配置
 gpt-sovits:
-  api-url: http://localhost:7860
-  token: your-gpt-sovits-token
+  api-url: ${GPT_SOVITS_API_URL:http://localhost:7860}
+  token: ${GPT_SOVITS_TOKEN:your-gpt-sovits-token}
 
 # MinIO配置
 minio:
-  endpoint: http://localhost:9000
-  access-key: admin
-  secret-key: password123
-  bucket-name: qq-chat-files
+  endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
+  access-key: ${MINIO_ACCESS_KEY:admin}
+  secret-key: ${MINIO_SECRET_KEY:password123}
+  bucket-name: ${MINIO_BUCKET:qq-chat-files}
   secure: false
+
+# FFmpeg配置
+ffmpeg:
+  path: ${FFMPEG_PATH:D:/ai/Documents/qq-web/ffmpeg-8.1-essentials_build/bin/ffmpeg.exe}
 
 # 文件上传配置
 file:
@@ -58,21 +62,16 @@ file:
     max-size: 100MB
     allowed-types: image/*,video/*,audio/*,application/*
   storage:
-    # 本地临时存储路径
     temp-path: ./uploads/temp
-    # 归档存储路径
     archive-path: ./uploads/archive
-    # 本地图片存储路径
     local-path: ./uploads/images
 
 # 消息归档配置
 archive:
-  # 多少天前的消息需要归档
   days-before: 90
-  # 每天几点执行归档任务
   cron: 0 0 2 * * ?
 
 # JWT配置
 jwt:
-  secret: your-256-bit-secret-key-for-jwt-signing-qq-ai-assistant
-  expiration: 86400000  # 24小时，单位毫秒
+  secret: ${JWT_SECRET:your-256-bit-secret-key-for-jwt-signing-qq-ai-assistant}
+  expiration: ${JWT_EXPIRATION:86400000}
