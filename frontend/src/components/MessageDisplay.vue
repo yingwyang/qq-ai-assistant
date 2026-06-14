@@ -46,9 +46,25 @@ export default {
     const hasAttemptedLoad = ref(false);
 
     const loadMessages = async () => {
+      // 如果 groupId 为空，尝试自动获取最近群聊
       if (!groupId.value) {
-        showToast('请输入群聊ID', 'warning');
-        return;
+        try {
+          const recentGroups = await messageApi.getRecentGroups();
+          if (recentGroups && recentGroups.length > 0) {
+            groupId.value = String(recentGroups[0].groupId || recentGroups[0].id || '');
+            if (!groupId.value) {
+              showToast('获取群聊信息异常', 'warning');
+              return;
+            }
+          } else {
+            showToast('暂无最近群聊，请输入群聊ID', 'warning');
+            return;
+          }
+        } catch (error) {
+          console.error('获取最近群聊失败:', error);
+          showToast('请输入群聊ID', 'warning');
+          return;
+        }
       }
 
       isLoading.value = true;

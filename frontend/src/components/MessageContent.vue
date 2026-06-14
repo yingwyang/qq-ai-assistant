@@ -18,12 +18,15 @@
     
     <!-- 视频消息 -->
     <div v-else-if="isVideoMessage" class="message-video">
-      <div class="video-icon">🎬</div>
-      <div class="video-info">
-        <span class="video-label">视频消息</span>
-        <span class="video-size">{{ formatFileSize(videoSize) }}</span>
-      </div>
       <video v-if="videoUrl" :src="videoUrl" controls class="video-player"></video>
+      <div v-else class="video-placeholder">
+        <svg class="video-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <rect x="2" y="4" width="20" height="16" rx="2"/>
+          <polygon points="10,8 16,12 10,16"/>
+        </svg>
+        <span class="video-label">视频消息</span>
+        <span v-if="videoSize" class="video-size">{{ formatFileSize(videoSize) }}</span>
+      </div>
     </div>
     
     <!-- 表情消息 -->
@@ -411,30 +414,42 @@ export default {
 }
 
 .message-video {
+  border-radius: 8px;
+  overflow: hidden;
+  max-width: 280px;
+}
+
+.message-video .video-player {
+  width: 100%;
+  border-radius: 8px;
+  display: block;
+}
+
+.message-video .video-placeholder {
   display: flex;
   flex-direction: column;
+  align-items: center;
+  justify-content: center;
   gap: 8px;
-  padding: 10px;
+  padding: 24px;
   background-color: #f0f0f0;
   border-radius: 8px;
 }
 
-.message-video .video-icon {
-  font-size: 24px;
+.video-icon-svg {
+  width: 40px;
+  height: 40px;
+  color: #999;
 }
 
-.message-video .video-info {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
+.message-video .video-label {
+  font-size: 13px;
   color: #666;
 }
 
-.message-video .video-player {
-  max-width: 100%;
-  max-height: 200px;
-  border-radius: 8px;
+.message-video .video-size {
+  font-size: 11px;
+  color: #999;
 }
 
 .message-face {

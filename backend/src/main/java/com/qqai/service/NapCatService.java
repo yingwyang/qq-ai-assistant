@@ -9,6 +9,7 @@ import org.apache.hc.client5.http.impl.classic.CloseableHttpResponse;
 import org.apache.hc.client5.http.impl.classic.HttpClients;
 import org.apache.hc.core5.http.io.entity.StringEntity;
 import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -272,11 +273,43 @@ public class NapCatService {
         return new File(configPath).getCanonicalFile().getAbsolutePath();
     }
 
+    private String getLastQqNumber() {
+        try {
+            String configPath = getNapCatConfigPath();
+            File configDir = new File(configPath);
+            if (!configDir.exists() || !configDir.isDirectory()) {
+                return null;
+            }
+            File[] files = configDir.listFiles((dir, name) -> name.startsWith("napcat_") && name.endsWith(".json") && !name.startsWith("napcat_protocol_"));
+            if (files == null || files.length == 0) {
+                return null;
+            }
+            // 按修改时间排序，取最新的
+            File latestFile = files[0];
+            for (File file : files) {
+                if (file.lastModified() > latestFile.lastModified()) {
+                    latestFile = file;
+                }
+            }
+            String fileName = latestFile.getName();
+            // napcat_2488130337.json -> 2488130337
+            String qq = fileName.replace("napcat_", "").replace(".json", "");
+            return qq.matches("\\d+") ? qq : null;
+        } catch (Exception e) {
+            System.err.println("获取最近QQ号失败: " + e.getMessage());
+            return null;
+        }
+    }
+
     private Process napcatProcess;
 
     public void startNapCat() throws Exception {
+        startNapCat(false);
+    }
+
+    public void startNapCat(boolean autoLogin) throws Exception {
         try {
-            // NapCat 启动脚本路径 - 使用相对路径，位于项目根目录下的 napcat/NapCat.Shell 文件夹
+            // NapCat 启动脚本路径 - 使用相对路径
             String projectRoot = System.getProperty("user.dir");
             String napcatPath = projectRoot + File.separator + ".." + File.separator + ".." + File.separator + "napcat" + File.separator + "NapCat.Shell";
             File napcatDir = new File(napcatPath).getCanonicalFile();
@@ -287,8 +320,16 @@ public class NapCatService {
                 throw new IOException("NapCat launcher.bat not found at: " + launcherPath);
             }
             
-            // 构建进程
-            ProcessBuilder processBuilder = new ProcessBuilder("cmd.exe", "/c", "start", "cmd.exe", "/k", launcherPath);
+            // 构建进程命令
+            String qq = autoLogin ? getLastQqNumber() : null;
+            ProcessBuilder processBuilder;
+            if (qq != null && !qq.isEmpty()) {
+                processBuilder = new ProcessBuilder("cmd.exe", "/c", "start", "cmd.exe", "/k", launcherPath, qq);
+                System.out.println("Starting NapCat with QQ: " + qq);
+            } else {
+                processBuilder = new ProcessBuilder("cmd.exe", "/c", "start", "cmd.exe", "/k", launcherPath);
+                System.out.println("Starting NapCat without QQ number (QR code login)");
+            }
             processBuilder.directory(napcatDir);
             processBuilder.inheritIO();
             
@@ -332,5 +373,79 @@ public class NapCatService {
         String projectRoot = System.getProperty("user.dir");
         String qrCodePath = projectRoot + File.separator + ".." + File.separator + ".." + File.separator + "napcat" + File.separator + "NapCat.Shell" + File.separator + "cache" + File.separator + "qrcode.png";
         return new File(qrCodePath).getCanonicalFile().getAbsolutePath();
+    }
+
+    /**
+     * 获取群列表
+     */
+    public JSONArray getGroupList() throws Exception {
+        CloseableHttpClient httpClient = HttpClients.createDefault();
+        HttpPost httpPost = new HttpPost(napcatApiUrl + "/api/get_group_list");
+        httpPost.setHeader("Content-Type", "application/json");
+        httpPost.setHeader("Authorization", "Bearer " + napcatToken);
+
+        JSONObject body = new JSONObject();
+        body.put("no_cache", false);
+        httpPost.setEntity(new StringEntity(body.toJSONString()));
+
+        try (CloseableHttpResponse response = httpClient.execute(httpPost)) {
+            BufferedReader reader = new BufferedReader(
+                new InputStreamReader(response.getEntity().getContent())
+            );
+            StringBuilder responseContent = new StringBuilder();
+            String line;
+            while ((line = reader.readLine()) != null) {
+                responseContent.append(line);
+            }
+            String responseStr = responseContent.toString();
+            System.out.println("获取群列表响应: " + responseStr);
+
+            JSONObject json = JSON.parseObject(responseStr);
+            if ("ok".equals(json.getString("status")) && json.containsKey("data")) {
+                return json.getJSONArray("data");
+            }
+            return new JSONArray();
+        } finally {
+            httpClient.close();
+        }
+    }
+
+    /**
+     * 获取群历史消息
+     */
+    public JSONArray getGroupMessageHistory(long groupId, int count) throws Exception {
+        CloseableHttpClient httpClient = HttpClients.createDefault();
+        HttpPost httpPost = new HttpPost(napcatApiUrl + "/api/get_group_msg_history");
+        httpPost.setHeader("Content-Type", "application/json");
+        httpPost.setHeader("Authorization", "Bearer " + napcatToken);
+
+        JSONObject body = new JSONObject();
+        body.put("group_id", groupId);
+        body.put("count", count);
+        httpPost.setEntity(new StringEntity(body.toJSONString()));
+
+        try (CloseableHttpResponse response = httpClient.execute(httpPost)) {
+            BufferedReader reader = new BufferedReader(
+                new InputStreamReader(response.getEntity().getContent())
+            );
+            StringBuilder responseContent = new StringBuilder();
+            String line;
+            while ((line = reader.readLine()) != null) {
+                responseContent.append(line);
+            }
+            String responseStr = responseContent.toString();
+            System.out.println("获取群" + groupId + "历史消息响应: " + (responseStr.length() > 200 ? responseStr.substring(0, 200) + "..." : responseStr));
+
+            JSONObject json = JSON.parseObject(responseStr);
+            if ("ok".equals(json.getString("status")) && json.containsKey("data")) {
+                JSONObject data = json.getJSONObject("data");
+                if (data.containsKey("messages")) {
+                    return data.getJSONArray("messages");
+                }
+            }
+            return new JSONArray();
+        } finally {
+            httpClient.close();
+        }
     }
 }

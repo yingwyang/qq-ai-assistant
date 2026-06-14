@@ -10,98 +10,65 @@
         <div class="system-control-section">
           <h3>系统控制</h3>
           
-          <!-- 组件状态显示 -->
-          <div class="component-status">
-            <div class="status-item" :class="{ active: componentStatus.astrbot?.running }">
-              <span class="status-dot"></span>
-              <span>AstrBot</span>
-              <span class="status-text">{{ componentStatus.astrbot?.running ? '运行中' : '已停止' }}</span>
-            </div>
-            <div class="status-item" :class="{ active: componentStatus.napcat?.running }">
-              <span class="status-dot"></span>
-              <span>NapCat</span>
-              <span class="status-text">{{ componentStatus.napcat?.running ? '运行中' : '已停止' }}</span>
-            </div>
-            <div class="status-item" :class="{ active: componentStatus.gptsovits?.running }">
-              <span class="status-dot"></span>
-              <span>GPT-SoVITS</span>
-              <span class="status-text">{{ componentStatus.gptsovits?.running ? '运行中' : '已停止' }}</span>
-            </div>
-          </div>
-
-          <!-- 分别控制按钮 -->
+          <!-- 分别启动各组件 -->
           <div class="component-buttons">
             <div class="component-row">
               <span class="component-name">AstrBot</span>
               <button 
                 @click="startAstrBot" 
-                class="btn-component"
-                :disabled="isStartingAstrBot || componentStatus.astrbot?.running"
+                class="btn-component btn-start" 
+                :disabled="isStartingAstrBot"
               >
-                {{ isStartingAstrBot ? '启动中...' : '启动' }}
+                <span v-if="isStartingAstrBot">启动中...</span>
+                <span v-else>启动</span>
               </button>
               <button 
                 @click="stopAstrBot" 
-                class="btn-component btn-stop"
-                :disabled="isStoppingAstrBot || !componentStatus.astrbot?.running"
+                class="btn-component btn-stop" 
+                :disabled="isStoppingAstrBot"
               >
-                {{ isStoppingAstrBot ? '停止中...' : '停止' }}
+                <span v-if="isStoppingAstrBot">停止中...</span>
+                <span v-else>停止</span>
               </button>
             </div>
             <div class="component-row">
               <span class="component-name">NapCat</span>
               <button 
                 @click="startNapCat" 
-                class="btn-component"
-                :disabled="isStartingNapCat || componentStatus.napcat?.running"
+                class="btn-component btn-start" 
+                :disabled="isStartingNapCat"
               >
-                {{ isStartingNapCat ? '启动中...' : '启动' }}
+                <span v-if="isStartingNapCat">启动中...</span>
+                <span v-else>启动</span>
               </button>
               <button 
                 @click="stopNapCat" 
-                class="btn-component btn-stop"
-                :disabled="isStoppingNapCat || !componentStatus.napcat?.running"
+                class="btn-component btn-stop" 
+                :disabled="isStoppingNapCat"
               >
-                {{ isStoppingNapCat ? '停止中...' : '停止' }}
+                <span v-if="isStoppingNapCat">停止中...</span>
+                <span v-else>停止</span>
               </button>
             </div>
             <div class="component-row">
               <span class="component-name">GPT-SoVITS</span>
               <button 
                 @click="startGptSovits" 
-                class="btn-component"
-                :disabled="isStartingGptSovits || componentStatus.gptsovits?.running"
+                class="btn-component btn-start" 
+                :disabled="isStartingGptSovits"
               >
-                {{ isStartingGptSovits ? '启动中...' : '启动' }}
+                <span v-if="isStartingGptSovits">启动中...</span>
+                <span v-else>启动</span>
               </button>
               <button 
                 @click="stopGptSovits" 
-                class="btn-component btn-stop"
-                :disabled="isStoppingGptSovits || !componentStatus.gptsovits?.running"
+                class="btn-component btn-stop" 
+                :disabled="isStoppingGptSovits"
               >
-                {{ isStoppingGptSovits ? '停止中...' : '停止' }}
+                <span v-if="isStoppingGptSovits">停止中...</span>
+                <span v-else>停止</span>
               </button>
             </div>
-          </div>
-
-          <!-- 一键控制按钮 -->
-          <div class="system-buttons">
-            <button 
-              @click="startAllComponents" 
-              class="btn-system" 
-              :disabled="isStarting"
-            >
-              <span v-if="isStarting">启动中...</span>
-              <span v-else>启动所有组件</span>
-            </button>
-            <button 
-              @click="stopAllComponents" 
-              class="btn-system btn-stop"
-              :disabled="isStopping"
-            >
-              <span v-if="isStopping">停止中...</span>
-              <span v-else>停止所有组件</span>
-            </button>
           </div>
           <div v-if="systemMessage" class="system-message" :class="{ success: systemMessageType === 'success', error: systemMessageType === 'error' }">
             {{ systemMessage }}
@@ -111,22 +78,19 @@
         <!-- 登录模块 -->
         <div class="login-section">
           <h3>登录 NapCat</h3>
-          <div v-if="!isLoggedIn" class="login-container">
-            <div v-if="serviceAvailable && qrCode" class="qrcode-container">
+          <div class="login-container">
+            <div v-if="qrCode" class="qrcode-container">
               <img :src="qrCode" alt="NapCat登录二维码" class="qrcode" />
               <p>请使用QQ扫码登录</p>
               <button @click="refreshQrCode" class="btn-refresh">刷新二维码</button>
-            </div>
-            <div v-else-if="!serviceAvailable" class="loading">
-              <p>NapCat 服务未启动，请点击"启动所有组件"</p>
+              <label class="auto-login-label">
+                <input type="checkbox" v-model="autoLogin" @change="onAutoLoginChange" />
+                下次自动登录
+              </label>
             </div>
             <div v-else class="loading">
               <p>获取登录二维码中...</p>
             </div>
-          </div>
-          <div v-else class="logged-in">
-            <p>✅ 已登录成功！</p>
-            <button @click="closeModal" class="btn-confirm">确定</button>
           </div>
         </div>
       </div>
@@ -155,6 +119,8 @@ export default {
     const isStopping = ref(false);
     const systemMessage = ref('');
     const systemMessageType = ref('');
+    const qrCodeError = ref(false);
+    const autoLogin = ref(localStorage.getItem('napcat_auto_login') === 'true');
     
     // 组件状态
     const componentStatus = ref({
@@ -175,10 +141,22 @@ export default {
 
     const getQrCode = async () => {
       try {
-        qrCode.value = '/api/system/napcat/qrcode-image?timestamp=' + new Date().getTime();
+        qrCodeError.value = false;
+        // 使用完整URL，添加时间戳防止缓存
+        const timestamp = new Date().getTime();
+        qrCode.value = `http://localhost:8081/api/system/napcat/qrcode-image?timestamp=${timestamp}`;
       } catch (error) {
         console.error('获取二维码失败:', error);
+        qrCodeError.value = true;
       }
+    };
+
+    const onQrCodeError = () => {
+      qrCodeError.value = true;
+    };
+
+    const onAutoLoginChange = () => {
+      localStorage.setItem('napcat_auto_login', autoLogin.value);
     };
 
     const checkServiceHealth = async () => {
@@ -375,11 +353,14 @@ export default {
       if (props.visible) {
         await getComponentStatus();
         await checkServiceHealth();
+        // 如果勾选了自动登录且 NapCat 未运行，自动启动
+        if (autoLogin.value && !componentStatus.value.napcat.running) {
+          await startNapCat();
+        }
+        // 无论服务是否可用，都尝试获取二维码
+        getQrCode();
         if (serviceAvailable.value) {
           await checkLoginStatus();
-          if (!isLoggedIn.value) {
-            getQrCode();
-          }
         }
       }
     };
@@ -416,6 +397,8 @@ export default {
       isStopping,
       systemMessage,
       systemMessageType,
+      qrCodeError,
+      autoLogin,
       componentStatus,
       isStartingAstrBot,
       isStoppingAstrBot,
@@ -424,6 +407,8 @@ export default {
       isStartingGptSovits,
       isStoppingGptSovits,
       refreshQrCode,
+      onQrCodeError,
+      onAutoLoginChange,
       startAllComponents,
       stopAllComponents,
       startAstrBot,
@@ -514,41 +499,59 @@ export default {
   padding-bottom: 8px;
 }
 
-.system-buttons {
+.component-buttons {
   display: flex;
-  gap: 10px;
+  flex-direction: column;
+  gap: 8px;
   margin-bottom: 15px;
 }
 
-.btn-system {
+.component-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background-color: #f8f9fa;
+  border-radius: 6px;
+}
+
+.component-name {
   flex: 1;
-  padding: 10px 15px;
+  font-size: 14px;
+  font-weight: 500;
+  color: #2c3e50;
+}
+
+.btn-component {
+  padding: 6px 14px;
   border: none;
   border-radius: 4px;
   cursor: pointer;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 500;
   transition: all 0.2s;
+  min-width: 60px;
 }
 
-.btn-system:not(:disabled) {
+.btn-component.btn-start:not(:disabled) {
   background-color: #3498db;
   color: white;
 }
 
-.btn-system:not(:disabled):hover {
+.btn-component.btn-start:not(:disabled):hover {
   background-color: #2980b9;
 }
 
-.btn-system.btn-stop:not(:disabled) {
+.btn-component.btn-stop:not(:disabled) {
   background-color: #e74c3c;
+  color: white;
 }
 
-.btn-system.btn-stop:not(:disabled):hover {
+.btn-component.btn-stop:not(:disabled):hover {
   background-color: #c0392b;
 }
 
-.btn-system:disabled {
+.btn-component:disabled {
   background-color: #bdc3c7;
   color: #7f8c8d;
   cursor: not-allowed;
@@ -610,6 +613,22 @@ export default {
 
 .btn-refresh:hover {
   background-color: #e9ecef;
+}
+
+.auto-login-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 12px;
+  font-size: 13px;
+  color: #666;
+  cursor: pointer;
+}
+
+.auto-login-label input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
 }
 
 .logged-in {

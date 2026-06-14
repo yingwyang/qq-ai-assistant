@@ -3,16 +3,9 @@
     <!-- 顶部群聊选择器 -->
     <div class="chat-header">
       <div class="group-selector">
-        <input 
-          type="text" 
-          v-model="groupId" 
-          placeholder="输入群聊ID" 
-          class="group-input"
-          @keyup.enter="loadMessages"
-        />
-        <button @click="loadMessages" class="btn-load" :disabled="isLoading">
-          <span v-if="isLoading">加载中...</span>
-          <span v-else>加载消息</span>
+        <button @click="loadMessages" class="btn-load" :disabled="isLoading" title="刷新消息">
+          <Icon v-if="!isLoading" name="refresh" :size="16" />
+          <span v-else>加载中...</span>
         </button>
         <button 
           @click="toggleSelectionMode" 
@@ -37,12 +30,12 @@
       </div>
       <div class="selection-actions">
         <button @click="clearSelection" class="btn-clear">清空</button>
-        <button 
-          @click="analyzeSelected" 
+        <button
+          @click="analyzeSelected"
           :disabled="selectedMessages.length === 0"
           class="btn-analyze"
         >
-          🤖 AI 分析
+          <Icon name="robot" :size="14" /> AI 分析
         </button>
       </div>
     </div>
@@ -50,7 +43,7 @@
     <!-- 消息列表区域 -->
     <div class="messages-area" ref="messagesContainer">
       <div v-if="messages.length === 0 && !isLoading" class="empty-state">
-        <div class="empty-icon">💬</div>
+        <div class="empty-icon"><Icon name="chat" :size="48" /></div>
         <p>请输入群聊ID开始对话</p>
       </div>
       
@@ -98,7 +91,7 @@
               <!-- AI 总结（左对齐） -->
               <div v-if="message.aiSummary" class="ai-summary">
                 <div class="ai-summary-header">
-                  <span class="ai-icon">🤖</span>
+                  <span class="ai-icon"><Icon name="robot" :size="14" /></span>
                   <span>AI 总结</span>
                 </div>
                 <div class="ai-summary-content">{{ message.aiSummary }}</div>
@@ -136,6 +129,7 @@
 
 <script>
 import { ref, nextTick, watch, onMounted, onUnmounted, computed } from 'vue';
+import Icon from './Icon.vue';
 import { messageApi, astrBotApi } from '../services/api';
 import MessageContent from './MessageContent.vue';
 import { showToast } from './Toast.vue';
@@ -143,6 +137,7 @@ import { showToast } from './Toast.vue';
 export default {
   name: 'ChatInterface',
   components: {
+    Icon,
     MessageContent
   },
   props: {
@@ -179,9 +174,25 @@ export default {
     });
 
     const loadMessages = async (showLoading = true, scrollToBottomFlag = true) => {
+      // 如果 groupId 为空，尝试自动获取最近群聊
       if (!groupId.value) {
-        showToast('请输入群聊ID', 'warning');
-        return;
+        try {
+          const recentGroups = await messageApi.getRecentGroups();
+          if (recentGroups && recentGroups.length > 0) {
+            groupId.value = String(recentGroups[0].groupId || recentGroups[0].id || '');
+            if (!groupId.value) {
+              showToast('获取群聊信息异常', 'warning');
+              return;
+            }
+          } else {
+            showToast('暂无最近群聊，请输入群聊ID', 'warning');
+            return;
+          }
+        } catch (error) {
+          console.error('获取最近群聊失败:', error);
+          showToast('请输入群聊ID', 'warning');
+          return;
+        }
       }
       
       // 只有在需要显示加载状态时才设置 isLoading
@@ -365,12 +376,10 @@ export default {
       }
     }, { immediate: true });
     
-    // 组件挂载时，如果有 groupId 则加载消息
+    // 组件挂载时自动尝试加载消息（无 groupId 时会自动获取最近群聊）
     onMounted(() => {
-      if (groupId.value) {
-        loadMessages();
-        startAutoRefresh();
-      }
+      loadMessages();
+      startAutoRefresh();
     });
     
     // 组件卸载时停止自动刷新
@@ -486,12 +495,13 @@ export default {
 }
 
 .chat-header {
-  padding: 12px 20px;
+  padding: 8px 16px;
   border-bottom: 1px solid #e0e0e0;
   background-color: #f8f9fa;
   display: flex;
   justify-content: space-between;
   align-items: center;
+  min-height: 48px;
 }
 
 .group-selector {
@@ -501,27 +511,25 @@ export default {
   max-width: 400px;
 }
 
-.group-input {
-  flex: 1;
-  padding: 10px;
-  border: 1px solid #dee2e6;
-  border-radius: 4px;
-  font-size: 14px;
-}
-
 .btn-load {
-  padding: 10px 20px;
-  background-color: #3498db;
-  color: white;
-  border: none;
-  border-radius: 4px;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: transparent;
+  color: #3498db;
+  border: 1px solid #3498db;
+  border-radius: 50%;
   cursor: pointer;
-  font-size: 14px;
-  transition: background-color 0.2s;
+  font-size: 13px;
+  transition: all 0.2s;
 }
 
 .btn-load:hover:not(:disabled) {
-  background-color: #2980b9;
+  background-color: #3498db;
+  color: white;
 }
 
 .btn-load:disabled {
@@ -532,7 +540,7 @@ export default {
 .current-group {
   font-weight: 500;
   color: #2c3e50;
-  font-size: 16px;
+  font-size: 14px;
 }
 
 .messages-area {
@@ -737,13 +745,13 @@ export default {
 
 /* 选择模式按钮 */
 .btn-selection {
-  padding: 10px 16px;
+  padding: 6px 12px;
   background-color: #9b59b6;
   color: white;
   border: none;
   border-radius: 4px;
   cursor: pointer;
-  font-size: 14px;
+  font-size: 13px;
   transition: all 0.2s;
   white-space: nowrap;
 }

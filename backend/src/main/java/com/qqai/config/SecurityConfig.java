@@ -33,6 +33,15 @@ public class SecurityConfig {
                 // 公开端点
                 .requestMatchers("/api/auth/**").permitAll()
                 .requestMatchers("/api/system/health").permitAll()
+                .requestMatchers("/api/system/napcat/qrcode-image").permitAll()
+                .requestMatchers("/api/system/napcat/login-status").permitAll()
+                .requestMatchers("/api/system/component-status").permitAll()
+                .requestMatchers("/api/persona/**").permitAll()
+                .requestMatchers("/api/dashboard/**").hasRole("ADMIN")
+                .requestMatchers("/api/admin/**").hasRole("ADMIN")
+                // NapCat Webhook 上报端点（无需认证）
+                .requestMatchers("/").permitAll()
+                .requestMatchers("/webhook").permitAll()
                 // 静态资源公开访问
                 .requestMatchers("/images/**").permitAll()
                 .requestMatchers("/uploads/**").permitAll()

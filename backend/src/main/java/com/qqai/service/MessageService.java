@@ -41,6 +41,13 @@ public class MessageService {
         return savedMessage;
     }
 
+    /**
+     * 检查消息是否已存在（去重）
+     */
+    public boolean existsByMessageId(String messageId) {
+        return messageRepository.existsByMessageId(messageId);
+    }
+
     public void processMessage(Message message) {
         try {
             String summary = astrBotService.summarizeMessage(message.getContent());

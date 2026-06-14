@@ -111,4 +111,21 @@ public interface MessageRepository extends JpaRepository<Message, Long> {
      */
     @Query("SELECT COUNT(m) FROM Message m WHERE m.groupId = :groupId AND m.selfQq IN :selfQqList AND m.archived = false")
     Long countActiveMessagesByGroupIdAndSelfQqIn(@Param("groupId") String groupId, @Param("selfQqList") List<String> selfQqList);
+
+    /**
+     * 根据消息ID判断消息是否存在
+     */
+    boolean existsByMessageId(String messageId);
+
+    /**
+     * 统计指定时间范围内的消息数量
+     */
+    @Query("SELECT COUNT(m) FROM Message m WHERE m.sendTime >= :start AND m.sendTime < :end")
+    Long countBySendTimeBetween(@Param("start") LocalDateTime start, @Param("end") LocalDateTime end);
+
+    /**
+     * 按消息类型统计数量
+     */
+    @Query("SELECT m.messageType, COUNT(m) FROM Message m GROUP BY m.messageType")
+    List<Object[]> countByMessageType();
 }

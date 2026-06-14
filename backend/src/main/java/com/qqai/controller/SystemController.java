@@ -12,6 +12,8 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.io.File;
+import java.io.IOException;
+import java.net.Socket;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.HashMap;
@@ -186,10 +188,11 @@ public class SystemController {
     }
 
     @PostMapping("/start-napcat")
-    public Map<String, String> startNapCat() {
+    public Map<String, String> startNapCat(@RequestBody(required = false) Map<String, Object> params) {
         Map<String, String> result = new HashMap<>();
         try {
-            napCatService.startNapCat();
+            boolean autoLogin = params != null && Boolean.TRUE.equals(params.get("autoLogin"));
+            napCatService.startNapCat(autoLogin);
             result.put("status", "started");
             result.put("message", "NapCat 启动成功");
         } catch (Exception e) {
@@ -244,31 +247,28 @@ public class SystemController {
     @GetMapping("/component-status")
     public Map<String, Object> getComponentStatus() {
         Map<String, Object> result = new HashMap<>();
-        
-        // 检查 AstrBot 状态
-        try {
-            // 这里可以根据实际情况检查 AstrBot 是否运行
-            result.put("astrbot", Map.of("running", true, "status", "running"));
-        } catch (Exception e) {
-            result.put("astrbot", Map.of("running", false, "status", "stopped"));
-        }
-        
-        // 检查 NapCat 状态
-        try {
-            napCatService.checkLoginStatus();
-            result.put("napcat", Map.of("running", true, "status", "running"));
-        } catch (Exception e) {
-            result.put("napcat", Map.of("running", false, "status", "stopped"));
-        }
-        
-        // 检查 GPT-SoVITS 状态
-        try {
-            // 这里可以根据实际情况检查 GPT-SoVITS 是否运行
-            result.put("gptsovits", Map.of("running", true, "status", "running"));
-        } catch (Exception e) {
-            result.put("gptsovits", Map.of("running", false, "status", "stopped"));
-        }
-        
+
+        // AstrBot 监听 6185 端口
+        boolean astrbotRunning = isPortOpen("localhost", 6185);
+        result.put("astrbot", Map.of("running", astrbotRunning, "status", astrbotRunning ? "running" : "stopped"));
+
+        // NapCat 监听 6099 端口
+        boolean napcatRunning = isPortOpen("localhost", 6099);
+        result.put("napcat", Map.of("running", napcatRunning, "status", napcatRunning ? "running" : "stopped"));
+
+        // GPT-SoVITS 监听 7860 端口
+        boolean gptsovitsRunning = isPortOpen("localhost", 7860);
+        result.put("gptsovits", Map.of("running", gptsovitsRunning, "status", gptsovitsRunning ? "running" : "stopped"));
+
         return result;
+    }
+
+    private boolean isPortOpen(String host, int port) {
+        try (Socket socket = new Socket()) {
+            socket.connect(new java.net.InetSocketAddress(host, port), 2000);
+            return true;
+        } catch (IOException e) {
+            return false;
+        }
     }
 }

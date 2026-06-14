@@ -188,8 +188,12 @@ export const systemApi = {
   stopAstrBot: () => request('/system/stop-astrbot', {
     method: 'POST',
   }),
-  startNapCat: () => request('/system/start-napcat', {
+  startNapCat: (autoLogin = false) => request('/system/start-napcat', {
     method: 'POST',
+    body: JSON.stringify({ autoLogin }),
+    headers: {
+      'Content-Type': 'application/json',
+    },
   }),
   stopNapCat: () => request('/system/stop-napcat', {
     method: 'POST',
@@ -326,6 +330,49 @@ export const userApi = {
   getDefaultQq: () => request('/user/qq-bindings/default'),
 };
 
+// 仪表盘(Dashboard) API
+export const dashboardApi = {
+  getStats: () => request('/dashboard/stats'),
+  getMessageTrend: () => request('/dashboard/message-trend'),
+  getGroupRanking: () => request('/dashboard/group-ranking'),
+  getMessageTypeDistribution: () => request('/dashboard/message-type-distribution'),
+};
+
+// 人格(Persona) API
+export const personaApi = {
+  // 获取人格列表
+  list: () => request('/persona/list'),
+
+  // 获取单个人格
+  get: (id) => request(`/persona/${id}`),
+
+  // 创建人格
+  create: (params) => request('/persona', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  }),
+
+  // 更新人格
+  update: (id, params) => request(`/persona/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(params),
+  }),
+
+  // 删除人格
+  delete: (id) => request(`/persona/${id}`, {
+    method: 'DELETE',
+  }),
+
+  // 设置默认人格
+  setDefault: (personaId) => request('/persona/set-default', {
+    method: 'POST',
+    body: JSON.stringify({ personaId }),
+  }),
+
+  // 获取默认人格
+  getDefault: () => request('/persona/default'),
+};
+
 // 认证 API
 export const authApi = {
   // 登录
@@ -347,6 +394,29 @@ export const authApi = {
   changePassword: (oldPassword, newPassword) => request('/auth/change-password', {
     method: 'POST',
     body: JSON.stringify({ oldPassword, newPassword }),
+  }),
+};
+
+// 管理员 API
+export const adminApi = {
+  // 获取所有用户
+  getUsers: () => request('/admin/users'),
+
+  // 更新用户角色
+  updateUserRole: (id, role) => request(`/admin/users/${id}/role`, {
+    method: 'PUT',
+    body: JSON.stringify({ role }),
+  }),
+
+  // 更新用户状态
+  updateUserActive: (id, active) => request(`/admin/users/${id}/active`, {
+    method: 'PUT',
+    body: JSON.stringify({ active }),
+  }),
+
+  // 删除用户
+  deleteUser: (id) => request(`/admin/users/${id}`, {
+    method: 'DELETE',
   }),
 };
 

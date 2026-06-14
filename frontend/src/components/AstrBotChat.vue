@@ -12,13 +12,13 @@
       </div>
       <div class="header-actions">
         <button class="action-btn" @click="showConversationList = !showConversationList" title="对话历史">
-          📋
+          <Icon name="list" :size="16" />
         </button>
         <button class="action-btn" @click="createNewConversation" title="新对话">
-          ➕
+          <Icon name="add" :size="16" />
         </button>
         <button class="action-btn" @click="showSettings = true" title="设置">
-          ⚙️
+          <Icon name="settings" :size="16" />
         </button>
       </div>
     </div>
@@ -27,7 +27,7 @@
     <div v-if="showConversationList" class="conversation-panel">
       <div class="panel-header">
         <h4>对话历史 ({{ conversations.length }})</h4>
-        <button class="close-btn" @click="showConversationList = false">✕</button>
+        <button class="close-btn" @click="showConversationList = false"><Icon name="close" :size="16" /></button>
       </div>
       <div class="conversation-list">
         <div
@@ -43,12 +43,12 @@
               <span>{{ formatDate(conv.timeUpdated) }}</span>
             </div>
           </div>
-          <button 
-            class="delete-btn" 
-            @click="(e) => { e.preventDefault(); e.stopPropagation(); showDeleteConfirm(conv.conversationId); }" 
+          <button
+            class="delete-btn"
+            @click="(e) => { e.preventDefault(); e.stopPropagation(); showDeleteConfirm(conv.conversationId); }"
             title="删除"
           >
-            🗑️
+            <Icon name="delete" :size="14" />
           </button>
         </div>
         <div v-if="conversations.length === 0" class="empty-conversations">
@@ -61,7 +61,7 @@
     <div v-if="showConfirmDialog" class="confirm-dialog-overlay" @click="cancelDelete">
       <div class="confirm-dialog" @click.stop>
         <div class="confirm-dialog-header">
-          <span class="confirm-icon">⚠️</span>
+          <span class="confirm-icon"><Icon name="warning" :size="20" /></span>
           <h3>确认删除</h3>
         </div>
         <div class="confirm-dialog-body">
@@ -79,9 +79,9 @@
     <div v-if="showSettings" class="settings-dialog-overlay" @click="closeSettings">
       <div class="settings-dialog" @click.stop>
         <div class="settings-dialog-header">
-          <span class="settings-icon">⚙️</span>
+          <span class="settings-icon"><Icon name="settings" :size="20" /></span>
           <h3>聊天设置</h3>
-          <button class="close-btn" @click="closeSettings">✕</button>
+          <button class="close-btn" @click="closeSettings"><Icon name="close" :size="16" /></button>
         </div>
         <div class="settings-dialog-body">
           <div class="settings-section">
@@ -159,7 +159,7 @@
 
     <div class="chat-messages" ref="messagesContainer">
       <div v-if="messages.length === 0" class="empty-chat">
-        <div class="empty-icon">💬</div>
+        <div class="empty-icon"><Icon name="chat" :size="48" /></div>
         <p>开始与 AstrBot 对话</p>
         <p class="empty-hint">对话将自动保存，您可以随时查看历史记录</p>
       </div>
@@ -221,12 +221,14 @@
 
 <script>
 import { ref, onMounted, nextTick, watch } from 'vue';
+import Icon from './Icon.vue';
 import { astrBotApi, userApi } from '../services/api';
 import { filterToolJson, processAstrBotResponse } from '../utils/messageFilter';
 import { showToast } from './Toast.vue';
 
 export default {
   name: 'AstrBotChat',
+  components: { Icon },
   props: {
     groupId: { type: String, default: null },
     userQq: { type: String, default: null },
@@ -586,7 +588,7 @@ export default {
       const summaryText = data.messages.map(m => `${m.user}: ${m.content.substring(0, 50)}${m.content.length > 50 ? '...' : ''}`).join('\n');
       
       messages.value.push({
-        text: `📋 已选择 ${data.messages.length} 条消息进行分析：\n\n${summaryText}`,
+        text: `[分析] 已选择 ${data.messages.length} 条消息进行分析：\n\n${summaryText}`,
         sender: '系统',
         isSelf: false,
         time: new Date(),

@@ -250,8 +250,16 @@ public class RootWebhookController {
             }
 
             // 判断是否是登录账号发送的消息
-            // 优先使用配置的selfQq，如果没有则使用self_id
-            String currentSelfQq = (selfQq != null && !selfQq.isEmpty()) ? selfQq : (selfIdLong != null ? String.valueOf(selfIdLong) : null);
+            // 优先使用实际上报的 self_id / X-Self-ID，最后 fallback 到配置文件
+            String currentSelfQq = null;
+            if (selfIdLong != null) {
+                currentSelfQq = String.valueOf(selfIdLong);
+            } else if (selfId != null && !selfId.isEmpty()) {
+                currentSelfQq = selfId;
+            } else if (selfQq != null && !selfQq.isEmpty()) {
+                currentSelfQq = selfQq;
+            }
+            System.out.println("[DEBUG] self_id=" + json.getLong("self_id") + ", X-Self-ID=" + selfId + ", config.selfQq=" + selfQq + ", 最终使用=" + currentSelfQq);
             boolean isSelfMessage = currentSelfQq != null && currentSelfQq.equals(String.valueOf(userId));
             
             if (isSelfMessage) {

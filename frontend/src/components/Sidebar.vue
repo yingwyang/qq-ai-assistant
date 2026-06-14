@@ -2,8 +2,8 @@
   <div class="sidebar" :class="{ collapsed: isCollapsed }">
     <div class="sidebar-header">
       <button class="toggle-btn" @click="toggleSidebar">
-        <span v-if="isCollapsed">☰</span>
-        <span v-else>✕</span>
+        <Icon v-if="isCollapsed" name="menu" :size="16" />
+        <Icon v-else name="close" :size="16" />
       </button>
       <h3 v-if="!isCollapsed" class="sidebar-title">铃音QQ对话</h3>
     </div>
@@ -20,35 +20,55 @@
       <div v-if="!isCollapsed" class="profile-arrow">›</div>
     </div>
     
-    <nav class="sidebar-nav">
+    <nav v-if="isLoggedIn" class="sidebar-nav">
       <div class="nav-section">
         <ul class="nav-list">
           <li class="nav-item" :class="{ active: activeTab === 'recent' }" @click="toggleRecentGroups">
-            <span class="nav-icon">💬</span>
+            <span class="nav-icon"><Icon name="chat" :size="16" /></span>
             <span v-if="!isCollapsed" class="nav-text">对话</span>
-            <span v-if="!isCollapsed" class="expand-icon">{{ isRecentExpanded ? '▼' : '▶' }}</span>
+            <span v-if="!isCollapsed" class="expand-icon"><Icon :name="isRecentExpanded ? 'expand' : 'collapse'" :size="12" /></span>
           </li>
           
-          <!-- 最近对话列表 - 仅在登录状态下且展开时显示 -->
+          <!-- 最近对话列表 - 按QQ绑定分组显示 -->
           <template v-if="isLoggedIn && isRecentExpanded">
-            <li 
-              v-for="group in recentGroups" 
-              :key="group.groupId"
-              class="nav-item group-item"
-              @click="selectGroup(group.groupId)"
-            >
-              <div class="group-avatar">
-                <img 
-                  :src="getGroupAvatar(group)" 
-                  :alt="group.groupName"
-                  @error="handleAvatarError"
-                />
-              </div>
-              <div v-if="!isCollapsed" class="group-info">
-                <div class="group-name">{{ group.groupName || '群聊 ' + group.groupId }}</div>
-                <div class="group-id">{{ group.groupId }}</div>
-              </div>
-            </li>
+            <template v-for="binding in qqBindings" :key="binding.id">
+              <!-- 该QQ下有群才显示分组 -->
+              <template v-if="getGroupsByQq(binding.qqNumber).length > 0">
+                <li class="nav-item qq-binding-header">
+                  <div class="qq-binding-avatar">
+                    <img 
+                      :src="binding.avatar || 'https://q.qlogo.cn/headimg_dl?dst_uin=' + binding.qqNumber + '&spec=100'" 
+                      :alt="binding.nickname"
+                      @error="handleAvatarError"
+                    />
+                  </div>
+                  <div v-if="!isCollapsed" class="qq-binding-info">
+                    <div class="qq-binding-name">{{ binding.nickname || binding.qqNumber }}</div>
+                    <div class="qq-binding-number">{{ binding.qqNumber }}</div>
+                    <span v-if="binding.isDefault" class="default-badge">默认</span>
+                  </div>
+                </li>
+                <li 
+                  v-for="group in getGroupsByQq(binding.qqNumber)" 
+                  :key="group.groupId"
+                  class="nav-item group-item"
+                  :class="{ active: selectedGroupId === group.groupId }"
+                  @click="selectGroup(group.groupId)"
+                >
+                  <div class="group-avatar">
+                    <img 
+                      :src="getGroupAvatar(group)" 
+                      :alt="group.groupName"
+                      @error="handleAvatarError"
+                    />
+                  </div>
+                  <div v-if="!isCollapsed" class="group-info">
+                    <div class="group-name">{{ group.groupName || '群聊 ' + group.groupId }}</div>
+                    <div class="group-id">{{ group.groupId }}</div>
+                  </div>
+                </li>
+              </template>
+            </template>
           </template>
         </ul>
       </div>
@@ -56,8 +76,8 @@
       <div class="nav-section">
         <div v-if="!isCollapsed" class="nav-section-title"></div>
         <ul class="nav-list">
-          <li class="nav-item" @click="openAstrBot">
-            <span class="nav-icon">🤖</span>
+          <li class="nav-item" @click="openPersonaManager">
+            <span class="nav-icon"><Icon name="robot" :size="16" /></span>
             <span v-if="!isCollapsed" class="nav-text">我的智能体</span>
           </li>
         </ul>
@@ -65,21 +85,21 @@
     </nav>
     
     <div class="sidebar-footer">
-      <!-- 系统控制按钮（仅已登录用户可见） -->
-      <button v-if="isLoggedIn" class="nav-item system-btn" @click="openSystemModal">
-        <span class="nav-icon">⚙️</span>
-        <span v-if="!isCollapsed" class="nav-text">系统控制</span>
+      <!-- 系统管理按钮（仅已登录用户可见） -->
+      <button v-if="isLoggedIn" class="nav-item system-btn" @click="openAdminDashboard">
+        <span class="nav-icon"><Icon name="settings" :size="16" /></span>
+        <span v-if="!isCollapsed" class="nav-text">系统管理</span>
       </button>
-      
+
       <!-- 登录按钮（仅未登录用户可见） -->
       <button v-if="!isLoggedIn" class="nav-item login-btn" @click="openLoginModal">
-        <span class="nav-icon">🔐</span>
+        <span class="nav-icon"><Icon name="lock" :size="16" /></span>
         <span v-if="!isCollapsed" class="nav-text">登录</span>
       </button>
-      
+
       <!-- 退出登录按钮 -->
       <button v-if="isLoggedIn" class="nav-item logout-btn" @click="logout">
-        <span class="nav-icon">🚪</span>
+        <span class="nav-icon"><Icon name="logout" :size="16" /></span>
         <span v-if="!isCollapsed" class="nav-text">退出登录</span>
       </button>
     </div>
@@ -88,10 +108,12 @@
 
 <script>
 import { ref, onMounted, onUnmounted, watch, computed } from 'vue';
-import { messageApi } from '../services/api';
+import { messageApi, userApi } from '../services/api';
+import Icon from './Icon.vue';
 
 export default {
-  name: 'Sidebar',
+    name: 'Sidebar',
+    components: { Icon },
   props: {
     isLoggedIn: {
       type: Boolean,
@@ -106,12 +128,14 @@ export default {
       default: false
     }
   },
-  emits: ['tab-change', 'logout', 'open-login-modal', 'open-system-modal', 'open-user-profile', 'select-group'],
+  emits: ['tab-change', 'logout', 'open-login-modal', 'open-system-modal', 'open-user-profile', 'select-group', 'open-persona-manager', 'open-admin-dashboard'],
   setup(props, { emit }) {
     const isCollapsedLocal = ref(false);
     const activeTab = ref('recent');
     const recentGroups = ref([]);
     const isRecentExpanded = ref(true); // 默认展开群列表
+    const qqBindings = ref([]);
+    const selectedGroupId = ref('');
     let refreshInterval = null;
     
     // 使用 computed 确保响应式
@@ -154,12 +178,35 @@ export default {
       emit('open-user-profile');
     };
 
-    const openAstrBot = () => {
-      window.open('http://localhost:6185', '_blank');
+    const openPersonaManager = () => {
+      emit('open-persona-manager');
+    };
+
+    const openAdminDashboard = () => {
+      emit('open-admin-dashboard');
     };
 
     const selectGroup = (groupId) => {
+      selectedGroupId.value = groupId;
       emit('select-group', groupId);
+    };
+
+    const getGroupsByQq = (qqNumber) => {
+      return recentGroups.value.filter(g => String(g.ownerQq) === String(qqNumber));
+    };
+
+    const loadQqBindings = async () => {
+      if (!props.isLoggedIn) {
+        qqBindings.value = [];
+        return;
+      }
+      try {
+        const bindings = await userApi.getQqBindings();
+        qqBindings.value = bindings;
+      } catch (error) {
+        console.error('加载QQ绑定失败:', error);
+        qqBindings.value = [];
+      }
     };
 
     const handleAvatarError = (e) => {
@@ -210,11 +257,13 @@ export default {
 
     onMounted(() => {
       loadRecentGroups();
+      loadQqBindings();
       
-      // 每30秒自动刷新群聊列表
+      // 每30秒自动刷新群聊列表和QQ绑定
       refreshInterval = setInterval(() => {
         if (props.isLoggedIn) {
           loadRecentGroups();
+          loadQqBindings();
         }
       }, 30000);
     });
@@ -226,13 +275,15 @@ export default {
       }
     });
 
-    // 监听登录状态变化，当登录状态改变时重新加载群聊列表
+    // 监听登录状态变化，当登录状态改变时重新加载群聊列表和QQ绑定
     watch(() => props.isLoggedIn, (newValue) => {
       console.log('登录状态变化:', newValue);
       if (newValue) {
         loadRecentGroups();
+        loadQqBindings();
       } else {
         recentGroups.value = [];
+        qqBindings.value = [];
       }
     });
 
@@ -241,6 +292,8 @@ export default {
       activeTab,
       recentGroups,
       isRecentExpanded,
+      qqBindings,
+      selectedGroupId,
       isLoggedIn: isLoggedInComputed,
       toggleSidebar,
       toggleRecentGroups,
@@ -249,8 +302,10 @@ export default {
       openLoginModal,
       openSystemModal,
       openUserProfile,
-      openAstrBot,
+      openPersonaManager,
+      openAdminDashboard,
       selectGroup,
+      getGroupsByQq,
       handleAvatarError,
       getGroupAvatar
     };
@@ -406,6 +461,15 @@ export default {
   background-color: #34495e;
 }
 
+.nav-link {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: inherit;
+  text-decoration: none;
+  flex: 1;
+}
+
 .nav-item.active {
   background-color: #3498db;
   border-right: 3px solid #ecf0f1;
@@ -478,6 +542,74 @@ export default {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* QQ绑定分组标题样式 */
+.qq-binding-header {
+  padding: 8px 20px;
+  background-color: #263545;
+  border-top: 1px solid #34495e;
+  cursor: default;
+}
+
+.qq-binding-header:hover {
+  background-color: #263545;
+}
+
+.qq-binding-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  overflow: hidden;
+  flex-shrink: 0;
+  background-color: #34495e;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.qq-binding-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.qq-binding-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  position: relative;
+}
+
+.qq-binding-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #ecf0f1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.qq-binding-number {
+  font-size: 11px;
+  color: #95a5a6;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.qq-binding-header .default-badge {
+  position: absolute;
+  right: 0;
+  top: 2px;
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background-color: #3498db;
+  color: white;
 }
 
 .sidebar-footer {

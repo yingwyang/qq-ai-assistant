@@ -211,8 +211,9 @@ qq-ai-assistant/
 
 - Java 17+
 - Node.js 18+
-- MySQL 8.0+
-- FFmpeg（用于语音转换）
+- Maven 3.8+
+- MySQL 8.0+（或使用内置 H2 数据库）
+- FFmpeg（用于语音转换，可选）
 
 ### 1. 克隆项目
 
@@ -221,7 +222,7 @@ git clone <repository-url>
 cd qq-ai-assistant
 ```
 
-### 2. 配置FFmpeg
+### 2. 配置FFmpeg（可选）
 
 将 FFmpeg 放置在项目根目录：
 ```
@@ -237,32 +238,67 @@ qq-ai-assistant/
 
 ### 3. 配置数据库
 
+#### 方式一：使用内置 H2 数据库（推荐，开发测试用）
+无需额外配置，直接启动后端即可。H2 控制台地址：`http://localhost:8081/h2-console`
+
+#### 方式二：使用 MySQL
 ```bash
 # 创建数据库
 mysql -u root -p < backend/src/main/resources/init-mysql.sql
 ```
+修改 `backend/src/main/resources/application.yml` 中的数据库连接配置。
 
 ### 4. 启动后端
 
 ```bash
 cd backend
-mvn clean install
+mvn spring-boot:run
+```
+
+或打包后运行：
+```bash
+cd backend
+mvn clean package
 java -jar target/qq-ai-assistant-1.0-SNAPSHOT.jar
 ```
 
-后端服务将运行在 http://localhost:8081
+- 后端服务运行在 `http://localhost:8081`
+- **首次启动会自动创建默认管理员账号**，控制台会输出：
+  ```
+  账号: admin
+  密码: admin123
+  ```
 
 ### 5. 启动前端
 
+#### 开发模式（热更新）
 ```bash
 cd frontend
 npm install
 npm run dev
 ```
+- 前端服务运行在 `http://localhost:5173`
 
-前端服务将运行在 http://localhost:5173
+#### 生产构建
+```bash
+cd frontend
+npm install
+npm run build
+```
+构建产物在 `frontend/dist/` 目录，可部署到任意静态服务器。
 
-### 6. 配置 NapCat
+### 6. 登录系统
+
+1. 打开前端页面 `http://localhost:5173`
+2. 使用默认管理员账号登录：
+   - 账号：`admin`
+   - 密码：`admin123`
+3. 管理员登录后会自动跳转到**管理员页面**，可进行：
+   - 数据概览（消息统计、用户统计、趋势图）
+   - 用户管理（提权/降权、禁用/启用、删除）
+   - 组件控制（AstrBot / NapCat / GPT-SoVITS 启停）
+
+### 7. 配置 NapCat
 
 1. 启动 NapCat 并登录QQ
 2. 在 NapCat WebUI 中配置 HTTP 上报：
@@ -270,19 +306,38 @@ npm run dev
    - Token: 配置文件中设置的 token
    - 启用 `reportSelfMessage` 以接收发送的消息
 
-### 7. 启动 AstrBot (可选)
+### 8. 启动 AstrBot (可选)
 
 ```bash
 cd astrbot
 python main.py
 ```
 
-### 8. 启动 GPT-SoVITS (可选)
+### 9. 启动 GPT-SoVITS (可选)
 
 ```bash
 cd GPT-SoVITS-v2pro-20250604-nvidia50
-runtime\python.exe -I api_v2.py -a 127.0.0.1 -p 7860
+runtime\python.exe api_v2.py -a 127.0.0.1 -p 7860
 ```
+
+### 常用服务端口
+
+| 服务 | 端口 | 说明 |
+|------|------|------|
+| SpringBoot 后端 | 8081 | 主 API 服务 |
+| Vue 前端开发 | 5173 | 开发模式 |
+| AstrBot | 6185 | AI 对话服务 |
+| NapCat | 6099 | QQ 消息监听 |
+| GPT-SoVITS API | 7860 | 语音合成 API |
+| GPT-SoVITS WebUI | 9872 | 语音合成 WebUI |
+
+### 管理员功能
+
+管理员账号登录后可访问 `/admin` 页面，具备以下功能：
+- **数据概览**：总消息数、群聊数、用户数、AI 对话数、近 7 天消息趋势图
+- **用户管理**：查看所有用户、修改角色（ADMIN/USER）、禁用/启用账号、删除用户
+- **组件控制**：一键启动/停止 AstrBot、NapCat、GPT-SoVITS
+- **消息分布**：按文本/图片/视频/文件/音频/语音分类统计
 
 ## 使用说明
 

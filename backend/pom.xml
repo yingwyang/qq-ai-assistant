@@ -95,6 +95,12 @@
             <version>0.12.3</version>
             <scope>runtime</scope>
         </dependency>
+        <!-- SQLite JDBC -->
+        <dependency>
+            <groupId>org.xerial</groupId>
+            <artifactId>sqlite-jdbc</artifactId>
+            <version>3.45.2.0</version>
+        </dependency>
     </dependencies>
 
     <build>

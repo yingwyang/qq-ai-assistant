@@ -3,7 +3,7 @@
     <div class="profile-container">
       <div class="profile-header">
         <h2>个人信息</h2>
-        <button class="close-btn" @click="closeModal">✕</button>
+        <button class="close-btn" @click="closeModal"><Icon name="close" :size="16" /></button>
       </div>
 
       <div class="profile-content">
@@ -129,11 +129,13 @@
 
 <script>
 import { ref, reactive, onMounted } from 'vue';
+import Icon from './Icon.vue';
 import { userApi } from '../services/api';
 import { showToast } from './Toast.vue';
 import { showConfirm } from './ConfirmDialog.vue';
 
 export default {
+  components: { Icon },
   name: 'UserProfile',
   props: {
     visible: {
