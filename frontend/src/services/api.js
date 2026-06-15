@@ -136,6 +136,7 @@ export const systemApi = {
   getNapCatQrCodePath: () => request('/system/napcat/qrcode-path'),
   checkNapCatLoginStatus: () => request('/system/napcat/login-status'),
   healthCheck: () => request('/system/health'),
+  getDiskUsage: () => request('/system/disk-usage'),
 };
 
 export const astrBotApi = {
@@ -205,8 +206,9 @@ export const userApi = {
 
 export const dashboardApi = {
   getStats: () => request('/dashboard/stats'),
-  getMessageTrend: () => request('/dashboard/message-trend'),
+  getMessageTrend: (days = 7, interval = 'day') => request(`/dashboard/message-trend?days=${days}&interval=${interval}`),
   getGroupRanking: () => request('/dashboard/group-ranking'),
+  getQQRanking: () => request('/dashboard/qq-ranking'),
   getMessageTypeDistribution: () => request('/dashboard/message-type-distribution'),
 };
 

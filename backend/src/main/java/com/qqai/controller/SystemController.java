@@ -263,6 +263,62 @@ public class SystemController {
         return result;
     }
 
+    @GetMapping("/disk-usage")
+    public Map<String, Object> getDiskUsage() {
+        Map<String, Object> result = new HashMap<>();
+        try {
+            // uploads 目录大小
+            String projectRoot = System.getProperty("user.dir");
+            String uploadsPath = projectRoot + File.separator + ".." + File.separator + ".." + File.separator + "qq-ai-assistant" + File.separator + "uploads";
+            File uploadsDir = new File(uploadsPath).getCanonicalFile();
+            long uploadsSize = 0;
+            if (uploadsDir.exists() && uploadsDir.isDirectory()) {
+                uploadsSize = calculateDirectorySize(uploadsDir);
+            }
+
+            // D 盘空间（项目所在盘）
+            File dDrive = new File("D:\\");
+            long totalSpace = dDrive.getTotalSpace();
+            long freeSpace = dDrive.getFreeSpace();
+            long usedSpace = totalSpace - freeSpace;
+            double usagePercent = totalSpace > 0 ? (usedSpace * 100.0 / totalSpace) : 0;
+
+            result.put("uploadsSize", uploadsSize);
+            result.put("uploadsSizeFormatted", formatBytes(uploadsSize));
+            result.put("totalSpace", totalSpace);
+            result.put("totalSpaceFormatted", formatBytes(totalSpace));
+            result.put("freeSpace", freeSpace);
+            result.put("freeSpaceFormatted", formatBytes(freeSpace));
+            result.put("usedSpace", usedSpace);
+            result.put("usedSpaceFormatted", formatBytes(usedSpace));
+            result.put("usagePercent", Math.round(usagePercent * 100) / 100.0);
+        } catch (Exception e) {
+            result.put("error", e.getMessage());
+        }
+        return result;
+    }
+
+    private long calculateDirectorySize(File dir) {
+        long size = 0;
+        File[] files = dir.listFiles();
+        if (files == null) return size;
+        for (File file : files) {
+            if (file.isDirectory()) {
+                size += calculateDirectorySize(file);
+            } else {
+                size += file.length();
+            }
+        }
+        return size;
+    }
+
+    private String formatBytes(long bytes) {
+        if (bytes < 1024) return bytes + " B";
+        if (bytes < 1024 * 1024) return String.format("%.2f KB", bytes / 1024.0);
+        if (bytes < 1024L * 1024 * 1024) return String.format("%.2f MB", bytes / (1024.0 * 1024));
+        return String.format("%.2f GB", bytes / (1024.0 * 1024 * 1024));
+    }
+
     private boolean isPortOpen(String host, int port) {
         try (Socket socket = new Socket()) {
             socket.connect(new java.net.InetSocketAddress(host, port), 2000);
