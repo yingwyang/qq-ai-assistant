@@ -6,6 +6,12 @@
     </div>
 
     <div class="dashboard-body">
+      <!-- 加载状态指示器 -->
+      <div v-if="isLoading" class="loading-overlay">
+        <div class="loading-spinner"></div>
+        <span class="loading-text">加载中...</span>
+      </div>
+
       <!-- 组件状态与控制 -->
       <div class="section-card">
         <h4>组件状态与控制</h4>
@@ -764,6 +770,36 @@ export default {
 .loading-box {
   padding: 40px;
   color: #888;
+}
+
+/* 加载状态指示器 */
+.loading-overlay {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  gap: 12px;
+}
+
+.loading-spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid #e8e8e8;
+  border-top-color: #3498db;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.loading-text {
+  font-size: 14px;
+  color: #666;
 }
 
 /* 系统消息 */

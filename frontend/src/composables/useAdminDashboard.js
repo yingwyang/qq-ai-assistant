@@ -40,6 +40,7 @@ export function useAdminDashboard() {
     usagePercent: 0,
   });
 
+  const isLoading = ref(false);
   const isStartingAstrBot = ref(false);
   const isStoppingAstrBot = ref(false);
   const isStartingNapCat = ref(false);
@@ -117,7 +118,7 @@ export function useAdminDashboard() {
     }
   };
 
-  const refreshQrCode = () => {
+  const refreshQrCode = async () => {
     qrCode.value = `/api/system/napcat/qrcode-image?timestamp=${Date.now()}`;
   };
 
@@ -272,15 +273,22 @@ export function useAdminDashboard() {
     }
   };
 
-  const loadDashboard = () => {
-    loadStats();
-    loadTrend();
-    loadRanking();
-    loadQQRanking();
-    loadDiskUsage();
-    getComponentStatus();
-    refreshQrCode();
-    if (autoLogin.value) checkNapCatLogin();
+  const loadDashboard = async () => {
+    isLoading.value = true;
+    try {
+      await Promise.all([
+        loadStats(),
+        loadTrend(),
+        loadRanking(),
+        loadQQRanking(),
+        loadDiskUsage(),
+        getComponentStatus(),
+        refreshQrCode(),
+      ]);
+      if (autoLogin.value) await checkNapCatLogin();
+    } finally {
+      isLoading.value = false;
+    }
   };
 
   let isDown = false;
@@ -360,6 +368,7 @@ export function useAdminDashboard() {
     tooltipData,
     tooltipStyle,
     scrollWrapper,
+    isLoading,
     isStartingAstrBot,
     isStoppingAstrBot,
     isStartingNapCat,
@@ -367,6 +376,7 @@ export function useAdminDashboard() {
     isStartingGptSovits,
     isStoppingGptSovits,
     loadStats,
+    loadDiskUsage,
     loadTrend,
     loadRanking,
     loadQQRanking,
