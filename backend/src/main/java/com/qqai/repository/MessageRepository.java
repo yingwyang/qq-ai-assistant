@@ -120,7 +120,7 @@ public interface MessageRepository extends JpaRepository<Message, Long> {
     /**
      * 统计消息最多的QQ账号（取前10）
      */
-    @Query("SELECT m.senderId, MAX(m.senderName) as nickname, COUNT(m) as cnt FROM Message m WHERE m.archived = false GROUP BY m.senderId ORDER BY cnt DESC LIMIT 10")
+    @Query("SELECT m.userQq, MAX(m.userNickname) as nickname, COUNT(m) as cnt FROM Message m WHERE m.archived = false GROUP BY m.userQq ORDER BY cnt DESC LIMIT 10")
     List<Object[]> findTopQQByMessageCount();
 
     /**
