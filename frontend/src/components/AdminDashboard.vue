@@ -6,197 +6,6 @@
     </div>
 
     <div class="dashboard-body">
-      <!-- 统计卡片 -->
-      <div class="stats-cards">
-        <div class="stat-card">
-          <div class="stat-icon" style="background: #e3f2fd; color: #1976d2;"><Icon name="chat" :size="24" /></div>
-          <div class="stat-info">
-            <div class="stat-value">{{ stats.totalMessages }}</div>
-            <div class="stat-label">总消息数</div>
-          </div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-icon" style="background: #f3e5f5; color: #7b1fa2;"><Icon name="group" :size="24" /></div>
-          <div class="stat-info">
-            <div class="stat-value">{{ stats.totalGroups }}</div>
-            <div class="stat-label">群聊总数</div>
-          </div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-icon" style="background: #e8f5e9; color: #388e3c;"><Icon name="user" :size="24" /></div>
-          <div class="stat-info">
-            <div class="stat-value">{{ stats.totalUsers }}</div>
-            <div class="stat-label">用户总数</div>
-          </div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-icon" style="background: #fff3e0; color: #f57c00;"><Icon name="robot" :size="24" /></div>
-          <div class="stat-info">
-            <div class="stat-value">{{ stats.totalConversations }}</div>
-            <div class="stat-label">AI 对话数</div>
-          </div>
-        </div>
-        <div class="stat-card disk-card">
-          <div class="stat-icon" style="background: #ffebee; color: #c62828;"><Icon name="disk" :size="24" /></div>
-          <div class="stat-info">
-            <div class="stat-value">{{ diskUsage.uploadsSizeFormatted }}</div>
-            <div class="stat-label">上传文件占用</div>
-            <div class="stat-today">D盘已用 {{ diskUsage.usagePercent }}%</div>
-          </div>
-          <div class="disk-bar">
-            <div class="disk-bar-track">
-              <div class="disk-bar-fill" :style="{ width: diskUsage.usagePercent + '%' }"></div>
-            </div>
-            <div class="disk-bar-label">
-              <span>已用 {{ diskUsage.usedSpaceFormatted }}</span>
-              <span>总计 {{ diskUsage.totalSpaceFormatted }}</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- 图表区域 -->
-      <div class="charts-row">
-        <!-- 消息趋势 -->
-        <div class="chart-card chart-large">
-          <div class="chart-header">
-            <h4>消息趋势</h4>
-            <div class="chart-controls">
-              <button
-                class="chart-btn"
-                :class="{ active: trendInterval === 'hour' }"
-                @click="setTrendDays(1, 'hour')"
-              >
-                24小时
-              </button>
-              <button
-                v-for="d in [7, 30, 90]"
-                :key="d"
-                class="chart-btn"
-                :class="{ active: trendDays === d && trendInterval === 'day' }"
-                @click="setTrendDays(d, 'day')"
-              >
-                {{ d }}天
-              </button>
-            </div>
-          </div>
-          <div class="line-chart">
-            <div class="line-chart-yaxis">
-              <span v-for="n in 5" :key="n">{{ getYAxisLabel(n - 1) }}</span>
-            </div>
-            <div class="line-chart-scroll-wrapper" ref="scrollWrapper">
-              <div class="line-chart-scroll" :style="{ minWidth: Math.max(messageTrend.length * (trendInterval === 'hour' ? 55 : 36), 400) + 'px' }">
-                <svg viewBox="0 0 100 60" preserveAspectRatio="none">
-                  <!-- 网格横线 -->
-                  <line
-                    v-for="n in 5"
-                    :key="'grid-h-' + n"
-                    x1="0"
-                    :y1="n * 12"
-                    x2="100"
-                    :y2="n * 12"
-                    stroke="#f0f0f0"
-                    stroke-width="0.3"
-                  />
-                  <!-- 网格竖线 -->
-                  <line
-                    v-for="(item, index) in messageTrend"
-                    :key="'grid-v-' + index"
-                    :x1="getPointX(index)"
-                    y1="0"
-                    :x2="getPointX(index)"
-                    y2="60"
-                    stroke="#f0f0f0"
-                    stroke-width="0.2"
-                  />
-                  <polygon
-                    v-if="messageTrend.length > 0"
-                    fill="rgba(52, 152, 219, 0.1)"
-                    :points="getAreaPoints()"
-                  />
-                  <polyline
-                    fill="none"
-                    stroke="#3498db"
-                    stroke-width="0.4"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    vector-effect="non-scaling-stroke"
-                    :points="getLinePoints()"
-                  />
-                </svg>
-                <div class="data-points-overlay">
-                  <div
-                    v-for="(item, index) in messageTrend"
-                    :key="'pt-' + index"
-                    class="data-point-css"
-                    :style="{ left: getPointXPercent(index) + '%', top: getPointYPercent(item.count) + '%' }"
-                    @mouseenter="showTooltip($event, item)"
-                    @mouseleave="hideTooltip"
-                  ></div>
-                </div>
-                <div v-if="tooltipVisible" class="chart-tooltip" :style="tooltipStyle">
-                  <div class="tooltip-date">{{ tooltipData.date }}</div>
-                  <div class="tooltip-value">{{ tooltipData.count }} 条消息</div>
-                </div>
-                <div class="line-chart-labels" :class="{ 'hour-labels': trendInterval === 'hour' }">
-                  <span v-for="(item, index) in messageTrend" :key="index">
-                    {{ item.date }}
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- 群聊排行 -->
-        <div class="chart-card">
-          <h4>活跃群聊排行 TOP5</h4>
-          <div class="ranking-list">
-            <div
-              v-for="(group, index) in groupRanking.slice(0, 5)"
-              :key="group.groupId"
-              class="rank-item"
-            >
-              <div class="rank-num">{{ index + 1 }}</div>
-              <div class="rank-name" :title="group.groupName">
-                {{ truncateName(group.groupName) }}
-              </div>
-              <div class="rank-bar-wrapper">
-                <div
-                  class="rank-bar"
-                  :style="{ width: getRankWidth(group.messageCount) + '%', backgroundColor: getRankColor(index) }"
-                ></div>
-              </div>
-              <div class="rank-count">{{ group.messageCount }}</div>
-            </div>
-          </div>
-        </div>
-
-        <!-- 活跃QQ排行 -->
-        <div class="chart-card">
-          <h4>活跃QQ账号排行 TOP5</h4>
-          <div class="ranking-list">
-            <div
-              v-for="(qq, index) in qqRanking.slice(0, 5)"
-              :key="qq.qq"
-              class="rank-item"
-            >
-              <div class="rank-num">{{ index + 1 }}</div>
-              <div class="rank-name" :title="qq.nickname">
-                {{ truncateQQName(qq.nickname, qq.qq) }}
-              </div>
-              <div class="rank-bar-wrapper">
-                <div
-                  class="rank-bar"
-                  :style="{ width: getQQRankWidth(qq.messageCount) + '%', backgroundColor: getRankColor(index) }"
-                ></div>
-              </div>
-              <div class="rank-count">{{ qq.messageCount }}</div>
-            </div>
-          </div>
-        </div>
-      </div>
-
       <!-- 组件状态与控制 -->
       <div class="section-card">
         <h4>组件状态与控制</h4>
@@ -252,7 +61,11 @@
                 {{ isStoppingNapCat ? '停止中...' : '停止' }}
               </button>
             </div>
-            <a href="http://127.0.0.1:6099/webui?token=***REMOVED***" target="_blank" class="webui-link">
+            <a
+              href="http://127.0.0.1:6099"
+              target="_blank"
+              class="webui-link"
+            >
               <Icon name="globe" :size="14" /> 打开 NapCat WebUI
             </a>
           </div>
@@ -280,6 +93,13 @@
                 {{ isStoppingGptSovits ? '停止中...' : '停止' }}
               </button>
             </div>
+            <a
+              href="http://localhost:8000"
+              target="_blank"
+              class="webui-link"
+            >
+              <Icon name="globe" :size="14" /> 打开 GPT-SoVITS WebUI
+            </a>
           </div>
         </div>
       </div>
@@ -834,11 +654,33 @@ export default {
   background: #c0392b;
 }
 
-button:disabled {
-  background: #ddd;
-  color: #999;
-  cursor: not-allowed;
+.btn-webui {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px;
+  background: #f0f7ff;
+  border-radius: 4px;
+  color: #1976d2;
+  font-size: 12px;
+  cursor: pointer;
+  border: none;
+  text-decoration: none;
+  transition: background 0.2s;
 }
+
+.btn-webui:hover {
+  background: #d6e9ff;
+}
+
+.btn-webui:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background: #f0f7ff;
+}
+
+
 
 .webui-link {
   display: flex;
@@ -850,8 +692,21 @@ button:disabled {
   border-radius: 4px;
   color: #1976d2;
   text-decoration: none;
+  border: none;
+  cursor: pointer;
   font-size: 12px;
   transition: background 0.2s;
+}
+
+.webui-link.disabled,
+.webui-link:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background: #f0f7ff;
+  color: #1976d2;
+  font-size: 12px;
+  transition: background 0.2s;
+  pointer-events: none;
 }
 
 .webui-link:hover {

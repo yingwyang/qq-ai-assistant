@@ -52,6 +52,18 @@ async function request(endpoint, options = {}) {
     const response = await fetch(url, { ...options, headers });
     return await parseResponse(response);
   } catch (error) {
+    // 处理网络错误（服务未启动等情况）
+    if (error.name === 'TypeError' && error.message === 'Failed to fetch') {
+      throw new Error('服务暂时不可用，请检查后端服务是否已启动');
+    }
+    // 处理连接被拒绝错误
+    if (error.message && error.message.includes('Connection refused')) {
+      throw new Error('无法连接到服务器，请检查后端服务是否运行');
+    }
+    // 隐藏技术堆栈，显示友好提示
+    if (error.message && error.message.includes('getsockopt')) {
+      throw new Error('服务暂时不可用，请稍后重试');
+    }
     if (error.message !== '登录已过期，请重新登录') {
       console.error('API request failed:', error);
     }

@@ -61,6 +61,9 @@
                       :alt="group.groupName"
                       @error="handleAvatarError"
                     />
+                    <span v-if="group.unreadCount && group.unreadCount > 0" class="badge">
+                      {{ group.unreadCount > 99 ? '99+' : group.unreadCount }}
+                    </span>
                   </div>
                   <div v-if="!isCollapsed" class="group-info">
                     <div class="group-name">{{ group.groupName || '群聊 ' + group.groupId }}</div>
@@ -110,6 +113,7 @@
 import { ref, onMounted, onUnmounted, watch, computed } from 'vue';
 import { messageApi, userApi } from '../services/api';
 import Icon from './Icon.vue';
+import { showConfirm } from './ConfirmDialog.vue';
 
 export default {
     name: 'Sidebar',
@@ -162,8 +166,16 @@ export default {
       emit('tab-change', tab);
     };
 
-    const logout = () => {
-      emit('logout');
+    const logout = async () => {
+      const confirmed = await showConfirm({
+        title: '确认退出',
+        message: '确定要退出登录吗？',
+        confirmText: '确认',
+        cancelText: '取消'
+      });
+      if (confirmed) {
+        emit('logout');
+      }
     };
 
     const openLoginModal = () => {
@@ -355,10 +367,17 @@ export default {
 
 .sidebar-title {
   margin: 0;
-  font-size: 18px;
-  font-weight: 600;
+  font-size: 20px;
+  font-weight: bold;
   white-space: nowrap;
   overflow: hidden;
+  font-family: 'Georgia', 'Times New Roman', serif;
+  background: linear-gradient(135deg, #ff6b6b, #feca57, #48dbfb, #ff9ff3);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.1);
+  letter-spacing: 2px;
 }
 
 /* 用户信息区域 */
@@ -513,6 +532,25 @@ export default {
   display: flex;
   align-items: center;
   justify-content: center;
+  position: relative;
+}
+
+.group-avatar .badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  background-color: #ff3b30;
+  color: white;
+  font-size: 10px;
+  font-weight: bold;
+  border-radius: 7px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid #1a252f;
 }
 
 .group-avatar img {

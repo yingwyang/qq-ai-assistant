@@ -3,15 +3,20 @@
     <!-- 顶部群聊选择器 -->
     <div class="chat-header">
       <div class="group-selector">
-        <button @click="loadMessages" class="btn-load" :disabled="isLoading" title="刷新消息">
-          <Icon v-if="!isLoading" name="refresh" :size="16" />
-          <span v-else>加载中...</span>
+        <button @click="loadMessages" class="btn-refresh" :disabled="isLoading" title="刷新消息">
+          <svg v-if="!isLoading" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
+            <path d="M3 3v5h5"></path>
+            <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"></path>
+            <path d="M16 21h5v-5"></path>
+          </svg>
+          <span v-else>...</span>
         </button>
         <button 
           @click="toggleSelectionMode" 
           :class="['btn-selection', { active: isSelectionMode }]"
+          :title="isSelectionMode ? '退出选择' : '选择消息'"
         >
-          {{ isSelectionMode ? '退出选择' : '选择消息' }}
         </button>
       </div>
       <div v-if="currentGroupName" class="current-group">
@@ -29,6 +34,16 @@
         </label>
       </div>
       <div class="selection-actions">
+        <div class="quick-select">
+          <input 
+            type="number" 
+            v-model="quickSelectCount" 
+            min="1" 
+            placeholder="数量" 
+            class="quick-select-input"
+          />
+          <button @click="selectRecentMessages" class="btn-quick-select">选择最近</button>
+        </div>
         <button @click="clearSelection" class="btn-clear">清空</button>
         <button
           @click="analyzeSelected"
@@ -172,6 +187,7 @@ export default {
     const isSelectionMode = ref(false);
     const isMultiSelect = ref(false);
     const selectedMessageIds = ref(new Set());
+    const quickSelectCount = ref('');
     
     // 计算选中的消息数量
     const selectedMessages = computed(() => Array.from(selectedMessageIds.value));
@@ -445,6 +461,33 @@ export default {
       selectedMessageIds.value.clear();
     };
     
+    // 快速选择最近n条消息
+    const selectRecentMessages = () => {
+      const count = parseInt(quickSelectCount.value);
+      if (isNaN(count) || count <= 0) {
+        showToast('请输入有效的数量', 'warning');
+        return;
+      }
+      
+      // 按时间排序消息，取最近的count条
+      const sortedMessages = [...messages.value].sort((a, b) => {
+        const timeA = new Date(a.sendTime || a.timestamp || 0);
+        const timeB = new Date(b.sendTime || b.timestamp || 0);
+        return timeB - timeA;
+      });
+      
+      // 清空之前的选择
+      selectedMessageIds.value.clear();
+      
+      // 选择最近的count条消息
+      const recentMessages = sortedMessages.slice(0, count);
+      recentMessages.forEach(msg => {
+        selectedMessageIds.value.add(msg.id);
+      });
+      
+      showToast(`已选择最近 ${recentMessages.length} 条消息`, 'success');
+    };
+    
     // 分析选中的消息
     const analyzeSelected = async () => {
       if (selectedMessages.value.length === 0) {
@@ -494,10 +537,12 @@ export default {
       isMultiSelect,
       selectedMessages,
       selectedMessagesData,
+      quickSelectCount,
       toggleSelectionMode,
       toggleMessageSelection,
       isSelected,
       clearSelection,
+      selectRecentMessages,
       analyzeSelected
     };
   }
@@ -532,30 +577,30 @@ export default {
   max-width: 400px;
 }
 
-.btn-load {
-  width: 28px;
-  height: 28px;
+.btn-refresh {
+  width: 32px;
+  height: 32px;
   padding: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  background-color: transparent;
-  color: #3498db;
-  border: 1px solid #3498db;
+  background-color: #3498db;
+  color: white;
+  border: none;
   border-radius: 50%;
   cursor: pointer;
-  font-size: 13px;
   transition: all 0.2s;
 }
 
-.btn-load:hover:not(:disabled) {
-  background-color: #3498db;
-  color: white;
+.btn-refresh:hover:not(:disabled) {
+  background-color: #2980b9;
+  transform: rotate(180deg);
 }
 
-.btn-load:disabled {
+.btn-refresh:disabled {
   background-color: #bdc3c7;
   cursor: not-allowed;
+  transform: none;
 }
 
 .current-group {
@@ -773,19 +818,38 @@ export default {
 
 /* 选择模式按钮 */
 .btn-selection {
-  padding: 6px 12px;
+  width: 32px;
+  height: 32px;
   background-color: #9b59b6;
   color: white;
   border: none;
-  border-radius: 4px;
+  border-radius: 50%;
   cursor: pointer;
-  font-size: 13px;
+  font-size: 16px;
   transition: all 0.2s;
-  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+
+.btn-selection::after {
+  content: '';
+  position: absolute;
+  width: 12px;
+  height: 6px;
+  border-left: 2px solid white;
+  border-bottom: 2px solid white;
+  transform: rotate(-45deg);
+  top: 50%;
+  left: 50%;
+  margin-left: -5px;
+  margin-top: -3px;
 }
 
 .btn-selection:hover {
   background-color: #8e44ad;
+  transform: scale(1.1);
 }
 
 .btn-selection.active {
@@ -833,6 +897,41 @@ export default {
 .selection-actions {
   display: flex;
   gap: 10px;
+  align-items: center;
+}
+
+.quick-select {
+  display: flex;
+  gap: 5px;
+}
+
+.quick-select-input {
+  width: 60px;
+  padding: 6px 10px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 14px;
+  text-align: center;
+}
+
+.quick-select-input:focus {
+  outline: none;
+  border-color: #3498db;
+}
+
+.btn-quick-select {
+  padding: 6px 12px;
+  background-color: #3498db;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background-color 0.2s;
+}
+
+.btn-quick-select:hover {
+  background-color: #2980b9;
 }
 
 .btn-clear {

@@ -255,6 +255,10 @@ export function useAdminDashboard() {
   const stopNapCat = () => wrapComponentAction(isStoppingNapCat, systemApi.stopNapCat, 'NapCat 停止成功');
   const startGptSovits = () => wrapComponentAction(isStartingGptSovits, systemApi.startGptSovits, 'GPT-SoVITS 启动成功');
   const stopGptSovits = () => wrapComponentAction(isStoppingGptSovits, systemApi.stopGptSovits, 'GPT-SoVITS 停止成功');
+  
+  const openGptSovitsWebUI = () => {
+    window.open('http://localhost:8000', '_blank');
+  };
 
   const startPolling = () => {
     stopPolling();
@@ -393,6 +397,7 @@ export function useAdminDashboard() {
     stopNapCat,
     startGptSovits,
     stopGptSovits,
+    openGptSovitsWebUI,
     loadDashboard,
     startPolling,
     stopPolling,

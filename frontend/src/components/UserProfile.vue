@@ -318,7 +318,6 @@ export default {
 
       isUploading.value = true;
       try {
-        // 这里需要调用上传API，暂时使用base64
         const result = await userApi.uploadAvatar(avatarFile.value);
         userInfo.avatar = result.avatarUrl;
         showAvatarUpload.value = false;
