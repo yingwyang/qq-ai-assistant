@@ -9,7 +9,7 @@ import java.util.Optional;
 @Repository
 public interface UserSettingsRepository extends JpaRepository<UserSettings, Long> {
     
-    Optional<UserSettings> findByUserQq(String userQq);
+    Optional<UserSettings> findByUserId(String userId);
     
-    boolean existsByUserQq(String userQq);
+    boolean existsByUserId(String userId);
 }

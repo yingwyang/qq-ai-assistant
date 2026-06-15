@@ -121,34 +121,7 @@
               </div>
             </div>
           </div>
-          <div class="settings-section">
-            <h4>用户设置</h4>
-            <div class="setting-item">
-              <label>用户头像</label>
-              <div class="avatar-upload">
-                <img :src="userAvatar" class="avatar-preview-large" @error="handleUserAvatarError" />
-                <div class="upload-actions">
-                  <input 
-                    type="file" 
-                    ref="userAvatarInput"
-                    accept="image/*"
-                    style="display: none"
-                    @change="handleUserAvatarUpload"
-                  />
-                  <button class="btn-upload" @click="$refs.userAvatarInput.click()">
-                    📁 选择图片
-                  </button>
-                  <span class="upload-hint">或输入 URL</span>
-                  <input 
-                    type="text" 
-                    v-model="userAvatar" 
-                    placeholder="输入头像图片地址"
-                    class="url-input"
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
+
         </div>
         <div class="settings-dialog-footer">
           <button class="btn-cancel" @click="closeSettings">取消</button>
@@ -231,7 +204,7 @@ export default {
   components: { Icon },
   props: {
     groupId: { type: String, default: null },
-    userQq: { type: String, default: null },
+    userId: { type: String, default: null },
     userNickname: { type: String, default: null }
   },
   setup(props) {
@@ -242,7 +215,6 @@ export default {
     const isLoading = ref(false);
     const isOnline = ref(true);
     const botAvatarInput = ref(null);
-    const userAvatarInput = ref(null);
 
     // 使用独立的过滤模块 - 导入自 ../utils/messageFilter
 
@@ -266,9 +238,9 @@ export default {
     // 设置弹窗
     const showSettings = ref(false);
     
-    // 加载设置 - 从后端获取
+    // 加载设置 - 优先从后端获取
     const loadSettings = async () => {
-      // 优先从 localStorage 加载（为了快速显示）
+      // 先从 localStorage 加载默认值
       const savedBotName = localStorage.getItem('astrbot_bot_name');
       const savedBotAvatar = localStorage.getItem('astrbot_bot_avatar');
       const savedUserAvatar = localStorage.getItem('astrbot_user_avatar');
@@ -277,23 +249,21 @@ export default {
       if (savedBotAvatar) botAvatar.value = savedBotAvatar;
       if (savedUserAvatar) userAvatar.value = savedUserAvatar;
       
-      // 如果有 userQq，从后端获取设置
-      if (props.userQq) {
-        try {
-          const response = await userApi.getSettings(props.userQq);
-          if (response && response.status === 'ok' && response.data) {
-            botName.value = response.data.botName || botName.value;
-            botAvatar.value = response.data.botAvatar || botAvatar.value;
-            userAvatar.value = response.data.userAvatar || userAvatar.value;
-            
-            // 同步到 localStorage
-            localStorage.setItem('astrbot_bot_name', botName.value);
-            localStorage.setItem('astrbot_bot_avatar', botAvatar.value);
-            localStorage.setItem('astrbot_user_avatar', userAvatar.value);
-          }
-        } catch (error) {
-          console.error('加载用户设置失败:', error);
+      // 优先从后端获取最新设置
+      try {
+        const response = await userApi.getSettings(props.userId);
+        if (response && response.status === 'ok' && response.data) {
+          botName.value = response.data.botName || botName.value;
+          botAvatar.value = response.data.botAvatar || botAvatar.value;
+          userAvatar.value = response.data.userAvatar || userAvatar.value;
+          
+          // 同步到 localStorage
+          localStorage.setItem('astrbot_bot_name', botName.value);
+          localStorage.setItem('astrbot_bot_avatar', botAvatar.value);
+          localStorage.setItem('astrbot_user_avatar', userAvatar.value);
         }
+      } catch (error) {
+        console.error('加载用户设置失败:', error);
       }
     };
     
@@ -304,18 +274,16 @@ export default {
       localStorage.setItem('astrbot_bot_avatar', botAvatar.value);
       localStorage.setItem('astrbot_user_avatar', userAvatar.value);
       
-      // 如果有 userQq，保存到后端
-      if (props.userQq) {
-        try {
-          await userApi.saveSettings({
-            userQq: props.userQq,
-            botName: botName.value,
-            botAvatar: botAvatar.value,
-            userAvatar: userAvatar.value
-          });
-        } catch (error) {
-          console.error('保存用户设置到后端失败:', error);
-        }
+      // 保存到后端（无论是否有 userId）
+      try {
+        await userApi.saveSettings({
+          userId: props.userId,
+          botName: botName.value,
+          botAvatar: botAvatar.value,
+          userAvatar: userAvatar.value
+        });
+      } catch (error) {
+        console.error('保存用户设置到后端失败:', error);
       }
       
       showSettings.value = false;
@@ -333,30 +301,41 @@ export default {
       botAvatar.value = 'https://q.qlogo.cn/headimg_dl?dst_uin=0&spec=100';
     };
     
-    const handleUserAvatarError = () => {
-      userAvatar.value = 'https://q.qlogo.cn/headimg_dl?dst_uin=0&spec=100';
-    };
-    
     // 头像文件上传处理
-    const handleBotAvatarUpload = (event) => {
+    const handleBotAvatarUpload = async (event) => {
       const file = event.target.files[0];
       if (file) {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-          botAvatar.value = e.target.result;
-        };
-        reader.readAsDataURL(file);
-      }
-    };
-    
-    const handleUserAvatarUpload = (event) => {
-      const file = event.target.files[0];
-      if (file) {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-          userAvatar.value = e.target.result;
-        };
-        reader.readAsDataURL(file);
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('type', 'bot');
+        
+        console.log('准备上传文件:', file.name, '大小:', file.size);
+        console.log('FormData内容:', [...formData.entries()]);
+        
+        try {
+          const response = await userApi.uploadAvatar(formData);
+          console.log('上传响应:', response);
+          if (response && response.status === 'ok') {
+            botAvatar.value = response.url;
+            console.log('头像URL:', botAvatar.value);
+          } else {
+            console.error('头像上传失败:', response?.message || '未知错误');
+            // 降级为本地预览
+            const reader = new FileReader();
+            reader.onload = (e) => {
+              botAvatar.value = e.target.result;
+            };
+            reader.readAsDataURL(file);
+          }
+        } catch (error) {
+          console.error('头像上传失败:', error);
+          // 降级为本地预览
+          const reader = new FileReader();
+          reader.onload = (e) => {
+            botAvatar.value = e.target.result;
+          };
+          reader.readAsDataURL(file);
+        }
       }
     };
 
@@ -409,7 +388,7 @@ export default {
       try {
         const request = {};
         if (props.groupId) request.groupId = props.groupId;
-        if (props.userQq) request.userQq = props.userQq;
+        if (props.userId) request.userId = props.userId;
         if (props.userNickname) request.userNickname = props.userNickname;
 
         const response = await astrBotApi.createConversation(request);
@@ -502,7 +481,7 @@ export default {
         const request = { message: userMessage };
         if (currentConversationId.value) request.conversationId = currentConversationId.value;
         if (props.groupId) request.groupId = props.groupId;
-        if (props.userQq) request.userQq = props.userQq;
+        if (props.userId) request.userId = props.userId;
         if (props.userNickname) request.userNickname = props.userNickname;
 
         const response = await astrBotApi.sendMessage(request);
@@ -606,7 +585,7 @@ export default {
         };
         if (currentConversationId.value) request.conversationId = currentConversationId.value;
         if (props.groupId) request.groupId = props.groupId;
-        if (props.userQq) request.userQq = props.userQq;
+        if (props.userId) request.userId = props.userId;
         if (props.userNickname) request.userNickname = props.userNickname;
 
         console.log('发送分析请求:', request);
@@ -657,9 +636,9 @@ export default {
       setInterval(checkStatus, 30000);
     });
 
-    // 监听 userQq 变化，重新加载设置
-    watch(() => props.userQq, (newUserQq) => {
-      if (newUserQq) {
+    // 监听 userId 变化，重新加载设置
+    watch(() => props.userId, (newUserId) => {
+      if (newUserId) {
         loadSettings();
       }
     });
@@ -670,7 +649,6 @@ export default {
       messagesContainer,
       inputRef,
       botAvatarInput,
-      userAvatarInput,
       isLoading,
       isOnline,
       conversations,
@@ -694,9 +672,7 @@ export default {
       saveSettings,
       closeSettings,
       handleBotAvatarError,
-      handleUserAvatarError,
-      handleBotAvatarUpload,
-      handleUserAvatarUpload
+      handleBotAvatarUpload
     };
   }
 };

@@ -8,7 +8,7 @@ import java.time.LocalDateTime;
  */
 @Entity
 @Table(name = "user_settings", indexes = {
-    @Index(name = "idx_user_qq", columnList = "userQq")
+    @Index(name = "idx_user_id", columnList = "userId")
 })
 public class UserSettings {
     
@@ -16,8 +16,8 @@ public class UserSettings {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
     
-    @Column(nullable = false, unique = true, length = 20)
-    private String userQq;  // 用户QQ号
+    @Column(nullable = false, unique = true, length = 50)
+    private String userId;  // 用户ID
     
     @Column(length = 100)
     private String botName = "AstrBot 助手";  // Bot名称
@@ -40,8 +40,8 @@ public class UserSettings {
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
     
-    public String getUserQq() { return userQq; }
-    public void setUserQq(String userQq) { this.userQq = userQq; }
+    public String getUserId() { return userId; }
+    public void setUserId(String userId) { this.userId = userId; }
     
     public String getBotName() { return botName; }
     public void setBotName(String botName) { this.botName = botName; }

@@ -191,7 +191,7 @@ export const astrBotApi = {
 };
 
 export const userApi = {
-  getSettings: (userQq) => request(`/user/settings?userQq=${userQq}`),
+  getSettings: (userId) => request(`/user/settings?userId=${userId}`),
   saveSettings: (params) => request('/user/settings', {
     method: 'POST',
     body: JSON.stringify(params),
@@ -201,11 +201,7 @@ export const userApi = {
     method: 'PUT',
     body: JSON.stringify(params),
   }),
-  uploadAvatar: (file) => {
-    const formData = new FormData();
-    formData.append('file', file);
-    return uploadRequest('/user/avatar', formData);
-  },
+  uploadAvatar: (formData) => uploadRequest('/avatar/upload', formData),
   getQqBindings: () => request('/user/qq-bindings'),
   bindQq: (params) => request('/user/qq-bindings', {
     method: 'POST',

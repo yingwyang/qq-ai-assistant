@@ -21,22 +21,31 @@ public class UserSettingsController {
      * 获取用户设置
      */
     @GetMapping("/settings")
-    public ResponseEntity<?> getSettings(@RequestParam String userQq) {
+    public ResponseEntity<?> getSettings(@RequestParam(required = false) String userId) {
         try {
-            Optional<UserSettings> settings = userSettingsRepository.findByUserQq(userQq);
-            
             JSONObject result = new JSONObject();
             result.put("status", "ok");
             
-            if (settings.isPresent()) {
-                UserSettings s = settings.get();
-                result.put("data", Map.of(
-                    "botName", s.getBotName(),
-                    "botAvatar", s.getBotAvatar(),
-                    "userAvatar", s.getUserAvatar()
-                ));
+            // 如果提供了 userId，尝试从数据库获取
+            if (userId != null && !userId.isEmpty()) {
+                Optional<UserSettings> settings = userSettingsRepository.findByUserId(userId);
+                if (settings.isPresent()) {
+                    UserSettings s = settings.get();
+                    result.put("data", Map.of(
+                        "botName", s.getBotName(),
+                        "botAvatar", s.getBotAvatar(),
+                        "userAvatar", s.getUserAvatar()
+                    ));
+                } else {
+                    // 返回默认设置
+                    result.put("data", Map.of(
+                        "botName", "AstrBot 助手",
+                        "botAvatar", "https://q.qlogo.cn/headimg_dl?dst_uin=0&spec=100",
+                        "userAvatar", "https://q.qlogo.cn/headimg_dl?dst_uin=0&spec=100"
+                    ));
+                }
             } else {
-                // 返回默认设置
+                // 未提供 userId，返回默认设置
                 result.put("data", Map.of(
                     "botName", "AstrBot 助手",
                     "botAvatar", "https://q.qlogo.cn/headimg_dl?dst_uin=0&spec=100",
@@ -59,22 +68,20 @@ public class UserSettingsController {
     @PostMapping("/settings")
     public ResponseEntity<?> saveSettings(@RequestBody Map<String, Object> request) {
         try {
-            String userQq = (String) request.get("userQq");
+            String userId = (String) request.get("userId");
             String botName = (String) request.get("botName");
             String botAvatar = (String) request.get("botAvatar");
             String userAvatar = (String) request.get("userAvatar");
 
-            if (userQq == null || userQq.isEmpty()) {
-                JSONObject error = new JSONObject();
-                error.put("status", "error");
-                error.put("message", "用户QQ不能为空");
-                return ResponseEntity.ok(error);
+            // 如果没有提供 userId，使用默认标识存储全局设置
+            if (userId == null || userId.isEmpty()) {
+                userId = "default";
             }
 
-            UserSettings settings = userSettingsRepository.findByUserQq(userQq)
+            UserSettings settings = userSettingsRepository.findByUserId(userId)
                 .orElse(new UserSettings());
             
-            settings.setUserQq(userQq);
+            settings.setUserId(userId);
             if (botName != null) settings.setBotName(botName);
             if (botAvatar != null) settings.setBotAvatar(botAvatar);
             if (userAvatar != null) settings.setUserAvatar(userAvatar);

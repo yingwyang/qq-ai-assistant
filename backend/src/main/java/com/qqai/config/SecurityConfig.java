@@ -51,6 +51,7 @@ public class SecurityConfig implements WebSocketConfigurer {
                 .requestMatchers("/api/system/napcat/qrcode-image").permitAll()
                 .requestMatchers("/api/system/napcat/login-status").permitAll()
                 .requestMatchers("/api/system/component-status").permitAll()
+                .requestMatchers("/api/avatar/**").permitAll()
                 .requestMatchers(HttpMethod.GET, "/api/persona/**").permitAll()
                 .requestMatchers("/api/persona/**").authenticated()
                 .requestMatchers("/api/dashboard/**").hasRole("ADMIN")
