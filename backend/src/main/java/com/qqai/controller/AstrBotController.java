@@ -5,6 +5,7 @@ import com.alibaba.fastjson.JSONObject;
 import com.qqai.entity.AstrBotConversation;
 import com.qqai.entity.AstrBotMessage;
 import com.qqai.entity.Message;
+import com.qqai.plugin.PluginManager;
 import com.qqai.service.AstrBotConversationService;
 import com.qqai.service.MessageService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -35,6 +36,9 @@ public class AstrBotController {
 
     @Autowired
     private AstrBotConversationService conversationService;
+
+    @Autowired
+    private PluginManager pluginManager;
 
     @Autowired
     private jakarta.persistence.EntityManager entityManager;
@@ -68,6 +72,14 @@ public class AstrBotController {
             
             // 如果是群消息或私聊消息，存入数据库
             if (groupId != null || sessionId != null) {
+                // 通过插件格式化 AstrBot 推送的内容
+                Map<String, Object> callbackContext = new HashMap<>();
+                callbackContext.put("source", "callback");
+                callbackContext.put("groupId", groupId);
+                callbackContext.put("sessionId", sessionId);
+                callbackContext.put("senderId", senderId);
+                content = pluginManager.applyPlugins(content, callbackContext);
+
                 Message message = new Message();
                 message.setGroupId(groupId != null ? groupId : sessionId);
                 message.setUserQq(senderId);
@@ -82,11 +94,16 @@ public class AstrBotController {
                 System.out.println("AstrBot消息已保存, ID: " + saved.getId());
             }
             
-            return ResponseEntity.ok("{\"status\":\"ok\"}");
+            Map<String, Object> okResult = new HashMap<>();
+            okResult.put("status", "ok");
+            return ResponseEntity.ok(okResult);
         } catch (Exception e) {
             System.err.println("处理AstrBot消息失败: " + e.getMessage());
             e.printStackTrace();
-            return ResponseEntity.ok("{\"status\":\"error\",\"message\":\"" + e.getMessage() + "\"}");
+            Map<String, Object> errorResult = new HashMap<>();
+            errorResult.put("status", "error");
+            errorResult.put("message", e.getMessage());
+            return ResponseEntity.ok(errorResult);
         }
     }
 
@@ -101,7 +118,9 @@ public class AstrBotController {
         String analysisType = (String) request.getOrDefault("type", "summary");
 
         if (groupId == null || groupId.trim().isEmpty()) {
-            return ResponseEntity.badRequest().body("{\"error\":\"群号不能为空\"}");
+            Map<String, Object> errorResult = new HashMap<>();
+            errorResult.put("error", "群号不能为空");
+            return ResponseEntity.badRequest().body(errorResult);
         }
 
         try {
@@ -133,7 +152,7 @@ public class AstrBotController {
             
             // 添加系统指令，让 AstrBot 使用工具查询并分析
             prompt.append("【系统指令】你是一名群聊分析助手。请使用 MySQL 工具查询群聊 \"" + groupId + "\" 的消息数据。\n");
-            prompt.append("【重要】完成分析后，请只输出最终的纯文本总结，不要包含任何 JSON 格式、表格格式或工具调用信息。\n\n");
+            prompt.append("【重要】完成分析后，请使用 Markdown 格式输出总结，支持标题、列表、加粗、链接。不要包含任何 JSON 格式或工具调用信息。\n\n");
             
             switch (analysisType) {
                 case "summary":
@@ -226,10 +245,15 @@ public class AstrBotController {
             analysis = analysis.replaceAll(jsonPattern, " ");
             // 再次清理可能残留的简单 JSON
             analysis = analysis.replaceAll("\\s*\\{[^{}]*\"id\"[^{}]*\\}\\s*", " ");
-            // 移除表格格式的内容
-            analysis = analysis.replaceAll("\\|[^|]+\\|\\n\\|[-|]+\\|", "");
-            // 移除多余的换行和空格
-            analysis = analysis.replaceAll("\\s+", " ").trim();
+            // 移除多余的水平空格，但保留 Markdown 段落结构
+            analysis = analysis.replaceAll("[ \\t]+", " ").trim();
+
+            // 通过插件链格式化分析结果
+            Map<String, Object> analyzeContext = new HashMap<>();
+            analyzeContext.put("source", "analyze");
+            analyzeContext.put("groupId", groupId);
+            analyzeContext.put("analysisType", analysisType);
+            analysis = pluginManager.applyPlugins(analysis, analyzeContext);
             
             System.out.println("AstrBot 分析结果: " + analysis);
 
@@ -260,13 +284,18 @@ public class AstrBotController {
      */
     @GetMapping("/status")
     public ResponseEntity<?> getAstrBotStatus() {
+        Map<String, Object> result = new HashMap<>();
         try {
             // 尝试访问 AstrBot 的根路径或健康检查端点
             String url = astrBotApiUrl;
             ResponseEntity<String> response = restTemplate.getForEntity(url, String.class);
-            return ResponseEntity.ok("{\"status\":\"online\",\"message\":\"AstrBot 运行中\"}");
+            result.put("status", "online");
+            result.put("message", "AstrBot 运行中");
+            return ResponseEntity.ok(result);
         } catch (Exception e) {
-            return ResponseEntity.ok("{\"status\":\"offline\",\"message\":\"" + e.getMessage() + "\"}");
+            result.put("status", "offline");
+            result.put("message", e.getMessage());
+            return ResponseEntity.ok(result);
         }
     }
 
@@ -284,7 +313,9 @@ public class AstrBotController {
         String model = (String) request.getOrDefault("model", "default");
 
         if (message == null || message.trim().isEmpty()) {
-            return ResponseEntity.badRequest().body("{\"error\":\"消息不能为空\"}");
+            Map<String, Object> errorResult = new HashMap<>();
+            errorResult.put("error", "消息不能为空");
+            return ResponseEntity.badRequest().body(errorResult);
         }
 
         try {
@@ -314,9 +345,16 @@ public class AstrBotController {
             if (groupId != null) {
                 body.put("session_id", groupId);
             }
+            // 在上下文最前面追加系统提示，要求 AI 使用 Markdown 格式回复
+            Map<String, String> systemMessage = new HashMap<>();
+            systemMessage.put("role", "system");
+            systemMessage.put("content", "请使用 Markdown 格式回复。支持标题、列表、加粗、代码块、引用、链接。如需摘要请使用 <details><summary>摘要</summary>...</details>。");
+            List<Map<String, String>> finalContext = new ArrayList<>();
+            finalContext.add(systemMessage);
+            finalContext.addAll(context);
             // 如果有上下文，传递给 AstrBot
-            if (!context.isEmpty()) {
-                body.put("context", context);
+            if (!finalContext.isEmpty()) {
+                body.put("context", finalContext);
             }
             
             HttpEntity<Map<String, Object>> entity = new HttpEntity<>(body, headers);
@@ -393,6 +431,14 @@ public class AstrBotController {
             if (finalReply.isEmpty()) {
                 finalReply = "抱歉，我没有理解您的问题。";
             }
+
+            // 通过插件链格式化 AI 回复
+            Map<String, Object> replyContext = new HashMap<>();
+            replyContext.put("source", "send");
+            replyContext.put("conversationId", currentConversationId);
+            replyContext.put("groupId", groupId);
+            replyContext.put("userId", userQq);
+            finalReply = pluginManager.applyPlugins(finalReply, replyContext);
             
             System.out.println("AstrBot 最终回复: " + finalReply);
             
@@ -476,7 +522,9 @@ public class AstrBotController {
                 result.put("data", conversation.get());
                 return ResponseEntity.ok(result.toJSONString());
             } else {
-                return ResponseEntity.status(404).body("{\"error\":\"对话不存在\"}");
+                Map<String, Object> errorResult = new HashMap<>();
+                errorResult.put("error", "对话不存在");
+                return ResponseEntity.status(404).body(errorResult);
             }
         } catch (Exception e) {
             JSONObject error = new JSONObject();
@@ -545,7 +593,9 @@ public class AstrBotController {
         try {
             String title = request.get("title");
             conversationService.updateConversationTitle(conversationId, title);
-            return ResponseEntity.ok("{\"status\":\"ok\"}");
+            Map<String, Object> okResult = new HashMap<>();
+            okResult.put("status", "ok");
+            return ResponseEntity.ok(okResult);
         } catch (Exception e) {
             JSONObject error = new JSONObject();
             error.put("status", "error");
@@ -561,7 +611,9 @@ public class AstrBotController {
     public ResponseEntity<?> archiveConversation(@PathVariable String conversationId) {
         try {
             conversationService.archiveConversation(conversationId);
-            return ResponseEntity.ok("{\"status\":\"ok\"}");
+            Map<String, Object> okResult = new HashMap<>();
+            okResult.put("status", "ok");
+            return ResponseEntity.ok(okResult);
         } catch (Exception e) {
             JSONObject error = new JSONObject();
             error.put("status", "error");
@@ -577,7 +629,9 @@ public class AstrBotController {
     public ResponseEntity<?> deleteConversation(@PathVariable String conversationId) {
         try {
             conversationService.deleteConversation(conversationId);
-            return ResponseEntity.ok("{\"status\":\"ok\"}");
+            Map<String, Object> okResult = new HashMap<>();
+            okResult.put("status", "ok");
+            return ResponseEntity.ok(okResult);
         } catch (Exception e) {
             JSONObject error = new JSONObject();
             error.put("status", "error");

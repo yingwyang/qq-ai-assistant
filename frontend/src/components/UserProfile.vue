@@ -12,12 +12,17 @@
           <h3>基本信息</h3>
           <div class="user-info-card">
             <div class="avatar-section">
-              <img :src="getUserAvatarUrl(userInfo.avatar)" alt="avatar" class="user-avatar" />
+              <img
+                :src="getUserAvatarUrl(userInfo.avatar)"
+                alt="avatar"
+                class="user-avatar"
+                @error="handleAvatarError"
+              />
               <button class="change-avatar-btn" @click="showAvatarUpload = true">更换头像</button>
             </div>
             <div class="info-fields">
               <div class="field">
-                <label>用户名</label>
+                <label>账号</label>
                 <span>{{ userInfo.username }}</span>
               </div>
               <div class="field">
@@ -62,7 +67,7 @@
               :class="{ 'is-default': binding.isDefault }"
             >
               <div class="qq-avatar">
-                <img :src="binding.avatar || defaultQqAvatar" alt="qq avatar" />
+                <img :src="binding.avatar || defaultQqAvatar" alt="qq avatar" @error="handleAvatarError" />
               </div>
               <div class="qq-info">
                 <div class="qq-number">{{ binding.qqNumber }}</div>
@@ -145,8 +150,8 @@ export default {
   },
   emits: ['update:visible', 'profile-updated'],
   setup(props, { emit }) {
-    const defaultAvatar = 'https://q.qlogo.cn/headimg_dl?dst_uin=0&spec=100';
-    const defaultQqAvatar = 'https://q.qlogo.cn/headimg_dl?dst_uin=0&spec=100';
+    const defaultAvatar = '/default-avatar.svg';
+    const defaultQqAvatar = '/default-avatar.svg';
 
     const userInfo = reactive({
       id: null,
@@ -160,7 +165,14 @@ export default {
     const getUserAvatarUrl = (avatar) => {
       if (!avatar) return defaultAvatar;
       if (avatar.startsWith('http')) return avatar;
-      return `http://localhost:8081${avatar}`;
+      // 兼容相对路径是否带前导斜杠
+      const normalized = avatar.startsWith('/') ? avatar : '/' + avatar;
+      return `http://localhost:8081${normalized}`;
+    };
+
+    // 头像加载失败时使用本地默认头像
+    const handleAvatarError = (e) => {
+      e.target.src = defaultAvatar;
     };
 
     const qqBindings = ref([]);
@@ -319,7 +331,10 @@ export default {
       isUploading.value = true;
       try {
         const result = await userApi.uploadAvatar(avatarFile.value);
-        userInfo.avatar = result.avatarUrl;
+        const avatarUrl = result.avatarUrl || result.url;
+        // 将新头像持久化到数据库，刷新后才不会再变回旧头像
+        await userApi.updateProfile({ avatar: avatarUrl });
+        userInfo.avatar = avatarUrl;
         showAvatarUpload.value = false;
         avatarPreview.value = '';
         avatarFile.value = null;
@@ -371,7 +386,8 @@ export default {
       closeModal,
       loadUserProfile,
       loadQqBindings,
-      getUserAvatarUrl
+      getUserAvatarUrl,
+      handleAvatarError
     };
   },
   watch: {

@@ -276,7 +276,7 @@
               <thead>
                 <tr>
                   <th>ID</th>
-                  <th>QQ</th>
+                  <th>账号</th>
                   <th>昵称</th>
                   <th>角色</th>
                   <th>状态</th>
@@ -288,7 +288,7 @@
               <tbody>
                 <tr v-for="user in users" :key="user.id">
                   <td>{{ user.id }}</td>
-                  <td>{{ user.qq }}</td>
+                  <td>{{ user.username }}</td>
                   <td>{{ user.nickname || '-' }}</td>
                   <td>
                     <span class="role-badge" :class="user.role?.toLowerCase()">
@@ -853,7 +853,7 @@ export default {
       const newRole = user.role === 'ADMIN' ? 'USER' : 'ADMIN';
       try {
         await adminApi.updateUserRole(user.id, newRole);
-        showSystemMsg(`用户 ${user.qq} 角色已更新为 ${newRole === 'ADMIN' ? '管理员' : '普通用户'}`);
+        showSystemMsg(`用户 ${user.username} 角色已更新为 ${newRole === 'ADMIN' ? '管理员' : '普通用户'}`);
         await loadUsers();
       } catch (error) {
         showSystemMsg('更新角色失败: ' + error.message, 'error');
@@ -863,7 +863,7 @@ export default {
     const toggleActive = async (user) => {
       try {
         await adminApi.updateUserActive(user.id, !user.active);
-        showSystemMsg(`用户 ${user.qq} 已${user.active ? '禁用' : '启用'}`);
+        showSystemMsg(`用户 ${user.username} 已${user.active ? '禁用' : '启用'}`);
         await loadUsers();
       } catch (error) {
         showSystemMsg('更新状态失败: ' + error.message, 'error');
@@ -871,10 +871,10 @@ export default {
     };
 
     const deleteUser = async (user) => {
-      if (!confirm(`确定要删除用户 ${user.qq} 吗？此操作不可恢复！`)) return;
+      if (!confirm(`确定要删除用户 ${user.username} 吗？此操作不可恢复！`)) return;
       try {
         await adminApi.deleteUser(user.id);
-        showSystemMsg(`用户 ${user.qq} 已删除`);
+        showSystemMsg(`用户 ${user.username} 已删除`);
         await loadUsers();
       } catch (error) {
         showSystemMsg('删除失败: ' + error.message, 'error');

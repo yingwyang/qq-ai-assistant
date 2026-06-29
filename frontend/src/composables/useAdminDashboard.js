@@ -1,5 +1,5 @@
-import { ref, onMounted, onUnmounted } from 'vue';
-import { dashboardApi, systemApi } from '../services/api';
+import { ref, onMounted, onUnmounted, computed } from 'vue';
+import { dashboardApi, systemApi, messageApi } from '../services/api';
 
 const POLL_INTERVAL_MS = 15000;
 
@@ -40,6 +40,50 @@ export function useAdminDashboard() {
     usagePercent: 0,
   });
 
+  // 媒体文件管理状态
+  const mediaFiles = ref([]);
+  const mediaFilesLoading = ref(false);
+  const mediaFilesError = ref('');
+  const mediaFileFilter = ref('ALL');
+  const mediaFilePage = ref(0);
+  const mediaFileSize = ref(20);
+  const mediaFilesTotal = ref(0);
+  const selectedMediaFileIds = ref(new Set());
+
+  // 跨页文件缓存：用于预览已选中但不在当前页的文件
+  const mediaFileCache = ref(new Map());
+
+  // 媒体文件加载失败记录（用于显示占位图，避免反复加载导致死循环）
+  const mediaErrorIds = ref(new Set());
+
+  const markMediaError = (id) => {
+    if (id == null) return;
+    mediaErrorIds.value = new Set(mediaErrorIds.value).add(id);
+  };
+
+  const isMediaError = (id) => mediaErrorIds.value.has(id);
+
+  const selectedMediaFilesCount = computed(() => selectedMediaFileIds.value.size);
+
+  const selectedMediaFilesTotalSize = computed(() => {
+    const selectedIds = selectedMediaFileIds.value;
+    let total = 0;
+    selectedIds.forEach((id) => {
+      const file = mediaFileCache.value.get(id);
+      if (file) total += file.fileSize || 0;
+    });
+    return total;
+  });
+
+  const formatBytes = (bytes) => {
+    if (bytes === 0 || bytes == null) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    const idx = Math.min(i, sizes.length - 1);
+    return `${parseFloat((bytes / Math.pow(k, idx)).toFixed(2))} ${sizes[idx]}`;
+  };
+
   const isLoading = ref(false);
   const isStartingAstrBot = ref(false);
   const isStoppingAstrBot = ref(false);
@@ -47,6 +91,14 @@ export function useAdminDashboard() {
   const isStoppingNapCat = ref(false);
   const isStartingGptSovits = ref(false);
   const isStoppingGptSovits = ref(false);
+
+  // 媒体文件清理状态
+  const isPurging = ref(false);
+  const purgeTypes = ref({ IMAGE: false, VIDEO: false, AUDIO: false });
+  const purgeResult = ref(null);
+  const hasPurgeSelection = computed(() =>
+    purgeTypes.value.IMAGE || purgeTypes.value.VIDEO || purgeTypes.value.AUDIO
+  );
 
   let statusInterval = null;
 
@@ -107,6 +159,121 @@ export function useAdminDashboard() {
       diskUsage.value = await systemApi.getDiskUsage();
     } catch (error) {
       console.error('加载磁盘使用情况失败:', error);
+    }
+  };
+
+  const loadMediaFiles = async () => {
+    mediaFilesLoading.value = true;
+    mediaFilesError.value = '';
+    try {
+      const res = await messageApi.getMediaFiles(mediaFileFilter.value, mediaFilePage.value, mediaFileSize.value);
+      if (res?.success && res.data) {
+        const content = res.data.content || [];
+        mediaFiles.value = content;
+        mediaFilesTotal.value = res.data.totalElements || 0;
+        const newCache = new Map(mediaFileCache.value);
+        content.forEach((file) => {
+          if (file.id != null) newCache.set(file.id, file);
+        });
+        mediaFileCache.value = newCache;
+      } else {
+        mediaFiles.value = [];
+        mediaFilesTotal.value = 0;
+      }
+    } catch (error) {
+      console.error('加载媒体文件失败:', error);
+      mediaFilesError.value = error.message || '加载媒体文件失败';
+      mediaFiles.value = [];
+      mediaFilesTotal.value = 0;
+    } finally {
+      mediaFilesLoading.value = false;
+    }
+  };
+
+  const setMediaFileFilter = (type) => {
+    mediaFileFilter.value = type || 'ALL';
+    mediaFilePage.value = 0;
+    selectedMediaFileIds.value = new Set();
+    mediaFileCache.value = new Map();
+    loadMediaFiles();
+  };
+
+  const toggleMediaFileSelection = (id) => {
+    const set = new Set(selectedMediaFileIds.value);
+    if (set.has(id)) {
+      set.delete(id);
+    } else {
+      set.add(id);
+    }
+    selectedMediaFileIds.value = set;
+  };
+
+  const selectAllMediaFiles = () => {
+    const newSet = new Set(selectedMediaFileIds.value);
+    const newCache = new Map(mediaFileCache.value);
+    mediaFiles.value.forEach((file) => {
+      if (file.id != null) {
+        newSet.add(file.id);
+        newCache.set(file.id, file);
+      }
+    });
+    selectedMediaFileIds.value = newSet;
+    mediaFileCache.value = newCache;
+  };
+
+  const clearMediaFileSelection = () => {
+    selectedMediaFileIds.value = new Set();
+  };
+
+  const deleteSelectedMediaFiles = async () => {
+    if (selectedMediaFileIds.value.size === 0) return;
+    const ids = Array.from(selectedMediaFileIds.value);
+    try {
+      const result = await messageApi.deleteMediaFiles(ids);
+      showSystemMsg(result.message || `成功删除 ${result.totalDeleted} 个文件`, 'success');
+      selectedMediaFileIds.value = new Set();
+      mediaFileCache.value = new Map();
+      await loadMediaFiles();
+      await loadDiskUsage();
+    } catch (error) {
+      console.error('删除媒体文件失败:', error);
+      showSystemMsg(`删除媒体文件失败: ${error.message}`, 'error');
+    }
+  };
+
+  /**
+   * 加载当前筛选条件下的全部媒体文件（用于大批量预览）。
+   * 通过较大的 page size 减少请求次数，并缓存所有文件对象。
+   */
+  const loadAllMediaFilesForPreview = async () => {
+    mediaFilesLoading.value = true;
+    mediaFilesError.value = '';
+    try {
+      const size = 500;
+      let page = 0;
+      let total = 0;
+      const allFiles = [];
+      const newCache = new Map(mediaFileCache.value);
+      do {
+        const res = await messageApi.getMediaFiles(mediaFileFilter.value, page, size);
+        if (!res?.success || !res.data) break;
+        const content = res.data.content || [];
+        total = res.data.totalElements || 0;
+        content.forEach((file) => {
+          if (file.id != null) newCache.set(file.id, file);
+        });
+        allFiles.push(...content);
+        if (content.length < size) break;
+        page++;
+      } while (allFiles.length < total);
+      mediaFileCache.value = newCache;
+      return allFiles;
+    } catch (error) {
+      console.error('加载全部媒体文件失败:', error);
+      mediaFilesError.value = error.message || '加载全部媒体文件失败';
+      return [];
+    } finally {
+      mediaFilesLoading.value = false;
     }
   };
 
@@ -256,7 +423,32 @@ export function useAdminDashboard() {
   const stopNapCat = () => wrapComponentAction(isStoppingNapCat, systemApi.stopNapCat, 'NapCat 停止成功');
   const startGptSovits = () => wrapComponentAction(isStartingGptSovits, systemApi.startGptSovits, 'GPT-SoVITS 启动成功');
   const stopGptSovits = () => wrapComponentAction(isStoppingGptSovits, systemApi.stopGptSovits, 'GPT-SoVITS 停止成功');
-  
+
+  const confirmPurgeMedia = async () => {
+    if (!hasPurgeSelection.value) return;
+    const types = [];
+    if (purgeTypes.value.IMAGE) types.push('IMAGE');
+    if (purgeTypes.value.VIDEO) types.push('VIDEO');
+    if (purgeTypes.value.AUDIO) types.push('AUDIO');
+
+    isPurging.value = true;
+    purgeResult.value = null;
+    try {
+      const result = await messageApi.purgeMedia(types);
+      purgeResult.value = result;
+      showSystemMsg(`成功清理 ${result.totalDeleted} 个文件（约 ${result.freedMB}）`, 'success');
+      selectedMediaFileIds.value = new Set();
+      mediaFileCache.value = new Map();
+      await loadMediaFiles();
+      await loadDiskUsage(); // 清理后刷新磁盘使用情况
+    } catch (error) {
+      console.error('清理媒体文件失败:', error);
+      showSystemMsg(`清理失败: ${error.message}`, 'error');
+    } finally {
+      isPurging.value = false;
+    }
+  };
+
   const openGptSovitsWebUI = () => {
     window.open('http://localhost:8000', '_blank');
   };
@@ -408,6 +600,33 @@ export function useAdminDashboard() {
     startGptSovits,
     stopGptSovits,
     openGptSovitsWebUI,
+    isPurging,
+    purgeTypes,
+    purgeResult,
+    hasPurgeSelection,
+    confirmPurgeMedia,
+    mediaFiles,
+    mediaFilesLoading,
+    mediaFilesError,
+    mediaFileFilter,
+    mediaFilePage,
+    mediaFileSize,
+    mediaFilesTotal,
+    selectedMediaFileIds,
+    selectedMediaFilesCount,
+    selectedMediaFilesTotalSize,
+    mediaFileCache,
+    mediaErrorIds,
+    markMediaError,
+    isMediaError,
+    loadMediaFiles,
+    setMediaFileFilter,
+    toggleMediaFileSelection,
+    selectAllMediaFiles,
+    clearMediaFileSelection,
+    deleteSelectedMediaFiles,
+    loadAllMediaFilesForPreview,
+    formatBytes,
     loadDashboard,
     startPolling,
     stopPolling,

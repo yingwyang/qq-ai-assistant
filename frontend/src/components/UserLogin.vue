@@ -10,12 +10,12 @@
         <!-- 登录表单 -->
         <form v-if="!isRegistering" @submit.prevent="handleLogin">
           <div class="form-group">
-            <label for="username">用户名</label>
+            <label for="username">账号</label>
             <input 
               id="username"
               v-model="loginForm.username" 
               type="text" 
-              placeholder="请输入用户名"
+              placeholder="请输入账号"
               required
               :disabled="isProcessing"
             />
@@ -50,12 +50,12 @@
         <!-- 注册表单 -->
         <form v-else @submit.prevent="handleRegister">
           <div class="form-group">
-            <label for="reg-username">用户名</label>
+            <label for="reg-username">账号</label>
             <input 
               id="reg-username"
               v-model="registerForm.username" 
               type="text" 
-              placeholder="请输入用户名"
+              placeholder="请输入账号"
               required
               :disabled="isProcessing"
             />
@@ -146,7 +146,7 @@ export default {
     
     const handleLogin = async () => {
       if (!loginForm.username || !loginForm.password) {
-        errorMessage.value = '请输入用户名和密码';
+        errorMessage.value = '请输入账号和密码';
         return;
       }
       
@@ -172,7 +172,7 @@ export default {
         loginForm.username = '';
         loginForm.password = '';
       } catch (error) {
-        errorMessage.value = error.message || '登录失败，请检查用户名和密码';
+        errorMessage.value = error.message || '登录失败，请检查账号和密码';
       } finally {
         isProcessing.value = false;
       }
@@ -180,7 +180,7 @@ export default {
     
     const handleRegister = async () => {
       if (!registerForm.username || !registerForm.password) {
-        errorMessage.value = '请输入用户名和密码';
+        errorMessage.value = '请输入账号和密码';
         return;
       }
       

@@ -54,7 +54,7 @@ public class SecurityConfig implements WebSocketConfigurer {
                 .requestMatchers("/api/avatar/**").permitAll()
                 .requestMatchers(HttpMethod.GET, "/api/persona/**").permitAll()
                 .requestMatchers("/api/persona/**").authenticated()
-                .requestMatchers("/api/dashboard/**").hasRole("ADMIN")
+                .requestMatchers("/api/dashboard/**").authenticated()
                 .requestMatchers("/api/admin/**").hasRole("ADMIN")
                 .requestMatchers("/").permitAll()
                 .requestMatchers("/webhook").permitAll()

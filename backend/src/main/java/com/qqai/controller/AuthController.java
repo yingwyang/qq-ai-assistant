@@ -9,6 +9,9 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.Map;
@@ -28,6 +31,25 @@ public class AuthController {
     @Autowired
     private JwtUtil jwtUtil;
 
+    /**
+     * 校验头像文件是否真实存在，不存在则返回 null，避免前端请求 404
+     */
+    private String resolveAvatarUrl(String avatar) {
+        if (avatar == null || avatar.isBlank()) {
+            return null;
+        }
+        if (avatar.startsWith("http")) {
+            return avatar;
+        }
+        String relative = avatar.startsWith("/") ? avatar.substring(1) : avatar;
+        Path filePath = Paths.get(relative).toAbsolutePath().normalize();
+        Path basePath = Paths.get("uploads/avatars").toAbsolutePath().normalize();
+        if (!filePath.startsWith(basePath)) {
+            return null;
+        }
+        return Files.exists(filePath) ? avatar : null;
+    }
+
     @PostMapping("/login")
     public ResponseEntity<?> login(@RequestBody Map<String, String> loginRequest) {
         String username = loginRequest.get("username");
@@ -38,7 +60,7 @@ public class AuthController {
                     .body(Map.of("error", "用户名和密码不能为空"));
         }
 
-        Optional<User> userOpt = userRepository.findByQq(username);
+        Optional<User> userOpt = userRepository.findByUsername(username);
         if (userOpt.isEmpty()) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(Map.of("error", "用户名或密码错误"));
@@ -61,14 +83,14 @@ public class AuthController {
         userRepository.save(user);
 
         // 生成 JWT token
-        String token = jwtUtil.generateToken(user.getQq(), user.getRole());
+        String token = jwtUtil.generateToken(user.getUsername(), user.getRole());
 
         Map<String, Object> response = new HashMap<>();
         response.put("token", token);
-        response.put("username", user.getQq());
+        response.put("username", user.getUsername());
         response.put("nickname", user.getNickname());
         response.put("role", user.getRole());
-        response.put("avatar", user.getAvatar());
+        response.put("avatar", resolveAvatarUrl(user.getAvatar()));
 
         return ResponseEntity.ok(response);
     }
@@ -84,13 +106,13 @@ public class AuthController {
                     .body(Map.of("error", "用户名和密码不能为空"));
         }
 
-        if (userRepository.findByQq(username).isPresent()) {
+        if (userRepository.findByUsername(username).isPresent()) {
             return ResponseEntity.badRequest()
                     .body(Map.of("error", "用户名已存在"));
         }
 
         User user = new User();
-        user.setQq(username);
+        user.setUsername(username);
         user.setPassword(passwordEncoder.encode(password));
         user.setNickname(nickname != null ? nickname : username);
         user.setRole("USER");
@@ -115,7 +137,7 @@ public class AuthController {
         }
 
         String username = jwtUtil.getUsernameFromToken(token);
-        Optional<User> userOpt = userRepository.findByQq(username);
+        Optional<User> userOpt = userRepository.findByUsername(username);
 
         if (userOpt.isEmpty()) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
@@ -124,10 +146,10 @@ public class AuthController {
 
         User user = userOpt.get();
         Map<String, Object> response = new HashMap<>();
-        response.put("username", user.getQq());
+        response.put("username", user.getUsername());
         response.put("nickname", user.getNickname());
         response.put("role", user.getRole());
-        response.put("avatar", user.getAvatar());
+        response.put("avatar", resolveAvatarUrl(user.getAvatar()));
 
         return ResponseEntity.ok(response);
     }
@@ -156,7 +178,7 @@ public class AuthController {
         }
 
         String username = jwtUtil.getUsernameFromToken(token);
-        Optional<User> userOpt = userRepository.findByQq(username);
+        Optional<User> userOpt = userRepository.findByUsername(username);
 
         if (userOpt.isEmpty()) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)

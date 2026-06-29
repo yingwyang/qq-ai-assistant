@@ -8,7 +8,7 @@ import java.time.LocalDateTime;
  */
 @Entity
 @Table(name = "users", indexes = {
-    @Index(name = "idx_qq", columnList = "qq"),
+    @Index(name = "idx_username", columnList = "username"),
     @Index(name = "idx_nickname", columnList = "nickname")
 })
 public class User {
@@ -18,7 +18,7 @@ public class User {
     private Long id;
     
     @Column(nullable = false, unique = true, length = 20)
-    private String qq;  // QQ号码
+    private String username;  // 用户名/账号
     
     @Column(length = 100)
     private String nickname;  // 昵称
@@ -53,8 +53,8 @@ public class User {
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
     
-    public String getQq() { return qq; }
-    public void setQq(String qq) { this.qq = qq; }
+    public String getUsername() { return username; }
+    public void setUsername(String username) { this.username = username; }
     
     public String getNickname() { return nickname; }
     public void setNickname(String nickname) { this.nickname = nickname; }

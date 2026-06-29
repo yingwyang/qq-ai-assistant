@@ -4,6 +4,7 @@
     <div class="chat-page">
       <!-- 左侧导航栏 -->
       <Sidebar 
+        ref="sidebarRef"
         :is-logged-in="isLoggedIn"
         :user-info="userInfo"
         :is-collapsed="shouldCollapseSidebar"
@@ -54,6 +55,7 @@
                 <ChatInterface 
                   :groupId="selectedGroupId" 
                   @analysis-result="handleAnalysisResult"
+                  @new-message-arrived="handleNewMessageArrived"
                 />
               </div>
               <div v-show="activeMobileTab === 'ai'" class="mobile-panel">
@@ -72,6 +74,7 @@
                 <ChatInterface 
                   :groupId="selectedGroupId" 
                   @analysis-result="handleAnalysisResult"
+                  @new-message-arrived="handleNewMessageArrived"
                 />
               </div>
               <div class="tablet-ai" :class="{ 'hidden': !showAIPanel }">
@@ -89,16 +92,45 @@
           <!-- 桌面端：三栏布局 -->
           <template v-else>
             <!-- 中间：群消息列表 -->
-            <div class="center-panel">
-              <ChatInterface 
-                :groupId="selectedGroupId" 
+            <div
+              ref="centerPanelRef"
+              class="center-panel"
+              :class="{ collapsed: centerWidth <= 0, resizing: isResizing }"
+              :style="{ flex: `0 0 ${centerWidth > 0 ? centerWidth : 0}%` }"
+            >
+              <ChatInterface
+                :groupId="selectedGroupId"
                 @analysis-result="handleAnalysisResult"
               />
+              <!-- 右侧收起时显示恢复按钮 -->
+              <button
+                v-if="rightWidth <= 0"
+                class="panel-expand-btn"
+                title="展开 AstrBot 聊天框"
+                @click="expandRightPanel"
+              >
+                <Icon name="chevron-left" :size="20" />
+                <span>AI</span>
+              </button>
             </div>
-            
+
+            <!-- 可拖动分隔条 -->
+            <div
+              v-if="rightWidth > 0"
+              class="panel-resizer"
+              :class="{ resizing: isResizing }"
+              title="拖动调整左右面板宽度"
+              @mousedown="startResize"
+            ></div>
+
             <!-- 右侧：AstrBot 对话框 -->
-            <div class="right-panel">
-              <AstrBotChat 
+            <div
+              ref="rightPanelRef"
+              class="right-panel"
+              :class="{ collapsed: rightWidth <= 0, resizing: isResizing }"
+              :style="{ flex: `0 0 ${rightWidth > 0 ? rightWidth : 0}%` }"
+            >
+              <AstrBotChat
                 ref="astrBotChatRef"
                 :groupId="selectedGroupId"
               />
@@ -149,7 +181,7 @@
 </template>
 
 <script>
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, computed } from 'vue';
 import { useRouter } from 'vue-router';
 import Icon from '../components/Icon.vue';
 import Sidebar from '../components/Sidebar.vue';
@@ -192,23 +224,92 @@ export default {
     const showAdminDashboard = ref(false);
     const selectedGroupId = ref('');
     const astrBotChatRef = ref(null);
+    const sidebarRef = ref(null); // Sidebar 组件引用，暴露了 refreshGroups 方法
     const userInfo = ref(null);
-    
+    const centerPanelRef = ref(null);
+    const rightPanelRef = ref(null);
+
     // 响应式布局
     const { isMobile, isTablet, isDesktop, layoutMode, shouldCollapseSidebar } = useResponsive();
-    
+
     // 移动端标签页状态
     const activeMobileTab = ref('chat');
-    
+
     // 平板端AI面板显示状态
     const showAIPanel = ref(false);
+
+    // 桌面端中间/右侧面板宽度（百分比），支持拖动调整
+    const centerWidth = ref(50);
+    const isResizing = ref(false);
+    const COLLAPSE_THRESHOLD = 10; // 小于 10% 自动收起
+
+    const rightWidth = computed(() => 100 - centerWidth.value);
+
+    const expandRightPanel = () => {
+      // 恢复右侧默认宽度 30%，中间占 70%
+      centerWidth.value = 70;
+      localStorage.setItem('home_center_width', String(centerWidth.value));
+    };
+
+    const startResize = (e) => {
+      if (!isDesktop.value) return;
+      e.preventDefault();
+      isResizing.value = true;
+      document.body.style.userSelect = 'none';
+
+      const mainEl = centerPanelRef.value?.parentElement;
+      if (!mainEl) return;
+      const mainRect = mainEl.getBoundingClientRect();
+
+      const onMouseMove = (moveEvent) => {
+        // 鼠标移出窗口或按键丢失时自动结束拖动
+        if ((moveEvent.buttons & 1) === 0) {
+          onMouseUp();
+          return;
+        }
+        const x = moveEvent.clientX - mainRect.left;
+        const percent = (x / mainRect.width) * 100;
+        let next = Math.max(0, Math.min(100, percent));
+
+        // 接近阈值时自动收起小的一边
+        if (next < COLLAPSE_THRESHOLD) {
+          next = 0;
+        } else if (100 - next < COLLAPSE_THRESHOLD) {
+          next = 100;
+        }
+
+        centerWidth.value = next;
+      };
+
+      const onMouseUp = () => {
+        isResizing.value = false;
+        document.body.style.userSelect = '';
+        document.removeEventListener('mousemove', onMouseMove);
+        document.removeEventListener('mouseup', onMouseUp);
+        window.removeEventListener('mouseup', onMouseUp);
+        // 持久化用户偏好
+        localStorage.setItem('home_center_width', String(centerWidth.value));
+      };
+
+      document.addEventListener('mousemove', onMouseMove);
+      document.addEventListener('mouseup', onMouseUp);
+      window.addEventListener('mouseup', onMouseUp);
+    };
 
     // 从 localStorage 恢复登录状态和群号
     onMounted(async () => {
       const savedGroupId = localStorage.getItem('selectedGroupId');
       const savedUserInfo = localStorage.getItem('user_info');
       const token = localStorage.getItem('auth_token');
-      
+      const savedCenterWidth = localStorage.getItem('home_center_width');
+
+      if (savedCenterWidth) {
+        const parsed = parseFloat(savedCenterWidth);
+        if (!isNaN(parsed) && parsed >= 0 && parsed <= 100) {
+          centerWidth.value = parsed;
+        }
+      }
+
       if (savedGroupId) {
         selectedGroupId.value = savedGroupId;
       }
@@ -272,12 +373,7 @@ export default {
     };
 
     const handleAdminDashboard = () => {
-      const role = localStorage.getItem('user_role');
-      if (role === 'ADMIN') {
-        router.push('/admin');
-      } else {
-        showAdminDashboard.value = true;
-      }
+      showAdminDashboard.value = true;
     };
 
     const handleSelectGroup = (groupId) => {
@@ -294,6 +390,13 @@ export default {
     const handleAnalysisResult = (data) => {
       if (astrBotChatRef.value && data.type === 'request') {
         astrBotChatRef.value.handleAnalysisRequest(data);
+      }
+    };
+
+    // ChatInterface 收到新消息时，刷新 Sidebar 群聊列表（按最新消息时间排序）
+    const handleNewMessageArrived = () => {
+      if (sidebarRef.value && sidebarRef.value.refreshGroups) {
+        sidebarRef.value.refreshGroups();
       }
     };
 
@@ -330,6 +433,9 @@ export default {
       selectedGroupId,
       astrBotChatRef,
       userInfo,
+      sidebarRef,
+      centerPanelRef,
+      rightPanelRef,
       // 响应式布局
       isMobile,
       isTablet,
@@ -338,6 +444,12 @@ export default {
       shouldCollapseSidebar,
       activeMobileTab,
       showAIPanel,
+      // 面板拖拽
+      centerWidth,
+      rightWidth,
+      isResizing,
+      startResize,
+      expandRightPanel,
       // 方法
       handleLoginSuccess,
       handleNapCatStatusChanged,
@@ -346,6 +458,7 @@ export default {
       handleAdminDashboard,
       handleSelectGroup,
       handleAnalysisResult,
+      handleNewMessageArrived,
       openUserProfile,
       handleProfileUpdated
     };
@@ -400,12 +513,82 @@ html, body {
   flex: 0 0 50%;
   border-right: 1px solid #e0e0e0;
   overflow: hidden;
+  transition: flex-basis 0.15s ease;
+  position: relative;
+}
+
+.center-panel.collapsed {
+  flex: 0 0 0 !important;
+  min-width: 0;
+}
+
+.center-panel.resizing,
+.right-panel.resizing {
+  transition: none;
 }
 
 /* 右侧面板：AstrBot - 占50% */
 .right-panel {
   flex: 0 0 50%;
   overflow: hidden;
+  transition: flex-basis 0.15s ease;
+}
+
+.right-panel.collapsed {
+  flex: 0 0 0 !important;
+  min-width: 0;
+}
+
+/* 可拖动分隔条 */
+.panel-resizer {
+  width: 6px;
+  flex-shrink: 0;
+  cursor: col-resize;
+  background-color: #e0e0e0;
+  transition: background-color 0.2s;
+  position: relative;
+  z-index: 10;
+}
+
+.panel-resizer:hover,
+.panel-resizer.resizing {
+  background-color: #3498db;
+}
+
+/* 右侧面板收起后显示的展开按钮 */
+.panel-expand-btn {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 28px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 10px 0;
+  background-color: #fff;
+  border: 1px solid #e0e0e0;
+  border-right: none;
+  border-radius: 8px 0 0 8px;
+  box-shadow: -2px 0 8px rgba(0, 0, 0, 0.08);
+  cursor: pointer;
+  color: #666;
+  font-size: 12px;
+  transition: background-color 0.2s, color 0.2s, width 0.2s;
+  z-index: 100;
+}
+
+.panel-expand-btn:hover {
+  background-color: #e8f4fc;
+  color: #3498db;
+  width: 32px;
+}
+
+.panel-expand-btn span {
+  writing-mode: vertical-rl;
+  letter-spacing: 2px;
 }
 
 /* 智能体页面样式 */

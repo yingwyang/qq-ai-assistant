@@ -1,14 +1,28 @@
 <template>
   <div class="astrbot-chat">
     <div class="chat-header">
-      <div class="header-avatar">
-        <img :src="botAvatar" alt="bot avatar" @error="handleBotAvatarError" />
-      </div>
       <div class="header-info">
         <h3>{{ botName }}</h3>
         <span class="status" :class="{ 'online': isOnline, 'offline': !isOnline }">
           {{ isOnline ? '在线' : '离线' }}
         </span>
+        <svg
+          v-if="isLoading"
+          class="header-loading-icon"
+          width="16"
+          height="16"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
+          <path d="M3 3v5h5"></path>
+          <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"></path>
+          <path d="M16 21h5v-5"></path>
+        </svg>
       </div>
       <div class="header-actions">
         <button class="action-btn" @click="showConversationList = !showConversationList" title="对话历史">
@@ -17,9 +31,7 @@
         <button class="action-btn" @click="createNewConversation" title="新对话">
           <Icon name="add" :size="16" />
         </button>
-        <button class="action-btn" @click="showSettings = true" title="设置">
-          <Icon name="settings" :size="16" />
-        </button>
+
       </div>
     </div>
 
@@ -75,60 +87,7 @@
       </div>
     </div>
 
-    <!-- 设置弹窗 -->
-    <div v-if="showSettings" class="settings-dialog-overlay" @click="closeSettings">
-      <div class="settings-dialog" @click.stop>
-        <div class="settings-dialog-header">
-          <span class="settings-icon"><Icon name="settings" :size="20" /></span>
-          <h3>聊天设置</h3>
-          <button class="close-btn" @click="closeSettings"><Icon name="close" :size="16" /></button>
-        </div>
-        <div class="settings-dialog-body">
-          <div class="settings-section">
-            <h4>AI 助手设置</h4>
-            <div class="setting-item">
-              <label>助手名称</label>
-              <input 
-                type="text" 
-                v-model="botName" 
-                placeholder="输入助手名称"
-                @keyup.enter="saveSettings"
-              />
-            </div>
-            <div class="setting-item">
-              <label>助手头像</label>
-              <div class="avatar-upload">
-                <img :src="botAvatar" class="avatar-preview-large" @error="handleBotAvatarError" />
-                <div class="upload-actions">
-                  <input 
-                    type="file" 
-                    ref="botAvatarInput"
-                    accept="image/*"
-                    style="display: none"
-                    @change="handleBotAvatarUpload"
-                  />
-                  <button class="btn-upload" @click="$refs.botAvatarInput.click()">
-                    📁 选择图片
-                  </button>
-                  <span class="upload-hint">或输入 URL</span>
-                  <input 
-                    type="text" 
-                    v-model="botAvatar" 
-                    placeholder="输入头像图片地址"
-                    class="url-input"
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
 
-        </div>
-        <div class="settings-dialog-footer">
-          <button class="btn-cancel" @click="closeSettings">取消</button>
-          <button class="btn-confirm" @click="saveSettings">保存设置</button>
-        </div>
-      </div>
-    </div>
 
     <div class="chat-messages" ref="messagesContainer">
       <div v-if="messages.length === 0" class="empty-chat">
@@ -161,7 +120,12 @@
               <span class="message-sender">{{ message.sender }}</span>
               <span class="message-time">{{ formatTime(message.time) }}</span>
             </div>
-            <div class="message-text" :class="{ 'message-system-text': message.isSystem }">{{ message.text }}</div>
+            <RichTextRenderer
+              class="message-text"
+              :class="{ 'message-system-text': message.isSystem }"
+              :content="message.text"
+              :section-mode="!message.isSelf && !message.isSystem"
+            />
           </div>
         </div>
       </div>
@@ -195,13 +159,14 @@
 <script>
 import { ref, onMounted, nextTick, watch } from 'vue';
 import Icon from './Icon.vue';
+import RichTextRenderer from './RichTextRenderer.vue';
 import { astrBotApi, userApi } from '../services/api';
 import { filterToolJson, processAstrBotResponse } from '../utils/messageFilter';
 import { showToast } from './Toast.vue';
 
 export default {
   name: 'AstrBotChat',
-  components: { Icon },
+  components: { Icon, RichTextRenderer },
   props: {
     groupId: { type: String, default: null },
     userId: { type: String, default: null },
@@ -228,7 +193,7 @@ export default {
     const showConfirmDialog = ref(false);
     const conversationToDelete = ref(null);
 
-    // 头像
+
     const userAvatar = ref('https://q.qlogo.cn/headimg_dl?dst_uin=0&spec=100');
     const botAvatar = ref('https://q.qlogo.cn/headimg_dl?dst_uin=0&spec=100');
     
@@ -540,7 +505,34 @@ export default {
     const formatTime = (time) => {
       if (!time) return '';
       const date = new Date(time);
-      return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+      if (isNaN(date.getTime())) return '';
+
+      const now = new Date();
+      const pad = (n) => String(n).padStart(2, '0');
+      const timeStr = `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+
+      const isSameDay = (d1, d2) =>
+        d1.getFullYear() === d2.getFullYear() &&
+        d1.getMonth() === d2.getMonth() &&
+        d1.getDate() === d2.getDate();
+
+      const diffMs = now - date;
+      const diffMin = Math.floor(diffMs / 60000);
+      const diffHour = Math.floor(diffMs / 3600000);
+
+      if (diffMin < 1) return '刚刚';
+      if (diffHour < 1) return `${diffMin}分钟前`;
+      if (isSameDay(date, now)) return timeStr;
+
+      const yesterday = new Date(now);
+      yesterday.setDate(yesterday.getDate() - 1);
+      if (isSameDay(date, yesterday)) return `昨天 ${timeStr}`;
+
+      if (date.getFullYear() === now.getFullYear()) {
+        return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${timeStr}`;
+      }
+
+      return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${timeStr}`;
     };
 
     const formatDate = (time) => {
@@ -560,14 +552,34 @@ export default {
 
     // 处理分析请求
     const handleAnalysisRequest = async (data) => {
+      // 简单的 HTML 转义，防止消息内容污染渲染
+      const escapeHtml = (text) => {
+        if (text == null) return '';
+        return String(text)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#039;');
+      };
+
+      // 为 @账号名 添加高亮样式（来自 ChatInterface 的 content 已被转换为 @昵称）
+      const formatAtMention = (text) => {
+        return text.replace(/@(\S+)/g, '<span class="at-mention">@$1</span>');
+      };
+
       // 创建新对话用于分析
       await createNewConversation();
-      
-      // 添加系统提示消息，显示选中的消息摘要
-      const summaryText = data.messages.map(m => `${m.user}: ${m.content.substring(0, 50)}${m.content.length > 50 ? '...' : ''}`).join('\n');
-      
+
+      // 添加系统提示消息，将转发的聊天记录折叠在 <details> 中
+      const detailsHtml = `<details><summary>已选择 ${data.messages.length} 条消息</summary>\n\n${data.messages.map(m => {
+        const user = escapeHtml(m.user || '未知用户');
+        const content = formatAtMention(escapeHtml(m.content || '[无内容]'));
+        return `<p><strong>${user}:</strong> ${content}</p>`;
+      }).join('\n')}\n</details>`;
+
       messages.value.push({
-        text: `[分析] 已选择 ${data.messages.length} 条消息进行分析：\n\n${summaryText}`,
+        text: `[分析] 已转发 ${data.messages.length} 条聊天记录给 AstrBot\n\n${detailsHtml}`,
         sender: '系统',
         isSelf: false,
         time: new Date(),
@@ -712,6 +724,9 @@ export default {
 
 .header-info {
   flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .header-info h3 {
@@ -730,6 +745,16 @@ export default {
 
 .header-info .status.offline {
   color: #e74c3c;
+}
+
+.header-loading-icon {
+  color: #3498db;
+  animation: astrbot-spin 1s linear infinite;
+}
+
+@keyframes astrbot-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 .header-actions {

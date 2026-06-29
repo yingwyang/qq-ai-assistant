@@ -26,8 +26,8 @@
           <div class="brand-icon"><Icon name="robot" :size="56" /></div>
           <div class="icon-ring"></div>
         </div>
-        <h1 class="brand-title">QQ AI 助手</h1>
-        <p class="brand-subtitle">智能群聊管理与 AI 对话平台</p>
+        <h1 class="brand-title">铃音聊天助手</h1>
+        <p class="brand-subtitle">智能QQ群聊管理AI对话平台</p>
         <div class="brand-decoration">
           <span class="decor-line"></span>
           <span class="decor-dot"></span>
@@ -49,7 +49,7 @@
               <input
                 v-model="loginForm.username"
                 type="text"
-                placeholder="请输入用户名"
+                placeholder="请输入账号"
                 required
                 :disabled="isProcessing"
                 class="form-input"
@@ -116,7 +116,7 @@
               <input
                 v-model="registerForm.username"
                 type="text"
-                placeholder="请输入用户名"
+                placeholder="请输入账号"
                 required
                 :disabled="isProcessing"
                 class="form-input"
@@ -248,7 +248,7 @@ export default {
 
     const handleLogin = async () => {
       if (!loginForm.username || !loginForm.password) {
-        errorMessage.value = '请输入用户名和密码';
+        errorMessage.value = '请输入账号和密码';
         return;
       }
 
@@ -275,7 +275,7 @@ export default {
           router.push('/');
         }
       } catch (error) {
-        errorMessage.value = error.message || '登录失败，请检查用户名和密码';
+        errorMessage.value = error.message || '登录失败，请检查账号和密码';
       } finally {
         isProcessing.value = false;
       }
@@ -283,7 +283,7 @@ export default {
 
     const handleRegister = async () => {
       if (!registerForm.username || !registerForm.password) {
-        errorMessage.value = '请输入用户名和密码';
+        errorMessage.value = '请输入账号和密码';
         return;
       }
 

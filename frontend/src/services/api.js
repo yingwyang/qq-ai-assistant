@@ -105,6 +105,9 @@ export const messageApi = {
   getMessagesSince: (groupId, afterId) =>
     request(`/messages/group/${groupId}/since?afterId=${afterId}`),
 
+  getGroupMembers: (groupId) =>
+    request(`/messages/group/${groupId}/members`),
+
   processAllMessages: () => request('/messages/process', { method: 'POST' }),
 
   uploadFile: (file, fileType) => {
@@ -127,8 +130,32 @@ export const messageApi = {
 
   getFileInfo: (fileId) => request(`/messages/file/${fileId}`),
   deleteFile: (fileId) => request(`/messages/file/${fileId}`, { method: 'DELETE' }),
+  deleteMessage: (messageId) => request(`/messages/${messageId}`, { method: 'DELETE' }),
+  deleteMessagesBatch: (messageIds, deleteMedia) => request('/messages/delete-batch', {
+    method: 'POST',
+    body: JSON.stringify({ messageIds, deleteMedia: !!deleteMedia }),
+  }),
+  purgeMedia: (types) => request('/messages/purge-media', {
+    method: 'POST',
+    body: JSON.stringify({ types }),
+  }),
   manualArchive: (daysBefore = 90) => request(`/messages/archive?daysBefore=${daysBefore}`, { method: 'POST' }),
-  getRecentGroups: () => request('/messages/recent-groups'),
+
+  getMediaFiles: (type, page = 0, size = 20) =>
+    request(`/messages/media-files?type=${encodeURIComponent(type || 'ALL')}&page=${page}&size=${size}`),
+
+  deleteMediaFiles: (ids) => request('/messages/delete-media-files', {
+    method: 'POST',
+    body: JSON.stringify({ ids }),
+  }),
+
+  getRecentGroups: (sinceTime) => {
+    // sinceTime 参数已弃用，现由后端根据 group_read_state 计算未读
+    return request('/messages/recent-groups');
+  },
+
+  markGroupAsRead: (groupId) => request(`/messages/read/${encodeURIComponent(groupId)}`, { method: 'POST' }),
+  markAllAsRead: () => request('/messages/read-all', { method: 'POST' }),
 };
 
 export const systemApi = {
@@ -201,7 +228,12 @@ export const userApi = {
     method: 'PUT',
     body: JSON.stringify(params),
   }),
-  uploadAvatar: (formData) => uploadRequest('/avatar/upload', formData),
+  uploadAvatar: (file, type = 'user') => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('type', type);
+    return uploadRequest('/avatar/upload', formData);
+  },
   getQqBindings: () => request('/user/qq-bindings'),
   bindQq: (params) => request('/user/qq-bindings', {
     method: 'POST',

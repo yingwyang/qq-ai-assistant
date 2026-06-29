@@ -4,7 +4,6 @@ import com.qqai.entity.User;
 import com.qqai.repository.UserRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.*;
@@ -29,7 +28,7 @@ public class AdminController {
         for (User user : users) {
             Map<String, Object> map = new HashMap<>();
             map.put("id", user.getId());
-            map.put("qq", user.getQq());
+            map.put("username", user.getUsername());
             map.put("nickname", user.getNickname());
             map.put("avatar", user.getAvatar());
             map.put("role", user.getRole());

@@ -34,16 +34,31 @@ public class WebMvcConfig implements WebMvcConfigurer {
         
         System.out.println("静态资源映射配置: /images/** -> file:" + absolutePath + "/");
         
-        // 配置头像上传目录映射
+        // 配置头像上传目录映射（groups 与 users 子目录自动包含在该映射下）
         File avatarDir = new File("uploads/avatars");
         String avatarPath = avatarDir.getAbsolutePath();
         if (!avatarDir.exists()) {
             avatarDir.mkdirs();
         }
+        // 预先创建隔离子目录
+        new File(avatarDir, "groups").mkdirs();
+        new File(avatarDir, "users").mkdirs();
         registry.addResourceHandler("/uploads/avatars/**")
                 .addResourceLocations("file:" + avatarPath + "/")
                 .setCachePeriod(3600);
-        
+
         System.out.println("静态资源映射配置: /uploads/avatars/** -> file:" + avatarPath + "/");
+
+        // 配置整个 uploads 目录映射（媒体文件管理预览需要）
+        File uploadsDir = new File("uploads");
+        String uploadsPath = uploadsDir.getAbsolutePath();
+        if (!uploadsDir.exists()) {
+            uploadsDir.mkdirs();
+        }
+        registry.addResourceHandler("/uploads/**")
+                .addResourceLocations("file:" + uploadsPath + "/")
+                .setCachePeriod(3600);
+
+        System.out.println("静态资源映射配置: /uploads/** -> file:" + uploadsPath + "/");
     }
 }

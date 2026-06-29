@@ -10,9 +10,9 @@ import java.util.Optional;
 public interface UserRepository extends JpaRepository<User, Long> {
     
     /**
-     * 根据QQ号码查找用户
+     * 根据用户名/账号查找用户
      */
-    Optional<User> findByQq(String qq);
+    Optional<User> findByUsername(String username);
     
     /**
      * 根据token查找用户
@@ -20,7 +20,7 @@ public interface UserRepository extends JpaRepository<User, Long> {
     Optional<User> findByToken(String token);
     
     /**
-     * 检查QQ号码是否存在
+     * 检查用户名/账号是否存在
      */
-    boolean existsByQq(String qq);
+    boolean existsByUsername(String username);
 }

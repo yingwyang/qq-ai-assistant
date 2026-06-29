@@ -1,6 +1,7 @@
 package com.qqai.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.qqai.entity.Message;
 import com.qqai.websocket.FrontendMessageWebSocketHandler;
 import org.slf4j.Logger;
@@ -19,7 +20,7 @@ public class MessageBroadcastService {
     @Autowired
     private FrontendMessageWebSocketHandler frontendMessageWebSocketHandler;
 
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
 
     public void broadcastNewMessage(Message message) {
         broadcast(message.getGroupId(), "new_message", message);

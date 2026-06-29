@@ -52,7 +52,9 @@ public class FileRecord {
     private Integer height;  // 图片高度
     
     private Integer duration;  // 音视频时长(秒)
-    
+
+    private boolean active = true;  // 文件记录是否有效（清理后=false）
+
     private LocalDateTime createdAt;
     
     @PrePersist
@@ -112,7 +114,10 @@ public class FileRecord {
     
     public Integer getDuration() { return duration; }
     public void setDuration(Integer duration) { this.duration = duration; }
-    
+
+    public boolean isActive() { return active; }
+    public void setActive(boolean active) { this.active = active; }
+
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
 }

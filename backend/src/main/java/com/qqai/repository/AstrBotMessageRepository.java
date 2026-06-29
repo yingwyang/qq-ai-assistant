@@ -87,9 +87,11 @@ public interface AstrBotMessageRepository extends JpaRepository<AstrBotMessage, 
 
     /**
      * 获取对话的消息列表（限制数量，用于构建上下文）
+     * 使用 Pageable 实现限制
      */
-    @Query(value = "SELECT * FROM astrbot_messages WHERE conversation_id = :conversationId ORDER BY time_created DESC LIMIT :limit", nativeQuery = true)
-    List<AstrBotMessage> findRecentMessagesByConversationId(
-            @Param("conversationId") String conversationId,
-            @Param("limit") int limit);
+    default List<AstrBotMessage> findRecentMessagesByConversationId(String conversationId, int limit) {
+        return findByConversationIdOrderByTimeCreatedAsc(conversationId, 
+                org.springframework.data.domain.PageRequest.of(0, limit))
+                .getContent();
+    }
 }

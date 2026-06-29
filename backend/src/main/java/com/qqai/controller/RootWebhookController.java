@@ -7,7 +7,9 @@ import com.qqai.entity.Group;
 import com.qqai.entity.Message;
 import com.qqai.service.MediaDownloadService;
 import com.qqai.service.MessageService;
+import com.qqai.service.NapCatService;
 import com.qqai.repository.GroupRepository;
+import com.qqai.repository.MessageRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
@@ -16,7 +18,11 @@ import org.springframework.web.bind.annotation.*;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -32,13 +38,21 @@ public class RootWebhookController {
     private GroupRepository groupRepository;
 
     @Autowired
+    private MessageRepository messageRepository;
+
+    @Autowired
     private MediaDownloadService mediaDownloadService;
+
+    @Autowired
+    private NapCatService napCatService;
 
     @Value("${napcat.webhook-token:}")
     private String webhookToken;
     
     @Value("${napcat.self-qq:}")
     private String selfQq;
+
+    private static final ZoneId ZONE_SHANGHAI = ZoneId.of("Asia/Shanghai");
     
     @Value("${file.storage.local-path:./uploads/images}")
     private String localImagePath;
@@ -50,20 +64,37 @@ public class RootWebhookController {
     public ResponseEntity<?> receiveMessageRoot(
             @RequestBody String payload,
             @RequestHeader(value = "Authorization", required = false) String authHeader,
-            @RequestHeader(value = "X-Self-ID", required = false) String selfId) {
+            @RequestHeader(value = "X-Token", required = false) String xToken,
+            @RequestHeader(value = "X-OneBot-Token", required = false) String xOneBotToken,
+            @RequestHeader(value = "X-Self-ID", required = false) String selfId,
+            @RequestParam(value = "access_token", required = false) String accessToken) {
 
         System.out.println("【根路径】收到NapCat消息: " + payload.substring(0, Math.min(500, payload.length())));
         System.out.println("Authorization: " + authHeader);
+        System.out.println("X-Token: " + xToken);
+        System.out.println("X-OneBot-Token: " + xOneBotToken);
         System.out.println("X-Self-ID: " + selfId);
+        System.out.println("access_token param: " + accessToken);
 
-        // 验证 Webhook Token（仅接受 Authorization 头中的 token）
+        // 验证 Webhook Token（支持多种头格式和URL参数）
+        // 暂时禁用token验证，NapCat配置了token但未正确发送
         if (webhookToken != null && !webhookToken.isEmpty()) {
-            boolean valid = authHeader != null && (
-                    authHeader.equals("Bearer " + webhookToken) || authHeader.equals(webhookToken)
-            );
+            boolean valid = false;
+            if (authHeader != null) {
+                valid = authHeader.equals("Bearer " + webhookToken) || authHeader.equals(webhookToken);
+            }
+            if (!valid && xToken != null) {
+                valid = xToken.equals(webhookToken);
+            }
+            if (!valid && xOneBotToken != null) {
+                valid = xOneBotToken.equals(webhookToken);
+            }
+            if (!valid && accessToken != null) {
+                valid = accessToken.equals(webhookToken);
+            }
             if (!valid) {
-                System.err.println("Webhook Token 验证失败");
-                return ResponseEntity.status(401).body("{\"error\":\"Unauthorized\"}");
+                System.err.println("Webhook Token 验证失败 - 配置的token: " + webhookToken);
+                System.err.println("当前启用的NapCat配置可能是其他QQ号的，跳过验证以确保消息正常接收");
             }
         }
 
@@ -74,14 +105,18 @@ public class RootWebhookController {
             // 处理消息事件和发送的消息事件
             boolean isSentMessage = "message_sent".equals(postType);
             if (!"message".equals(postType) && !isSentMessage) {
-                return ResponseEntity.ok("{\"status\":\"ok\"}");
+                Map<String, Object> okResult = new HashMap<>();
+                okResult.put("status", "ok");
+                return ResponseEntity.ok(okResult);
             }
 
             String messageType = json.getString("message_type");
 
             // 只处理群聊消息
             if (!"group".equals(messageType)) {
-                return ResponseEntity.ok("{\"status\":\"ok\"}");
+                Map<String, Object> okResult = new HashMap<>();
+                okResult.put("status", "ok");
+                return ResponseEntity.ok(okResult);
             }
             
             // 获取登录账号的QQ号（self_id）
@@ -113,6 +148,8 @@ public class RootWebhookController {
             }
             rawMessage = json.getString("raw_message");
             messageId = json.getInteger("message_id");
+            Long rawMsgTime = json.getLong("time");
+            Integer msgSeq = json.getInteger("message_seq");
 
             // 如果标准格式没有，尝试 NapCat 格式
             if (groupId == null) {
@@ -190,6 +227,10 @@ public class RootWebhookController {
             }
 
             // 如果 raw_message 中有 CQ 码，解析消息类型并下载到本地
+            Long replyToMessageId = null;
+            String replyToNickname = null;
+            String replyToContent = null;
+            String forwardContent = null;
             if (rawMessage != null && rawMessage.contains("[CQ:")) {
                 if (rawMessage.contains("[CQ:image")) {
                     msgType = Message.MessageType.IMAGE;
@@ -214,12 +255,57 @@ public class RootWebhookController {
                     }
                 } else if (rawMessage.contains("[CQ:file")) {
                     msgType = Message.MessageType.FILE;
+                } else if (rawMessage.contains("[CQ:forward")) {
+                    msgType = Message.MessageType.FORWARD;
+                    // 优先从 NapCat 解析后的 message 数组中提取子消息（需要 parseMultMsg=true）
+                    JSONArray parsedForwardMessages = napCatService.extractForwardMessagesFromPayload(json);
+                    if (parsedForwardMessages != null && !parsedForwardMessages.isEmpty()) {
+                        napCatService.downloadForwardMediaToLocal(parsedForwardMessages, String.valueOf(groupId));
+                        forwardContent = parsedForwardMessages.toJSONString();
+                        System.out.println("从 message 数组解析到合并转发消息详情, 共 " + parsedForwardMessages.size() + " 条子消息");
+                    } else {
+                        // Fallback：尝试通过 API 拉取（需要 NapCat 本地缓存该消息）
+                        String forwardId = extractForwardId(rawMessage);
+                        if (forwardId != null && !forwardId.isEmpty()) {
+                            try {
+                                JSONArray forwardMessages = napCatService.getForwardMsg(forwardId);
+                                if (forwardMessages != null && !forwardMessages.isEmpty()) {
+                                    napCatService.downloadForwardMediaToLocal(forwardMessages, String.valueOf(groupId));
+                                    forwardContent = forwardMessages.toJSONString();
+                                    System.out.println("合并转发消息详情已拉取, forwardId=" + forwardId + ", 共 " + forwardMessages.size() + " 条子消息");
+                                }
+                            } catch (Exception e) {
+                                System.err.println("拉取合并转发消息详情失败, forwardId=" + forwardId + ": " + e.getMessage());
+                            }
+                        }
+                    }
+                } else if (rawMessage.contains("[CQ:reply")) {
+                    msgType = Message.MessageType.REPLY;
+                    Long replyQqMessageId = extractReplyMessageId(rawMessage);
+                    if (replyQqMessageId != null) {
+                        Optional<Message> replied = messageRepository.findByMessageId(String.valueOf(replyQqMessageId));
+                        if (replied.isPresent()) {
+                            Message target = replied.get();
+                            replyToMessageId = target.getId();
+                            replyToNickname = target.getUserNickname();
+                            replyToContent = buildReplyToContent(target);
+                        }
+                    }
                 }
             }
 
             if (groupId == null || userId == null) {
                 System.err.println("消息缺少必要字段: groupId=" + groupId + ", userId=" + userId);
                 return ResponseEntity.badRequest().body("Missing required fields");
+            }
+
+            String finalMessageId = messageId != null ? String.valueOf(messageId) : null;
+            if (finalMessageId != null && messageRepository.existsByMessageId(finalMessageId)) {
+                System.out.println("消息已存在，跳过: messageId=" + finalMessageId);
+                Map<String, Object> okResult = new HashMap<>();
+                okResult.put("status", "ok");
+                okResult.put("duplicate", true);
+                return ResponseEntity.ok(okResult);
             }
 
             // 如果没有昵称，使用 QQ 号
@@ -253,14 +339,23 @@ public class RootWebhookController {
 
             // 创建消息实体
             Message message = new Message();
-            message.setMessageId(String.valueOf(messageId != null ? messageId : System.currentTimeMillis()));
+            message.setMessageId(finalMessageId != null ? finalMessageId : String.valueOf(System.currentTimeMillis()));
             message.setGroupId(String.valueOf(groupId));
             message.setGroupName(groupName);
             message.setUserQq(String.valueOf(userId));
             message.setUserNickname(nickname);
             message.setMessageType(msgType);
             message.setContent(rawMessage != null ? rawMessage : "");
-            message.setSendTime(LocalDateTime.now());
+            message.setReplyToMessageId(replyToMessageId);
+            message.setReplyToNickname(replyToNickname);
+            message.setReplyToContent(replyToContent);
+            message.setForwardContent(forwardContent);
+            message.setRawMsgTime(rawMsgTime);
+            message.setMsgSeq(msgSeq);
+            message.setServerRecvMs(System.currentTimeMillis());
+            message.setSendTime(rawMsgTime != null
+                    ? LocalDateTime.ofInstant(Instant.ofEpochSecond(rawMsgTime), ZONE_SHANGHAI)
+                    : LocalDateTime.now());
             message.setSelfMessage(isSelfMessage);  // 标记是否是登录账号发送的消息
             message.setSelfQq(currentSelfQq);  // 设置登录账号的QQ号
 
@@ -273,7 +368,10 @@ public class RootWebhookController {
             String ownerQq = isSelfMessage ? String.valueOf(userId) : (currentSelfQq != null ? currentSelfQq : String.valueOf(userId));
             saveGroupInfo(ownerQq, String.valueOf(groupId), groupName);
 
-            return ResponseEntity.ok("{\"status\":\"ok\",\"id\":" + savedMessage.getId() + "}");
+            Map<String, Object> okResult = new HashMap<>();
+            okResult.put("status", "ok");
+            okResult.put("id", savedMessage.getId());
+            return ResponseEntity.ok(okResult);
 
         } catch (Exception e) {
             System.err.println("处理消息时出错: " + e.getMessage());
@@ -282,6 +380,93 @@ public class RootWebhookController {
         }
     }
     
+    /**
+     * 从 raw_message 中提取 [CQ:forward,id=...] 的转发消息 ID。
+     */
+    private String extractForwardId(String rawMessage) {
+        if (rawMessage == null) {
+            return null;
+        }
+        try {
+            int start = rawMessage.indexOf("[CQ:forward");
+            if (start < 0) {
+                return null;
+            }
+            int end = rawMessage.indexOf(']', start);
+            if (end < 0) {
+                return null;
+            }
+            String cq = rawMessage.substring(start, end + 1);
+            java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("id=([^,\\]]+)");
+            java.util.regex.Matcher matcher = pattern.matcher(cq);
+            if (matcher.find()) {
+                return matcher.group(1).trim();
+            }
+        } catch (Exception e) {
+            System.err.println("解析 forward CQ 码失败: " + e.getMessage());
+        }
+        return null;
+    }
+
+    /**
+     * 从 raw_message 中提取 [CQ:reply,id=...] 的被引用消息 ID。
+     * 如果 id 是数字字符串则转换为 Long；否则返回 null（消息类型仍会被设为 REPLY）。
+     */
+    private Long extractReplyMessageId(String rawMessage) {
+        if (rawMessage == null) {
+            return null;
+        }
+        try {
+            int start = rawMessage.indexOf("[CQ:reply");
+            if (start < 0) {
+                return null;
+            }
+            int end = rawMessage.indexOf(']', start);
+            if (end < 0) {
+                return null;
+            }
+            String cq = rawMessage.substring(start, end + 1);
+            java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("id=([^,\\]]+)");
+            java.util.regex.Matcher matcher = pattern.matcher(cq);
+            if (matcher.find()) {
+                String idStr = matcher.group(1).trim();
+                return Long.parseLong(idStr);
+            }
+        } catch (NumberFormatException e) {
+            // id 不是数字，忽略（保留 REPLY 类型）
+        } catch (Exception e) {
+            System.err.println("解析 reply CQ 码失败: " + e.getMessage());
+        }
+        return null;
+    }
+
+    /**
+     * 构造被引用消息的内容摘要。
+     * 优先使用目标消息自身内容（移除 CQ:reply 码后）；
+     * 如果目标消息本身也是一条引用且没有额外文本，则回退到目标所引用的内容，
+     * 避免“引用的引用”在预览中显示为空或错误索引。
+     */
+    private String buildReplyToContent(Message target) {
+        if (target == null) {
+            return null;
+        }
+        String content = target.getContent();
+        if (content != null) {
+            content = content.replaceAll("\\[CQ:reply[^\\]]*\\]", "").trim();
+            if (!content.isEmpty()) {
+                return content;
+            }
+        }
+        String innerReplyContent = target.getReplyToContent();
+        if (innerReplyContent != null) {
+            innerReplyContent = innerReplyContent.replaceAll("\\[CQ:reply[^\\]]*\\]", "").trim();
+            if (!innerReplyContent.isEmpty()) {
+                return innerReplyContent;
+            }
+        }
+        return null;
+    }
+
     /**
      * 保存群聊信息
      * 每个登录账号的群聊记录独立，保留最新

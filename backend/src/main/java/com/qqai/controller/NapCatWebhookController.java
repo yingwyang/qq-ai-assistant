@@ -23,7 +23,7 @@ public class NapCatWebhookController {
             @RequestHeader(value = "Authorization", required = false) String authHeader,
             @RequestHeader(value = "X-Self-ID", required = false) String selfId) {
         // 转发到 RootWebhookController 处理，以支持媒体下载和转换
-        return rootWebhookController.receiveMessageRoot(payload, authHeader, selfId);
+        return rootWebhookController.receiveMessageRoot(payload, authHeader, null, null, selfId, null);
     }
 
     /**
@@ -35,6 +35,6 @@ public class NapCatWebhookController {
             @RequestHeader(value = "Authorization", required = false) String authHeader,
             @RequestHeader(value = "X-Self-ID", required = false) String selfId) {
         // 转发到 RootWebhookController 处理，以支持媒体下载和转换
-        return rootWebhookController.receiveMessageRoot(payload, authHeader, selfId);
+        return rootWebhookController.receiveMessageRoot(payload, authHeader, null, null, selfId, null);
     }
 }

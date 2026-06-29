@@ -10,10 +10,10 @@
     
     <!-- 用户信息区域 -->
     <div v-if="isLoggedIn && userInfo" class="user-info" @click="openUserProfile">
-      <div class="user-avatar">
-        <img :src="(userInfo.avatar ? (userInfo.avatar.startsWith('http') ? userInfo.avatar : 'http://localhost:8081' + userInfo.avatar) : 'https://q.qlogo.cn/headimg_dl?dst_uin=0&spec=100')" alt="avatar" />
-      </div>
-      <div v-if="!isCollapsed" class="user-details">
+        <div class="user-avatar">
+          <img :src="userAvatarUrl" alt="avatar" @error="handleAvatarError" />
+        </div>
+        <div v-if="!isCollapsed" class="user-details">
         <div class="user-nickname">{{ userInfo.nickname || userInfo.username }}</div>
         <div class="user-role">{{ userInfo.role === 'ADMIN' ? '管理员' : '用户' }}</div>
       </div>
@@ -61,14 +61,14 @@
                       :alt="group.groupName"
                       @error="handleAvatarError"
                     />
-                    <span v-if="group.unreadCount && group.unreadCount > 0" class="badge">
-                      {{ group.unreadCount > 99 ? '99+' : group.unreadCount }}
-                    </span>
                   </div>
                   <div v-if="!isCollapsed" class="group-info">
                     <div class="group-name">{{ group.groupName || '群聊 ' + group.groupId }}</div>
                     <div class="group-id">{{ group.groupId }}</div>
                   </div>
+                  <span v-if="!isCollapsed && group.unreadCount && group.unreadCount > 0" class="unread-badge">
+                    {{ group.unreadCount > 99 ? '99+' : group.unreadCount }}
+                  </span>
                 </li>
               </template>
             </template>
@@ -106,6 +106,7 @@
         <span v-if="!isCollapsed" class="nav-text">退出登录</span>
       </button>
     </div>
+
   </div>
 </template>
 
@@ -113,6 +114,7 @@
 import { ref, onMounted, onUnmounted, watch, computed } from 'vue';
 import { messageApi, userApi } from '../services/api';
 import Icon from './Icon.vue';
+import { showToast } from './Toast.vue';
 import { showConfirm } from './ConfirmDialog.vue';
 
 export default {
@@ -141,6 +143,12 @@ export default {
     const qqBindings = ref([]);
     const selectedGroupId = ref('');
     let refreshInterval = null;
+
+    // 暴露给父组件的方法
+    const refreshGroups = () => {
+      loadRecentGroups();
+      loadQqBindings();
+    };
     
     // 使用 computed 确保响应式
     const isLoggedInComputed = computed(() => props.isLoggedIn);
@@ -198,8 +206,20 @@ export default {
       emit('open-admin-dashboard');
     };
 
-    const selectGroup = (groupId) => {
+    const selectGroup = async (groupId) => {
       selectedGroupId.value = groupId;
+
+      // 标记该群聊为已读（服务端维护 lastReadTime，刷新后未读计数清零）
+      try {
+        await messageApi.markGroupAsRead(groupId);
+        // 本地乐观更新：直接把该群的未读数置 0，立即刷新 UI
+        const group = recentGroups.value.find(g => g.groupId === groupId);
+        if (group) group.unreadCount = 0;
+      } catch (e) {
+        // 失败时不阻塞，刷新列表由后台定时任务完成
+        console.warn('标记群聊 ' + groupId + ' 为已读失败:', e);
+      }
+
       emit('select-group', groupId);
     };
 
@@ -222,9 +242,19 @@ export default {
     };
 
     const handleAvatarError = (e) => {
-      // 头像加载失败时使用默认头像
-      e.target.src = 'https://q.qlogo.cn/headimg_dl?dst_uin=0&spec=100';
+      // 头像加载失败时使用本地默认头像
+      e.target.src = '/default-avatar.svg';
     };
+
+    // 用户头像完整 URL（优先本地文件，失败时走 handleAvatarError 兜底）
+    const userAvatarUrl = computed(() => {
+      if (!props.userInfo || !props.userInfo.avatar) return '/default-avatar.svg';
+      const avatar = props.userInfo.avatar;
+      if (avatar.startsWith('http')) return avatar;
+      // 兼容相对路径是否带前导斜杠
+      const normalized = avatar.startsWith('/') ? avatar : '/' + avatar;
+      return `http://localhost:8081${normalized}`;
+    });
 
     const getGroupAvatar = (group) => {
       // 优先使用后端返回的 avatar 字段（本地存储路径）
@@ -234,7 +264,7 @@ export default {
           return group.avatar;
         }
         // 如果 avatar 是相对路径，添加 API 基础 URL
-        if (group.avatar.startsWith('/images/')) {
+        if (group.avatar.startsWith('/images/') || group.avatar.startsWith('/uploads/avatars/')) {
           return `http://localhost:8081${group.avatar}`;
         }
         return group.avatar;
@@ -252,9 +282,9 @@ export default {
         recentGroups.value = [];
         return;
       }
-      
+
       try {
-        // 从 API 获取最近对话的群聊（后端从JWT自动获取用户ID）
+        // 从 API 获取最近对话的群聊（后端从 JWT 自动获取用户ID，按 group_read_state 计算未读）
         console.log('开始加载最近对话...');
         const groups = await messageApi.getRecentGroups();
         console.log('获取到的群聊数据:', groups);
@@ -271,13 +301,13 @@ export default {
       loadRecentGroups();
       loadQqBindings();
       
-      // 每60秒自动刷新群聊列表和QQ绑定
+      // 每15秒自动刷新群聊列表，确保收到新消息的群能及时移至顶层
       refreshInterval = setInterval(() => {
         if (props.isLoggedIn) {
           loadRecentGroups();
           loadQqBindings();
         }
-      }, 60000);
+      }, 15000);
     });
     
     // 组件卸载时清除定时器
@@ -319,7 +349,9 @@ export default {
       selectGroup,
       getGroupsByQq,
       handleAvatarError,
-      getGroupAvatar
+      getGroupAvatar,
+      refreshGroups,
+      userAvatarUrl
     };
   }
 };
@@ -340,6 +372,13 @@ export default {
 
 .sidebar.collapsed {
   width: 60px;
+  /* 收起后隐藏滚动条，避免滚动条占用内容宽度导致头像/图标看起来不居中 */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.sidebar.collapsed::-webkit-scrollbar {
+  display: none;
 }
 
 .sidebar-header {
@@ -421,6 +460,36 @@ export default {
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+/* 侧边栏收起时，顶部用户头像居中显示 */
+.sidebar.collapsed .user-info {
+  width: 60px;
+  justify-content: center;
+  padding: 15px 0;
+  gap: 0;
+}
+
+.sidebar.collapsed .profile-arrow {
+  display: none;
+}
+
+/* 收起后所有导航项的图标/头像也水平居中 */
+.sidebar.collapsed .nav-item {
+  justify-content: center;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.sidebar.collapsed .nav-item .nav-icon {
+  min-width: auto;
+}
+
+.sidebar.collapsed .group-item,
+.sidebar.collapsed .qq-binding-header {
+  padding-left: 0;
+  padding-right: 0;
+  justify-content: center;
 }
 
 .user-details {
@@ -535,24 +604,6 @@ export default {
   position: relative;
 }
 
-.group-avatar .badge {
-  position: absolute;
-  top: -4px;
-  right: -4px;
-  min-width: 14px;
-  height: 14px;
-  padding: 0 3px;
-  background-color: #ff3b30;
-  color: white;
-  font-size: 10px;
-  font-weight: bold;
-  border-radius: 7px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 2px solid #1a252f;
-}
-
 .group-avatar img {
   width: 100%;
   height: 100%;
@@ -580,6 +631,22 @@ export default {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.unread-badge {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  background-color: #ff3b30;
+  color: white;
+  font-size: 11px;
+  font-weight: bold;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: auto;
+  flex-shrink: 0;
 }
 
 /* QQ绑定分组标题样式 */

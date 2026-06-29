@@ -11,7 +11,8 @@ import java.time.LocalDateTime;
     @Index(name = "idx_group_time", columnList = "groupId, sendTime"),
     @Index(name = "idx_user_time", columnList = "userQq, sendTime"),
     @Index(name = "idx_file_id", columnList = "fileId"),
-    @Index(name = "idx_send_time", columnList = "sendTime")
+    @Index(name = "idx_send_time", columnList = "sendTime"),
+    @Index(name = "idx_group_server_time", columnList = "groupId, serverRecvMs")
 })
 public class Message {
     
@@ -47,18 +48,42 @@ public class Message {
     @Column(length = 20)
     private String atQq;  // @的用户QQ
     
-    private Long replyToMessageId;  // 回复的消息ID
-    
+    private Long replyToMessageId;  // 回复的消息ID（数据库自增ID）
+
+    @Column(length = 100)
+    private String replyToNickname;  // 被引用消息发送者昵称
+
+    @Column(columnDefinition = "TEXT")
+    private String replyToContent;  // 被引用消息内容摘要
+
+    @Column(columnDefinition = "TEXT")
+    private String forwardContent;  // 合并转发消息的原始内容（JSON 数组）
+
     @Column(columnDefinition = "TEXT")
     private String aiSummary;  // AI总结内容
     
     @Column(nullable = false)
-    private LocalDateTime sendTime;  // 发送时间
+    private LocalDateTime sendTime;  // 发送时间（展示时间，优先取自 OneBot time 转换）
+
+    @Column(name = "raw_msg_time")
+    private Long rawMsgTime;  // OneBot 上报的原始 Unix 时间戳（秒）
+
+    @Column(name = "msg_seq")
+    private Integer msgSeq;  // OneBot message_seq，用于时间接近时二次排序
+
+    @Column(name = "server_recv_ms")
+    private Long serverRecvMs;  // 服务端收到消息时的毫秒级 epoch
     
     private LocalDateTime createdAt;
     
     private boolean archived = false;  // 是否已归档
-    
+
+    private boolean deleted = false;  // 是否已被用户删除（软删除）
+
+    private java.time.LocalDateTime deletedAt;  // 删除时间
+
+    private Long deletedBy;  // 删除者用户ID（users.id）
+
     private boolean processed = false;  // 是否已处理
     
     @Column(nullable = false)
@@ -84,7 +109,8 @@ public class Message {
         FILE,       // 文件
         VOICE,      // 语音
         AT,         // @消息
-        REPLY       // 回复消息
+        REPLY,      // 回复消息
+        FORWARD     // 聊天记录（转发消息）
     }
     
     // Getters and Setters
@@ -120,18 +146,64 @@ public class Message {
     
     public Long getReplyToMessageId() { return replyToMessageId; }
     public void setReplyToMessageId(Long replyToMessageId) { this.replyToMessageId = replyToMessageId; }
-    
+
+    public String getReplyToNickname() { return replyToNickname; }
+    public void setReplyToNickname(String replyToNickname) { this.replyToNickname = replyToNickname; }
+
+    public String getReplyToContent() { return replyToContent; }
+    public void setReplyToContent(String replyToContent) { this.replyToContent = replyToContent; }
+
+    public String getForwardContent() { return forwardContent; }
+    public void setForwardContent(String forwardContent) { this.forwardContent = forwardContent; }
+
+    private static final com.fasterxml.jackson.databind.ObjectMapper FORWARD_OBJECT_MAPPER = new com.fasterxml.jackson.databind.ObjectMapper();
+
+    /**
+     * 供前端使用的合并转发子消息列表（JSON 字符串解析为对象数组）。
+     * 不持久化，仅序列化时输出。使用 Jackson 解析以确保能被 Spring 默认序列化器正确处理。
+     */
+    @com.fasterxml.jackson.annotation.JsonProperty("forwardMessages")
+    @jakarta.persistence.Transient
+    public Object getForwardMessages() {
+        if (forwardContent == null || forwardContent.isBlank()) {
+            return null;
+        }
+        try {
+            return FORWARD_OBJECT_MAPPER.readValue(forwardContent, Object.class);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
     public String getAiSummary() { return aiSummary; }
     public void setAiSummary(String aiSummary) { this.aiSummary = aiSummary; }
     
     public LocalDateTime getSendTime() { return sendTime; }
     public void setSendTime(LocalDateTime sendTime) { this.sendTime = sendTime; }
+
+    public Long getRawMsgTime() { return rawMsgTime; }
+    public void setRawMsgTime(Long rawMsgTime) { this.rawMsgTime = rawMsgTime; }
+
+    public Integer getMsgSeq() { return msgSeq; }
+    public void setMsgSeq(Integer msgSeq) { this.msgSeq = msgSeq; }
+
+    public Long getServerRecvMs() { return serverRecvMs; }
+    public void setServerRecvMs(Long serverRecvMs) { this.serverRecvMs = serverRecvMs; }
     
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
     
     public boolean isArchived() { return archived; }
     public void setArchived(boolean archived) { this.archived = archived; }
+
+    public boolean isDeleted() { return deleted; }
+    public void setDeleted(boolean deleted) { this.deleted = deleted; }
+
+    public java.time.LocalDateTime getDeletedAt() { return deletedAt; }
+    public void setDeletedAt(java.time.LocalDateTime deletedAt) { this.deletedAt = deletedAt; }
+
+    public Long getDeletedBy() { return deletedBy; }
+    public void setDeletedBy(Long deletedBy) { this.deletedBy = deletedBy; }
     
     public boolean isProcessed() { return processed; }
     public void setProcessed(boolean processed) { this.processed = processed; }

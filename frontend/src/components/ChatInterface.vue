@@ -46,6 +46,13 @@
         </div>
         <button @click="clearSelection" class="btn-clear">清空</button>
         <button
+          @click="deleteSelected"
+          :disabled="selectedMessages.length === 0"
+          class="btn-delete"
+        >
+          <Icon name="trash" :size="14" /> 删除
+        </button>
+        <button
           @click="analyzeSelected"
           :disabled="selectedMessages.length === 0"
           class="btn-analyze"
@@ -69,15 +76,17 @@
       </div>
       
       <div v-else class="messages-list">
-        <div 
-          v-for="message in messages" 
-          :key="message.id" 
+        <div
+          v-for="message in messages"
+          :key="message.id"
+          :id="'msg-' + message.id"
           class="message-wrapper"
-          :class="{ 
+          :class="{
             'message-self': isSelfMessage(message),
             'message-other': !isSelfMessage(message),
             'message-selected': isSelected(message.id),
-            'selection-mode': isSelectionMode
+            'selection-mode': isSelectionMode,
+            'message-highlight': highlightedMessageId === message.id
           }"
           @click="isSelectionMode && toggleMessageSelection(message.id)"
         >
@@ -103,7 +112,7 @@
                 <span class="message-time">{{ formatTime(message.sendTime || message.timestamp) }}</span>
               </div>
               <!-- 消息内容 -->
-              <MessageContent :message="message" />
+              <MessageContent :message="message" :qq-nickname-map="qqNicknameMap" @navigate-to-message="handleNavigateToMessage" />
               <!-- AI 总结（左对齐） -->
               <div v-if="message.aiSummary" class="ai-summary">
                 <div class="ai-summary-header">
@@ -128,7 +137,7 @@
                 <span class="message-user">{{ message.userNickname || message.userName || '我' }}</span>
               </div>
               <!-- 消息内容 -->
-              <MessageContent :message="message" />
+              <MessageContent :message="message" :qq-nickname-map="qqNicknameMap" @navigate-to-message="handleNavigateToMessage" />
             </div>
           </div>
         </div>
@@ -166,8 +175,8 @@ export default {
       default: ''
     }
   },
-  emits: ['analysis-result'],
-  
+  emits: ['analysis-result', 'new-message-arrived'],
+
   setup(props, { emit }) {
     const groupId = ref(props.groupId);
     const messages = ref([]);
@@ -179,7 +188,9 @@ export default {
     const totalMessages = ref(0);
     const hasMore = ref(true);
     const isLoadingMore = ref(false);
+    const highlightedMessageId = ref(null);
     let fallbackPollInterval = null;
+    let highlightTimer = null;
     
     const currentUserId = 'current_user';
     
@@ -197,11 +208,46 @@ export default {
       return messages.value.filter(msg => selectedMessageIds.value.has(msg.id));
     });
 
+    // 群成员昵称映射（从后端接口加载，覆盖历史所有发送者）
+    const groupMemberMap = ref(new Map());
+
+    // 根据已加载消息 + 群成员映射构建 QQ 号 -> 昵称，用于渲染 @某人
+    const qqNicknameMap = computed(() => {
+      const map = new Map(groupMemberMap.value);
+      messages.value.forEach(msg => {
+        if (msg.userQq && msg.userNickname) {
+          // 保留最新昵称（后续消息可能改名）
+          map.set(String(msg.userQq), msg.userNickname);
+        }
+      });
+      return map;
+    });
+
+    const loadGroupMembers = async (gid) => {
+      try {
+        const members = await messageApi.getGroupMembers(gid);
+        const map = new Map();
+        (members || []).forEach(m => {
+          if (m.qq) {
+            map.set(String(m.qq), m.nickname || m.qq);
+          }
+        });
+        groupMemberMap.value = map;
+      } catch (error) {
+        console.warn('加载群成员昵称映射失败:', error);
+      }
+    };
+
     const sortMessagesAsc = (list) => [...list].sort((a, b) => {
       return new Date(a.sendTime || a.timestamp) - new Date(b.sendTime || b.timestamp);
     });
 
     const mergeMessage = (incoming) => {
+      // 后端广播的已删除消息不应再出现在当前视图
+      if (incoming.deleted) {
+        messages.value = messages.value.filter(m => m.id !== incoming.id);
+        return;
+      }
       const idx = messages.value.findIndex(m => m.id === incoming.id);
       if (idx >= 0) {
         messages.value[idx] = { ...messages.value[idx], ...incoming };
@@ -240,6 +286,9 @@ export default {
         const response = await messageApi.getMessagesByGroupIdPaged(gid, 0, PAGE_SIZE);
         const list = sortMessagesAsc(response.messages || []);
         messages.value = list;
+
+        // 同时加载该群历史成员昵称映射，用于解析 @消息
+        loadGroupMembers(gid);
         totalMessages.value = response.total || list.length;
         hasMore.value = list.length < totalMessages.value;
         currentGroupName.value = list.length > 0
@@ -303,6 +352,8 @@ export default {
         const wasAtBottom = isAtBottom();
         newMessages.forEach(mergeMessage);
         if (wasAtBottom) nextTick(scrollToBottom);
+        // 通知父组件：有新消息，触发 Sidebar 刷新，让新消息多的群移至顶层
+        emit('new-message-arrived');
       } catch (error) {
         console.warn('增量拉取失败:', error);
       }
@@ -314,6 +365,7 @@ export default {
       if (data.type === 'new_message') {
         mergeMessage(data.message);
         if (wasAtBottom) nextTick(scrollToBottom);
+        emit('new-message-arrived');
       } else if (data.type === 'message_update') {
         mergeMessage(data.message);
       }
@@ -378,17 +430,54 @@ export default {
     const formatTime = (timestamp) => {
       if (!timestamp) return '';
       const date = new Date(timestamp);
-      return date.toLocaleTimeString('zh-CN', { 
-        hour: '2-digit', 
-        minute: '2-digit',
-        hour12: false 
-      });
+      if (isNaN(date.getTime())) return '';
+
+      const now = new Date();
+      const pad = (n) => String(n).padStart(2, '0');
+      const timeStr = `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+
+      const isSameDay = (d1, d2) =>
+        d1.getFullYear() === d2.getFullYear() &&
+        d1.getMonth() === d2.getMonth() &&
+        d1.getDate() === d2.getDate();
+
+      const diffMs = now - date;
+      const diffMin = Math.floor(diffMs / 60000);
+      const diffHour = Math.floor(diffMs / 3600000);
+
+      // 1 分钟内
+      if (diffMin < 1) return '刚刚';
+      // 1 分钟 ~ 1 小时
+      if (diffHour < 1) return `${diffMin}分钟前`;
+      // 当天内超过 1 小时
+      if (isSameDay(date, now)) return timeStr;
+
+      // 昨天
+      const yesterday = new Date(now);
+      yesterday.setDate(yesterday.getDate() - 1);
+      if (isSameDay(date, yesterday)) return `昨天 ${timeStr}`;
+
+      // 同一年显示 MM-DD HH:mm
+      if (date.getFullYear() === now.getFullYear()) {
+        return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${timeStr}`;
+      }
+
+      // 跨年份显示 YYYY-MM-DD HH:mm
+      return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${timeStr}`;
     };
 
     const scrollToBottom = () => {
-      if (messagesContainer.value) {
-        messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight;
-      }
+      if (!messagesContainer.value) return;
+      const container = messagesContainer.value;
+      container.scrollTop = container.scrollHeight;
+      // 图片/视频等异步加载后可能撑高容器，延迟再次滚动到底
+      requestAnimationFrame(() => {
+        setTimeout(() => {
+          if (messagesContainer.value) {
+            messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight;
+          }
+        }, 100);
+      });
     };
     
     // 检查是否在底部（允许10px的误差）
@@ -398,10 +487,31 @@ export default {
       return container.scrollHeight - container.scrollTop - container.clientHeight <= 10;
     };
 
+    // 点击引用消息后滚动到原消息并高亮
+    const handleNavigateToMessage = (messageId) => {
+      const target = messages.value.find(m => m.id === messageId || String(m.id) === String(messageId));
+      if (!target) {
+        showToast('原消息不在当前视图中，请加载更多消息', 'warning');
+        return;
+      }
+      const el = document.getElementById(`msg-${target.id}`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        highlightedMessageId.value = target.id;
+        if (highlightTimer) clearTimeout(highlightTimer);
+        highlightTimer = setTimeout(() => {
+          highlightedMessageId.value = null;
+        }, 3000);
+      } else {
+        showToast('原消息不在当前视图中，请加载更多消息', 'warning');
+      }
+    };
+
     watch(() => props.groupId, (newGroupId, oldGroupId) => {
       if (oldGroupId) wsUnsubscribe(oldGroupId);
       if (newGroupId) {
         groupId.value = newGroupId;
+        groupMemberMap.value = new Map();
         loadMessages();
         startFallbackPoll();
       } else {
@@ -420,6 +530,10 @@ export default {
     onUnmounted(() => {
       stopFallbackPoll();
       wsDisconnect();
+      if (highlightTimer) {
+        clearTimeout(highlightTimer);
+        highlightTimer = null;
+      }
     });
     
     // 切换选择模式
@@ -495,15 +609,42 @@ export default {
         return;
       }
       
+      // 格式化单条消息内容：媒体/转发等折叠为占位，清理 CQ 码
+      const formatMessageForAnalysis = (msg) => {
+        const type = (msg.messageType || 'TEXT').toUpperCase();
+        if (type === 'FORWARD') return '[聊天记录]';
+        if (type === 'IMAGE') return '[图片]';
+        if (type === 'VIDEO') return '[视频]';
+        if (type === 'VOICE' || type === 'AUDIO') return '[语音]';
+
+        let text = msg.content || '[无内容]';
+        // 清理/折叠 CQ 码
+        text = text
+          .replace(/\[CQ:image[^\]]*\]/g, '[图片]')
+          .replace(/\[CQ:video[^\]]*\]/g, '[视频]')
+          .replace(/\[CQ:record[^\]]*\]/g, '[语音]')
+          .replace(/\[CQ:voice[^\]]*\]/g, '[语音]')
+          .replace(/\[CQ:face[^\]]*\]/g, '[表情]')
+          .replace(/\[CQ:file[^\]]*\]/g, '[文件]')
+          .replace(/\[CQ:at,qq=([^,\]]+)\]/g, (match, qq) => {
+            const nickname = qqNicknameMap.value.get(String(qq));
+            return nickname ? `@${nickname}` : `@${qq}`;
+          })
+          .replace(/\[CQ:reply[^\]]*\]/g, '')
+          .replace(/\[CQ:forward[^\]]*\]/g, '[聊天记录]')
+          .replace(/\[CQ:[^\]]+\]/g, '');
+        return text.trim() || '[无内容]';
+      };
+
       // 构建选中的消息数据
       const selectedData = selectedMessagesData.value.map(msg => ({
         user: msg.userNickname || msg.userName || '未知用户',
-        content: msg.content || '[无内容]'
+        content: formatMessageForAnalysis(msg)
       }));
-      
+
       // 构建消息内容
       const messageContents = selectedData.map(msg => `${msg.user}: ${msg.content}`).join('\n');
-      
+
       // 发送分析请求事件给父组件
       emit('analysis-result', {
         type: 'request',
@@ -514,6 +655,49 @@ export default {
       // 退出选择模式
       isSelectionMode.value = false;
       clearSelection();
+    };
+
+    // 删除选中的消息
+    const deleteSelected = async () => {
+      if (selectedMessages.value.length === 0) {
+        showToast('请先选择要删除的消息', 'warning');
+        return;
+      }
+
+      // 判断是否包含图片/视频/语音消息，给用户"同时删除媒体文件"的选项
+      const hasMedia = messages.value.some(m => {
+        if (!selectedMessages.value.includes(m.id)) return false;
+        const type = (m.messageType || 'TEXT').toUpperCase();
+        return ['IMAGE', 'VIDEO', 'VOICE', 'AUDIO'].includes(type)
+          || (m.content && /^\s*\[CQ:(image|video|record)\b/i.test(m.content))
+          || (m.content && String(m.content).startsWith('/images/'));
+      });
+
+      let confirmText = `确定要删除选中的 ${selectedMessages.value.length} 条消息吗？`;
+      if (hasMedia) {
+        confirmText += '\n（点击"确认"仅软删除消息；点击"确认+删除媒体"同时删除图片/视频/语音文件）';
+      }
+      const confirmed = window.confirm(confirmText);
+      if (!confirmed) return;
+
+      // 只有当包含媒体时，再询问是否删除媒体文件（两步确认）
+      let deleteMedia = false;
+      if (hasMedia) {
+        deleteMedia = window.confirm('是否同时删除关联的图片/视频/语音文件？\n（点击"确认"同步删除磁盘文件；"取消"仅软删除消息记录）');
+      }
+
+      try {
+        const result = await messageApi.deleteMessagesBatch(selectedMessages.value, deleteMedia);
+        const deletedIds = new Set(selectedMessages.value);
+        messages.value = messages.value.filter(msg => !deletedIds.has(msg.id));
+        showToast(`成功删除 ${result.deletedCount || selectedMessages.value.length} 条消息${deleteMedia ? '（媒体文件已清理）' : ''}`, 'success');
+
+        clearSelection();
+        isSelectionMode.value = false;
+      } catch (error) {
+        console.error('删除消息失败:', error);
+        showToast(`删除失败: ${error.message}`, 'error');
+      }
     };
 
     return {
@@ -532,6 +716,9 @@ export default {
       openImage,
       closeImagePreview,
       formatTime,
+      highlightedMessageId,
+      handleNavigateToMessage,
+      qqNicknameMap,
       // 选择模式相关
       isSelectionMode,
       isMultiSelect,
@@ -543,7 +730,8 @@ export default {
       isSelected,
       clearSelection,
       selectRecentMessages,
-      analyzeSelected
+      analyzeSelected,
+      deleteSelected
     };
   }
 };
@@ -972,6 +1160,29 @@ export default {
   cursor: not-allowed;
 }
 
+.btn-delete {
+  padding: 8px 16px;
+  background-color: #e74c3c;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn-delete:hover:not(:disabled) {
+  background-color: #c0392b;
+}
+
+.btn-delete:disabled {
+  background-color: #bdc3c7;
+  cursor: not-allowed;
+}
+
 /* 消息选择框 */
 .message-checkbox {
   display: flex;
@@ -1001,6 +1212,21 @@ export default {
 .message-wrapper.message-selected {
   background-color: rgba(52, 152, 219, 0.15);
   border-radius: 8px;
+}
+
+.message-wrapper.message-highlight {
+  animation: highlight-pulse 3s ease;
+}
+
+@keyframes highlight-pulse {
+  0% {
+    background-color: rgba(255, 235, 59, 0.5);
+    box-shadow: 0 0 0 2px rgba(255, 235, 59, 0.6);
+  }
+  100% {
+    background-color: transparent;
+    box-shadow: none;
+  }
 }
 
 /* 响应式设计 */

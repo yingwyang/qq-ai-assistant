@@ -17,7 +17,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
-import java.time.LocalDateTime;
 import java.util.*;
 
 @RestController
@@ -31,6 +30,25 @@ public class UserProfileController {
     private UserQqBindingRepository userQqBindingRepository;
 
     /**
+     * 校验头像文件是否真实存在，不存在则返回 null，避免前端请求 404
+     */
+    private String resolveAvatarUrl(String avatar) {
+        if (avatar == null || avatar.isBlank()) {
+            return null;
+        }
+        if (avatar.startsWith("http")) {
+            return avatar;
+        }
+        String relative = avatar.startsWith("/") ? avatar.substring(1) : avatar;
+        Path filePath = Paths.get(relative).toAbsolutePath().normalize();
+        Path basePath = Paths.get("uploads/avatars").toAbsolutePath().normalize();
+        if (!filePath.startsWith(basePath)) {
+            return null;
+        }
+        return Files.exists(filePath) ? avatar : null;
+    }
+
+    /**
      * 获取当前登录用户ID
      */
     private Long getCurrentUserId() {
@@ -38,7 +56,7 @@ public class UserProfileController {
         if (authentication != null && authentication.isAuthenticated()) {
             String username = authentication.getName();
             // 从数据库查询用户ID
-            Optional<User> userOpt = userRepository.findByQq(username);
+            Optional<User> userOpt = userRepository.findByUsername(username);
             return userOpt.map(User::getId).orElse(null);
         }
         return null;
@@ -64,10 +82,10 @@ public class UserProfileController {
         User user = userOpt.get();
         Map<String, Object> profile = new HashMap<>();
         profile.put("id", user.getId());
-        profile.put("username", user.getQq());
+        profile.put("username", user.getUsername());
         profile.put("nickname", user.getNickname());
         profile.put("role", user.getRole());
-        profile.put("avatar", user.getAvatar());
+        profile.put("avatar", resolveAvatarUrl(user.getAvatar()));
         profile.put("createdAt", user.getCreatedAt());
 
         return ResponseEntity.ok(profile);
@@ -156,10 +174,21 @@ public class UserProfileController {
                     .body(Map.of("error", "QQ号不能为空", "code", 400));
         }
 
-        // 检查是否已绑定
-        if (userQqBindingRepository.existsByUserIdAndQqNumber(userId, qqNumber)) {
+        // 检查是否已绑定（只检查激活状态的）
+        if (userQqBindingRepository.existsByUserIdAndQqNumberAndActiveTrue(userId, qqNumber)) {
             return ResponseEntity.badRequest()
                     .body(Map.of("error", "该QQ号已绑定", "code", 400));
+        }
+
+        // 检查是否有已解绑的记录，有则重新激活
+        Optional<UserQqBinding> existingBindingOpt = userQqBindingRepository.findByUserIdAndQqNumber(userId, qqNumber);
+        if (existingBindingOpt.isPresent()) {
+            UserQqBinding existing = existingBindingOpt.get();
+            existing.setActive(true);
+            existing.setNickname(nickname);
+            existing.setAvatar(avatar);
+            userQqBindingRepository.save(existing);
+            return ResponseEntity.ok(Map.of("message", "绑定成功", "qqNumber", qqNumber));
         }
 
         // 创建绑定记录
@@ -171,7 +200,7 @@ public class UserProfileController {
         binding.setActive(true);
         
         // 如果是第一个绑定的账号，设为默认
-        long bindingCount = userQqBindingRepository.countByUserId(userId);
+        long bindingCount = userQqBindingRepository.countByUserIdAndActiveTrue(userId);
         binding.setDefault(bindingCount == 0);
 
         userQqBindingRepository.save(binding);
@@ -206,6 +235,15 @@ public class UserProfileController {
         binding.setActive(false);
         userQqBindingRepository.save(binding);
 
+        // 如果解绑的是默认账号，且还有其他激活的账号，将第一个设为默认
+        if (binding.isDefault()) {
+            List<UserQqBinding> remainingBindings = userQqBindingRepository.findByUserIdAndActiveTrue(userId);
+            if (!remainingBindings.isEmpty()) {
+                remainingBindings.get(0).setDefault(true);
+                userQqBindingRepository.save(remainingBindings.get(0));
+            }
+        }
+
         return ResponseEntity.ok(Map.of("message", "解绑成功"));
     }
 
@@ -232,8 +270,8 @@ public class UserProfileController {
                     .body(Map.of("error", "无权操作", "code", 403));
         }
 
-        // 取消其他默认账号
-        List<UserQqBinding> userBindings = userQqBindingRepository.findByUserId(userId);
+        // 取消其他默认账号（只考虑激活的）
+        List<UserQqBinding> userBindings = userQqBindingRepository.findByUserIdAndActiveTrue(userId);
         for (UserQqBinding b : userBindings) {
             if (b.isDefault()) {
                 b.setDefault(false);
@@ -304,8 +342,8 @@ public class UserProfileController {
         }
 
         try {
-            // 创建上传目录
-            String uploadDir = "uploads/avatars";
+            // 创建上传目录（用户头像隔离到 uploads/avatars/users）
+            String uploadDir = "uploads/avatars/users";
             Path uploadPath = Paths.get(uploadDir);
             if (!Files.exists(uploadPath)) {
                 Files.createDirectories(uploadPath);
@@ -323,7 +361,7 @@ public class UserProfileController {
             Files.copy(file.getInputStream(), filePath, StandardCopyOption.REPLACE_EXISTING);
 
             // 生成访问URL
-            String avatarUrl = "/uploads/avatars/" + filename;
+            String avatarUrl = "/uploads/avatars/users/" + filename;
 
             // 更新用户头像
             Optional<User> userOpt = userRepository.findById(userId);

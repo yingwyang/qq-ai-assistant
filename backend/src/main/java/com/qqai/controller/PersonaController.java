@@ -1,9 +1,12 @@
 package com.qqai.controller;
 
+import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson.JSONObject;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.io.File;
 import java.sql.*;
 import java.time.LocalDateTime;
 import java.util.*;
@@ -163,36 +166,146 @@ public class PersonaController {
             return ResponseEntity.badRequest().body(Map.of("error", "人格ID不能为空"));
         }
 
-        try (Connection conn = getConnection();
-             PreparedStatement ps = conn.prepareStatement(
-                "UPDATE preferences SET value = ? WHERE key = 'default_personality'")) {
-            ps.setString(1, personaId);
-            int updated = ps.executeUpdate();
-            if (updated == 0) {
-                // 如果不存在则插入
-                try (PreparedStatement insert = conn.prepareStatement(
-                    "INSERT INTO preferences (key, value) VALUES ('default_personality', ?)")) {
-                    insert.setString(1, personaId);
-                    insert.executeUpdate();
+        try (Connection conn = getConnection()) {
+            // 确保is_default字段存在
+            ensureIsDefaultColumn(conn);
+            
+            // 先将所有人格的is_default设置为0
+            try (PreparedStatement ps = conn.prepareStatement("UPDATE personas SET is_default = 0")) {
+                ps.executeUpdate();
+            }
+            // 再将指定人格设置为默认
+            try (PreparedStatement ps = conn.prepareStatement("UPDATE personas SET is_default = 1 WHERE persona_id = ?")) {
+                ps.setString(1, personaId);
+                int updated = ps.executeUpdate();
+                if (updated > 0) {
+                    // 同时更新 AstrBot 的 provider_settings 配置
+                    updateAstrBotDefaultPersonality(personaId);
+                    return ResponseEntity.ok(Map.of("success", true, "message", "默认人格设置成功"));
+                } else {
+                    return ResponseEntity.badRequest().body(Map.of("error", "未找到指定的人格"));
                 }
             }
-            return ResponseEntity.ok(Map.of("success", true, "message", "默认人格设置成功"));
         } catch (Exception e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         }
     }
 
+    private void updateAstrBotDefaultPersonality(String personaId) {
+        try {
+            System.out.println("【调试】开始更新AstrBot默认人格配置，personaId: " + personaId);
+            
+            // AstrBot 使用 JSON 配置文件存储默认人格
+            String configPath = astrbotDataPath + "/cmd_config.json";
+            File configFile = new File(configPath);
+            
+            if (!configFile.exists()) {
+                System.out.println("【调试】配置文件不存在: " + configPath);
+                return;
+            }
+            
+            // 读取配置文件
+            String content = new String(java.nio.file.Files.readAllBytes(configFile.toPath()), java.nio.charset.StandardCharsets.UTF_8);
+            JSONObject json = JSON.parseObject(content);
+            
+            // 更新默认人格
+            JSONObject providerSettings = json.getJSONObject("provider_settings");
+            if (providerSettings != null) {
+                String oldPersonality = providerSettings.getString("default_personality");
+                providerSettings.put("default_personality", personaId);
+                System.out.println("【调试】默认人格从 '" + oldPersonality + "' 更改为 '" + personaId + "'");
+                
+                // 写回配置文件
+                java.nio.file.Files.write(configFile.toPath(), json.toJSONString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                System.out.println("【调试】配置文件已更新");
+                
+                // 调用 AstrBot API 通知配置已更改
+                notifyAstrBotConfigChanged();
+            } else {
+                System.out.println("【调试】provider_settings 不存在");
+            }
+            
+            System.out.println("【调试】更新AstrBot默认人格配置完成");
+        } catch (Exception e) {
+            // 忽略更新失败，不影响主流程
+            System.err.println("【调试】更新AstrBot默认人格配置失败: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+    
+    private void notifyAstrBotConfigChanged() {
+        try {
+            String astrBotApiUrl = "http://localhost:6185";
+            String astrBotToken = "abk_6CJKaVnl8233_QVKJr_3ID1ns8cd5EIeCtSv31YjV84";
+            
+            // 调用 AstrBot 的配置保存 API，传递完整的配置数据
+            String url = astrBotApiUrl + "/api/config/save";
+            
+            org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
+            headers.set("Authorization", "Bearer " + astrBotToken);
+            headers.setContentType(org.springframework.http.MediaType.APPLICATION_JSON);
+            
+            // 读取完整的配置文件
+            String configPath = astrbotDataPath + "/cmd_config.json";
+            String content = new String(java.nio.file.Files.readAllBytes(new File(configPath).toPath()), java.nio.charset.StandardCharsets.UTF_8);
+            JSONObject configJson = JSON.parseObject(content);
+            
+            // 构造请求体 - 传递完整的配置
+            Map<String, Object> body = new HashMap<>();
+            body.put("is_core", true);
+            body.put("config", configJson);
+            
+            org.springframework.http.HttpEntity<Map<String, Object>> entity = new org.springframework.http.HttpEntity<>(body, headers);
+            
+            org.springframework.web.client.RestTemplate restTemplate = new org.springframework.web.client.RestTemplate();
+            org.springframework.http.ResponseEntity<String> response = restTemplate.postForEntity(url, entity, String.class);
+            
+            System.out.println("【调试】AstrBot 配置保存 API 响应: " + response.getBody());
+        } catch (Exception e) {
+            System.out.println("【调试】调用 AstrBot 配置保存 API 失败: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
     @GetMapping("/default")
     public ResponseEntity<?> getDefaultPersona() {
-        try (Connection conn = getConnection();
-             Statement stmt = conn.createStatement();
-             ResultSet rs = stmt.executeQuery("SELECT value FROM preferences WHERE key = 'default_personality'")) {
-            if (rs.next()) {
-                return ResponseEntity.ok(Map.of("defaultPersonaId", rs.getString("value")));
+        try (Connection conn = getConnection()) {
+            // 确保is_default字段存在
+            ensureIsDefaultColumn(conn);
+            
+            try (Statement stmt = conn.createStatement();
+                 ResultSet rs = stmt.executeQuery("SELECT persona_id FROM personas WHERE is_default = 1")) {
+                if (rs.next()) {
+                    return ResponseEntity.ok(Map.of("defaultPersonaId", rs.getString("persona_id")));
+                }
+                return ResponseEntity.ok(Map.of("defaultPersonaId", null));
             }
-            return ResponseEntity.ok(Map.of("defaultPersonaId", null));
         } catch (Exception e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    private void ensureIsDefaultColumn(Connection conn) {
+        try {
+            // 检查is_default字段是否存在
+            try (Statement stmt = conn.createStatement();
+                 ResultSet rs = stmt.executeQuery("PRAGMA table_info(personas)")) {
+                boolean exists = false;
+                while (rs.next()) {
+                    if ("is_default".equals(rs.getString("name"))) {
+                        exists = true;
+                        break;
+                    }
+                }
+                // 如果不存在则添加字段
+                if (!exists) {
+                    try (Statement alterStmt = conn.createStatement()) {
+                        alterStmt.executeUpdate("ALTER TABLE personas ADD COLUMN is_default INTEGER DEFAULT 0");
+                    }
+                }
+            }
+        } catch (Exception e) {
+            // 忽略字段添加错误
         }
     }
 
