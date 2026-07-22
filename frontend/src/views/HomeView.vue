@@ -14,14 +14,21 @@
         @open-system-modal="showSystemModal = true"
         @open-user-profile="openUserProfile"
         @open-persona-manager="showPersonaManager = true"
-        @open-admin-dashboard="handleAdminDashboard"
         @select-group="handleSelectGroup"
       />
       
       <!-- 三栏布局主内容区 -->
       <main class="chat-main" :class="{ 'mobile': isMobile, 'tablet': isTablet, 'desktop': isDesktop }">
+        <!-- 认证检查中显示加载状态 -->
+        <template v-if="isAuthChecking">
+          <div class="auth-loading">
+            <div class="auth-loading-spinner"></div>
+            <p>加载中...</p>
+          </div>
+        </template>
+        
         <!-- 未登录状态显示登录提示 -->
-        <template v-if="!isLoggedIn">
+        <template v-else-if="!isLoggedIn">
           <div class="login-prompt">
             <div class="login-prompt-content">
               <div class="login-icon"><Icon name="lock" :size="64" /></div>
@@ -101,6 +108,7 @@
               <ChatInterface
                 :groupId="selectedGroupId"
                 @analysis-result="handleAnalysisResult"
+                @new-message-arrived="handleNewMessageArrived"
               />
               <!-- 右侧收起时显示恢复按钮 -->
               <button
@@ -152,13 +160,6 @@
       @login-status-changed="handleNapCatStatusChanged" 
     />
     
-    <!-- 管理员仪表盘弹窗 -->
-    <div v-if="showAdminDashboard" class="admin-modal-overlay" @click="showAdminDashboard = false">
-      <div class="admin-modal-content" @click.stop>
-        <AdminDashboard @close="showAdminDashboard = false" />
-      </div>
-    </div>
-    
     <!-- 用户个人信息页面 -->
     <UserProfile
       v-model:visible="showUserProfile"
@@ -193,7 +194,6 @@ import UserProfile from '../components/UserProfile.vue';
 import Toast from '../components/Toast.vue';
 import ConfirmDialog from '../components/ConfirmDialog.vue';
 import PersonaManager from '../components/PersonaManager.vue';
-import AdminDashboard from '../components/AdminDashboard.vue';
 import { useResponsive } from '../composables/useResponsive';
 import { authApi } from '../services/api';
 
@@ -209,19 +209,18 @@ export default {
     UserProfile,
     Toast,
     ConfirmDialog,
-    PersonaManager,
-    AdminDashboard
+    PersonaManager
   },
   setup() {
     const router = useRouter();
     const isLoggedIn = ref(false);
+    const isAuthChecking = ref(true); // 认证检查中，防止"请先登录"闪现
     const activeTab = ref('recent');
     const gptSovitsRunning = ref(false);
     const showLoginModal = ref(false);
     const showSystemModal = ref(false);
     const showUserProfile = ref(false);
     const showPersonaManager = ref(false);
-    const showAdminDashboard = ref(false);
     const selectedGroupId = ref('');
     const astrBotChatRef = ref(null);
     const sidebarRef = ref(null); // Sidebar 组件引用，暴露了 refreshGroups 方法
@@ -319,20 +318,26 @@ export default {
         try {
           // 验证token有效性
           const userData = await authApi.getCurrentUser();
-          userInfo.value = userData;
-          isLoggedIn.value = true;
-          localStorage.setItem('isLoggedIn', 'true');
-          if (userData.role) {
-            localStorage.setItem('user_role', userData.role);
+          if (userData) {
+            userInfo.value = userData;
+            isLoggedIn.value = true;
+            localStorage.setItem('isLoggedIn', 'true');
+            if (userData.role) {
+              localStorage.setItem('user_role', userData.role);
+            }
+          } else {
+            console.log('Token验证失败，跳转登录页');
+            isLoggedIn.value = false;
           }
-        } catch (error) {
-          console.log('Token验证失败:', error);
-          // Token无效，清除登录状态
-          handleLogout();
+        } catch (e) {
+          console.log('Token验证异常:', e);
+          isLoggedIn.value = false;
         }
       } else {
         isLoggedIn.value = false;
       }
+      // 认证检查完成，无论成功失败都关闭加载状态
+      isAuthChecking.value = false;
     });
 
     const handleLoginSuccess = (userData) => {
@@ -370,10 +375,6 @@ export default {
       localStorage.removeItem('selectedGroupId');
       // 跳转到登录页
       router.push('/login');
-    };
-
-    const handleAdminDashboard = () => {
-      showAdminDashboard.value = true;
     };
 
     const handleSelectGroup = (groupId) => {
@@ -423,13 +424,13 @@ export default {
 
     return {
       isLoggedIn,
+      isAuthChecking,
       activeTab,
       gptSovitsRunning,
       showLoginModal,
       showSystemModal,
       showUserProfile,
       showPersonaManager,
-      showAdminDashboard,
       selectedGroupId,
       astrBotChatRef,
       userInfo,
@@ -455,7 +456,6 @@ export default {
       handleNapCatStatusChanged,
       handleTabChange,
       handleLogout,
-      handleAdminDashboard,
       handleSelectGroup,
       handleAnalysisResult,
       handleNewMessageArrived,
@@ -664,6 +664,34 @@ html, body {
   color: #155724;
 }
 
+/* 认证加载状态 */
+.auth-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  min-height: 100%;
+  gap: 16px;
+  color: #999;
+}
+
+.auth-loading-spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid #e0e0e0;
+  border-top-color: #3498db;
+  border-radius: 50%;
+  animation: auth-spin 0.8s linear infinite;
+}
+
+@keyframes auth-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 /* 登录提示样式 */
 .login-prompt {
   display: flex;
@@ -833,7 +861,6 @@ html, body {
 }
 
 /* 管理员弹窗 overlay */
-.admin-modal-overlay,
 .persona-modal-overlay {
   position: fixed;
   top: 0;
@@ -847,7 +874,6 @@ html, body {
   z-index: 1000;
 }
 
-.admin-modal-content,
 .persona-modal-content {
   background-color: white;
   border-radius: 8px;

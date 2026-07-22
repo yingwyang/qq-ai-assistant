@@ -1,0 +1,103 @@
+spring:
+  datasource:
+    url: ${DB_URL:jdbc:mysql://localhost:3306/qq_chat?useSSL=false&serverTimezone=Asia/Shanghai&characterEncoding=UTF-8&allowPublicKeyRetrieval=true}
+    username: ${DB_USERNAME:root}
+    password: ${DB_PASSWORD:}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: ${JPA_SHOW_SQL:false}
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQLDialect
+        format_sql: true
+        jdbc:
+          batch_size: 50
+        order_inserts: true
+        order_updates: true
+  servlet:
+    multipart:
+      enabled: true
+      max-file-size: 100MB
+      max-request-size: 100MB
+      file-size-threshold: 0
+
+server:
+  port: ${SERVER_PORT:8081}
+  error:
+    include-stacktrace: never
+    include-message: never
+    include-binding-errors: never
+
+# AstrBot配置
+astrbot:
+  api-url: ${ASTRBOT_API_URL:http://localhost:6185}
+  token: ${ASTRBOT_TOKEN:}
+  data-path: ${ASTRBOT_DATA_PATH:D:/ai/Documents/qq-web/Astrbot/data}
+
+# NapCat配置
+napcat:
+  api-url: ${NAPCAT_API_URL:http://localhost:6099}
+  onebot-api-url: ${NAPCAT_ONEBOT_API_URL:http://localhost:6100}
+  webui-url: ${NAPCAT_WEBUI_URL:http://127.0.0.1:6099}
+  token: ${NAPCAT_TOKEN:}
+  webhook-token: ${NAPCAT_WEBHOOK_TOKEN:}
+  # 严格模式：Webhook 上报必须携带正确的 token，否则返回 401。
+  # 若 NapCat 未正确发送 token，可临时设为 false，但会带来安全风险。
+  webhook-token-strict: ${NAPCAT_WEBHOOK_TOKEN_STRICT:false}
+  self-qq: ${NAPCAT_SELF_QQ:}
+
+# GPT-SoVITS配置
+gpt-sovits:
+  api-url: ${GPT_SOVITS_API_URL:http://localhost:8000}
+  token: ${GPT_SOVITS_TOKEN:}
+  ref-audio-path: ${GPT_SOVITS_REF_AUDIO_PATH:}
+  prompt-text: ${GPT_SOVITS_PROMPT_TEXT:大家好，今天是个美好的日子。}
+  prompt-lang: ${GPT_SOVITS_PROMPT_LANG:zh}
+  text-lang: ${GPT_SOVITS_TEXT_LANG:zh}
+  output-dir: ${GPT_SOVITS_OUTPUT_DIR:./uploads/tts}
+
+# MinIO配置
+minio:
+  endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
+  access-key: ${MINIO_ACCESS_KEY:}
+  secret-key: ${MINIO_SECRET_KEY:}
+  bucket-name: ${MINIO_BUCKET:qq-chat-files}
+  secure: false
+
+# FFmpeg配置
+ffmpeg:
+  path: ${FFMPEG_PATH:ffmpeg}
+
+# Python 配置（用于 QQ SILK 语音解码）
+python:
+  executable: ${PYTHON_EXECUTABLE:python}
+  silk-script: ${PYTHON_SILK_SCRIPT:./scripts/convert_silk_to_mp3.py}
+
+# 文件上传配置
+file:
+  upload:
+    max-size: 100MB
+    allowed-types: image/*,video/*,audio/*,application/*
+  storage:
+    temp-path: ./uploads/temp
+    archive-path: ./uploads/archive
+    local-path: ./uploads/images
+
+# 消息归档配置
+archive:
+  days-before: 90
+  cron: 0 0 2 * * ?
+
+# JWT配置
+jwt:
+  secret: ${JWT_SECRET:}
+  expiration: ${JWT_EXPIRATION:86400000}
+
+# 注册与账户安全配置
+app:
+  registration:
+    enabled: ${APP_REGISTRATION_ENABLED:true}
+    rate-limit-per-ip: 5
+    rate-limit-window-minutes: 1

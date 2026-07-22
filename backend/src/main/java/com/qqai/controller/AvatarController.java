@@ -1,6 +1,7 @@
 package com.qqai.controller;
 
-import com.alibaba.fastjson2.JSONObject;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
@@ -22,13 +23,15 @@ public class AvatarController {
     private static final String GROUP_AVATAR_DIR = "uploads/avatars/groups";
     private static final String USER_AVATAR_DIR = "uploads/avatars/users";
 
+    private final ObjectMapper objectMapper = new ObjectMapper();
+
     /**
      * 上传头像文件
      */
     @PostMapping("/upload")
     public ResponseEntity<?> uploadAvatar(@RequestParam("file") MultipartFile file,
                                           @RequestParam(value = "type", defaultValue = "bot") String type) {
-        JSONObject result = new JSONObject();
+        ObjectNode result = objectMapper.createObjectNode();
 
         if (file.isEmpty()) {
             result.put("status", "error");
@@ -83,7 +86,7 @@ public class AvatarController {
      */
     @DeleteMapping("/delete")
     public ResponseEntity<?> deleteAvatar(@RequestParam("url") String url) {
-        JSONObject result = new JSONObject();
+        ObjectNode result = objectMapper.createObjectNode();
 
         try {
             // 从 URL 中解析相对于 uploads/avatars 的路径，支持 groups/users 子目录及旧路径

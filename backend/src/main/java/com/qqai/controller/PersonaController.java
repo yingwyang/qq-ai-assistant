@@ -1,7 +1,10 @@
 package com.qqai.controller;
 
-import com.alibaba.fastjson.JSON;
-import com.alibaba.fastjson.JSONObject;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -15,8 +18,12 @@ import java.util.*;
 @RequestMapping("/api/persona")
 public class PersonaController {
 
+    private static final Logger log = LoggerFactory.getLogger(PersonaController.class);
+
     @Value("${astrbot.data-path:D:/ai/Documents/qq-web/Astrbot/data}")
     private String astrbotDataPath;
+
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     private Connection getConnection() throws SQLException {
         String dbPath = astrbotDataPath + "/data_v4.db";
@@ -193,76 +200,76 @@ public class PersonaController {
 
     private void updateAstrBotDefaultPersonality(String personaId) {
         try {
-            System.out.println("【调试】开始更新AstrBot默认人格配置，personaId: " + personaId);
-            
+            log.debug("【调试】开始更新AstrBot默认人格配置，personaId: {}", personaId);
+
             // AstrBot 使用 JSON 配置文件存储默认人格
             String configPath = astrbotDataPath + "/cmd_config.json";
             File configFile = new File(configPath);
-            
+
             if (!configFile.exists()) {
-                System.out.println("【调试】配置文件不存在: " + configPath);
+                log.debug("【调试】配置文件不存在: {}", configPath);
                 return;
             }
-            
+
             // 读取配置文件
             String content = new String(java.nio.file.Files.readAllBytes(configFile.toPath()), java.nio.charset.StandardCharsets.UTF_8);
-            JSONObject json = JSON.parseObject(content);
-            
+            ObjectNode json = (ObjectNode) objectMapper.readTree(content);
+
             // 更新默认人格
-            JSONObject providerSettings = json.getJSONObject("provider_settings");
+            ObjectNode providerSettings = (ObjectNode) json.get("provider_settings");
             if (providerSettings != null) {
-                String oldPersonality = providerSettings.getString("default_personality");
+                JsonNode oldPersonality = providerSettings.get("default_personality");
                 providerSettings.put("default_personality", personaId);
-                System.out.println("【调试】默认人格从 '" + oldPersonality + "' 更改为 '" + personaId + "'");
-                
+                log.debug("【调试】默认人格从 '{}' 更改为 '{}'", oldPersonality != null ? oldPersonality.asText() : null, personaId);
+
                 // 写回配置文件
-                java.nio.file.Files.write(configFile.toPath(), json.toJSONString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
-                System.out.println("【调试】配置文件已更新");
-                
+                java.nio.file.Files.write(configFile.toPath(), objectMapper.writeValueAsBytes(json));
+                log.debug("【调试】配置文件已更新");
+
                 // 调用 AstrBot API 通知配置已更改
                 notifyAstrBotConfigChanged();
             } else {
-                System.out.println("【调试】provider_settings 不存在");
+                log.debug("【调试】provider_settings 不存在");
             }
-            
-            System.out.println("【调试】更新AstrBot默认人格配置完成");
+
+            log.debug("【调试】更新AstrBot默认人格配置完成");
         } catch (Exception e) {
             // 忽略更新失败，不影响主流程
-            System.err.println("【调试】更新AstrBot默认人格配置失败: " + e.getMessage());
+            log.error("【调试】更新AstrBot默认人格配置失败: {}", e.getMessage());
             e.printStackTrace();
         }
     }
-    
+
     private void notifyAstrBotConfigChanged() {
         try {
             String astrBotApiUrl = "http://localhost:6185";
             String astrBotToken = "abk_6CJKaVnl8233_QVKJr_3ID1ns8cd5EIeCtSv31YjV84";
-            
+
             // 调用 AstrBot 的配置保存 API，传递完整的配置数据
             String url = astrBotApiUrl + "/api/config/save";
-            
+
             org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
             headers.set("Authorization", "Bearer " + astrBotToken);
             headers.setContentType(org.springframework.http.MediaType.APPLICATION_JSON);
-            
+
             // 读取完整的配置文件
             String configPath = astrbotDataPath + "/cmd_config.json";
             String content = new String(java.nio.file.Files.readAllBytes(new File(configPath).toPath()), java.nio.charset.StandardCharsets.UTF_8);
-            JSONObject configJson = JSON.parseObject(content);
-            
+            ObjectNode configJson = (ObjectNode) objectMapper.readTree(content);
+
             // 构造请求体 - 传递完整的配置
             Map<String, Object> body = new HashMap<>();
             body.put("is_core", true);
             body.put("config", configJson);
-            
+
             org.springframework.http.HttpEntity<Map<String, Object>> entity = new org.springframework.http.HttpEntity<>(body, headers);
-            
+
             org.springframework.web.client.RestTemplate restTemplate = new org.springframework.web.client.RestTemplate();
             org.springframework.http.ResponseEntity<String> response = restTemplate.postForEntity(url, entity, String.class);
-            
-            System.out.println("【调试】AstrBot 配置保存 API 响应: " + response.getBody());
+
+            log.debug("【调试】AstrBot 配置保存 API 响应: {}", response.getBody());
         } catch (Exception e) {
-            System.out.println("【调试】调用 AstrBot 配置保存 API 失败: " + e.getMessage());
+            log.error("【调试】调用 AstrBot 配置保存 API 失败: {}", e.getMessage());
             e.printStackTrace();
         }
     }
@@ -314,7 +321,7 @@ public class PersonaController {
             return null;
         }
         try {
-            return com.alibaba.fastjson.JSON.parse(json);
+            return objectMapper.readTree(json);
         } catch (Exception e) {
             return json;
         }
@@ -325,7 +332,7 @@ public class PersonaController {
             return null;
         }
         try {
-            return com.alibaba.fastjson.JSON.toJSONString(obj);
+            return objectMapper.writeValueAsString(obj);
         } catch (Exception e) {
             return obj.toString();
         }

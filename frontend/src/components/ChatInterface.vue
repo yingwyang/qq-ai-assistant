@@ -1,3 +1,4 @@
+
 <template>
   <div class="chat-interface">
     <!-- 顶部群聊选择器 -->
@@ -67,7 +68,7 @@
       <div v-if="isLoadingMore" class="load-more-hint">加载更早的消息...</div>
       <div v-if="messages.length === 0 && !isLoading" class="empty-state">
         <div class="empty-icon"><Icon name="chat" :size="48" /></div>
-        <p>请输入群聊ID开始对话</p>
+        <p>请选择群聊开始对话</p>
       </div>
       
       <div v-else-if="isLoading" class="loading-state">
@@ -161,7 +162,7 @@ import { showToast } from './Toast.vue';
 import { useMessageWebSocket } from '../composables/useMessageWebSocket';
 
 const PAGE_SIZE = 50;
-const FALLBACK_POLL_MS = 30000;
+const FALLBACK_POLL_MS = 10000;
 
 export default {
   name: 'ChatInterface',
@@ -609,17 +610,61 @@ export default {
         return;
       }
       
-      // 格式化单条消息内容：媒体/转发等折叠为占位，清理 CQ 码
-      const formatMessageForAnalysis = (msg) => {
-        const type = (msg.messageType || 'TEXT').toUpperCase();
-        if (type === 'FORWARD') return '[聊天记录]';
-        if (type === 'IMAGE') return '[图片]';
-        if (type === 'VIDEO') return '[视频]';
-        if (type === 'VOICE' || type === 'AUDIO') return '[语音]';
+      // 从 XML 中提取聊天记录 title
+      const extractForwardXmlTitles = (xml) => {
+        if (!xml || typeof xml !== 'string') return [];
+        try {
+          const parser = new DOMParser();
+          const doc = parser.parseFromString(xml, 'text/xml');
+          return Array.from(doc.querySelectorAll('item title')).map(t => t.textContent || '');
+        } catch (e) {
+          return [];
+        }
+      };
 
-        let text = msg.content || '[无内容]';
-        // 清理/折叠 CQ 码
-        text = text
+      // 解析转发消息中的子消息列表
+      const extractForwardMessages = (msg) => {
+        if (Array.isArray(msg.forwardMessages)) {
+          return msg.forwardMessages;
+        }
+        const c = msg.content || '';
+        if (!c.trim()) return [];
+        try {
+          const jsonMatch = c.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
+          if (jsonMatch) {
+            const parsed = JSON.parse(jsonMatch[1]);
+            if (Array.isArray(parsed)) return parsed;
+            if (parsed.messages && Array.isArray(parsed.messages)) return parsed.messages;
+            if (parsed.content && Array.isArray(parsed.content)) return parsed.content;
+            if (parsed.xmlContent && typeof parsed.xmlContent === 'string') {
+              const titles = extractForwardXmlTitles(parsed.xmlContent);
+              return titles.slice(1).map((text, index) => ({
+                id: `forward-${msg.id}-${index}`,
+                userNickname: '',
+                content: text,
+                messageType: 'TEXT'
+              }));
+            }
+          }
+        } catch (e) {
+          // 解析失败则忽略
+        }
+        if (c.includes('<msg') && c.includes('</msg>')) {
+          const titles = extractForwardXmlTitles(c);
+          return titles.slice(1).map((text, index) => ({
+            id: `forward-${msg.id}-${index}`,
+            userNickname: '',
+            content: text,
+            messageType: 'TEXT'
+          }));
+        }
+        return [];
+      };
+
+      // 清理消息中的 CQ 码
+      const cleanMessageText = (text) => {
+        if (!text) return '[无内容]';
+        return text
           .replace(/\[CQ:image[^\]]*\]/g, '[图片]')
           .replace(/\[CQ:video[^\]]*\]/g, '[视频]')
           .replace(/\[CQ:record[^\]]*\]/g, '[语音]')
@@ -632,8 +677,29 @@ export default {
           })
           .replace(/\[CQ:reply[^\]]*\]/g, '')
           .replace(/\[CQ:forward[^\]]*\]/g, '[聊天记录]')
-          .replace(/\[CQ:[^\]]+\]/g, '');
-        return text.trim() || '[无内容]';
+          .replace(/\[CQ:[^\]]+\]/g, '')
+          .trim() || '[无内容]';
+      };
+
+      // 格式化单条消息内容：媒体/转发等折叠为占位，清理 CQ 码
+      const formatMessageForAnalysis = (msg) => {
+        const type = (msg.messageType || 'TEXT').toUpperCase();
+        if (type === 'FORWARD') {
+          const children = extractForwardMessages(msg);
+          if (children.length === 0) return '[聊天记录]';
+          const lines = children.map(child => {
+            const childType = (child.messageType || 'TEXT').toUpperCase();
+            const childText = childType === 'FORWARD'
+              ? formatMessageForAnalysis(child)
+              : cleanMessageText(child.content);
+            return `${child.userNickname || child.userName || '未知用户'}: ${childText}`;
+          });
+          return `[聊天记录]\n${lines.join('\n')}`;
+        }
+        if (type === 'IMAGE') return '[图片]';
+        if (type === 'VIDEO') return '[视频]';
+        if (type === 'VOICE' || type === 'AUDIO') return '[语音]';
+        return cleanMessageText(msg.content);
       };
 
       // 构建选中的消息数据

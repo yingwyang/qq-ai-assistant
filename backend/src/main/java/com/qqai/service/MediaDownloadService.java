@@ -266,4 +266,67 @@ public class MediaDownloadService {
         File ffmpegFile = new File(ffmpegPath);
         return ffmpegFile.exists() ? ffmpegPath : "ffmpeg";
     }
+
+    /**
+     * 将本地路径中的 .amr/.silk 语音文件转换为浏览器可播放的 mp3（按需转码）。
+     * 适用于数据库中存储的是旧的 .amr 路径的情况。
+     *
+     * @param relativePath 相对路径，如 /images/voice/{groupId}/{date}/xxx.amr
+     * @return 转码后的相对路径（如 /images/voice/{groupId}/{date}/xxx.mp3），失败时返回 null
+     */
+    public String convertVoiceToMp3OnDemand(String relativePath) {
+        if (relativePath == null || relativePath.isEmpty()) {
+            return null;
+        }
+
+        // 如果已经是 mp3 格式，直接返回
+        if (relativePath.toLowerCase().endsWith(".mp3")) {
+            return relativePath;
+        }
+
+        // 如果不是 amr/silk 格式，直接返回
+        if (!relativePath.toLowerCase().matches(".*\\.(amr|silk)$")) {
+            return relativePath;
+        }
+
+        // 构建本地绝对路径
+        String baseDir = localImagePath.endsWith("/") ? localImagePath : localImagePath + "/";
+        // relativePath 可能以 /images/ 开头，需要去除该前缀
+        String subPath = relativePath.startsWith("/images/")
+                ? relativePath.substring("/images/".length())
+                : relativePath;
+        // 如果是 /uploads/ 开头，则使用 uploads 作为基础目录
+        String absolutePathStr;
+        if (relativePath.startsWith("/uploads/")) {
+            String uploadSubPath = relativePath.substring("/uploads/".length());
+            File uploadsDir = new File("uploads");
+            absolutePathStr = new File(uploadsDir, uploadSubPath).getAbsolutePath();
+        } else {
+            absolutePathStr = new File(baseDir + subPath).getAbsolutePath();
+        }
+
+        Path voicePath = Paths.get(absolutePathStr);
+        if (!Files.exists(voicePath)) {
+            log.warn("语音文件不存在: {}", absolutePathStr);
+            return null;
+        }
+
+        // 检查是否已有对应的 mp3 文件
+        String mp3PathStr = absolutePathStr.replaceAll("\\.(amr|silk)$", ".mp3");
+        Path mp3Path = Paths.get(mp3PathStr);
+        if (Files.exists(mp3Path)) {
+            // 已有 mp3 文件，直接返回 mp3 的相对路径
+            return relativePath.replaceAll("\\.(amr|silk)$", ".mp3");
+        }
+
+        // 尝试转码
+        String converted = convertVoiceToMp3(absolutePathStr);
+        if (converted != null) {
+            // 转码成功，返回新的相对路径
+            return relativePath.replaceAll("\\.(amr|silk)$", ".mp3");
+        }
+
+        log.warn("语音转码失败: {}", absolutePathStr);
+        return null;
+    }
 }

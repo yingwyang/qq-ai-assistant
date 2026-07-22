@@ -21,6 +21,7 @@
     <path v-else-if="name === 'audio'" d="M12 3v9.28a4.39 4.39 0 0 0-1.5-.28C8.01 12 6 13.79 6 16s2.01 4 4.5 4 4.5-1.79 4.5-4V7h4V3h-7z"/>
     <path v-else-if="name === 'link'" d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7A5.02 5.02 0 0 0 2 12a5.02 5.02 0 0 0 5 5h4v-1.9H7A3.1 3.1 0 0 1 3.9 12zM17 7h-4v1.9h4a3.1 3.1 0 0 1 0 6.2h-4V17h4A5.02 5.02 0 0 0 22 12a5.02 5.02 0 0 0-5-5zM8 11h8v2H8z"/>
     <path v-else-if="name === 'close'" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
+    <path v-else-if="name === 'x'" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
     <path v-else-if="name === 'menu'" d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/>
     <path v-else-if="name === 'expand'" d="M16.59 8.59L12 13.17 7.41 8.59 6 10l6 6 6-6z"/>
     <path v-else-if="name === 'collapse'" d="M12 8l-6 6 1.41 1.41L12 10.83l4.59 4.58L18 14z"/>
@@ -107,6 +108,21 @@
     <path v-else-if="name === 'qrcode'" d="M3 11h8V3H3v8zm2-6h4v4H5V5zM3 21h8v-8H3v8zm2-6h4v4H5v-4zM13 3v8h8V3h-8zm6 6h-4V5h4v4zM13 13h2v2h-2zM15 15h2v2h-2zM13 17h2v2h-2zM17 13h2v2h-2zM19 15h2v2h-2zM17 17h2v2h-2zM15 19h2v2h-2zM19 19h2v2h-2z"/>
     <path v-else-if="name === 'shield'" d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z"/>
     <path v-else-if="name === 'admin'" d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z"/>
+    <path v-else-if="name === 'book'" d="M18 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zM6 4h5v8l-2.5-1.5L6 12V4z"/>
+    <path v-else-if="name === 'app'" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/>
+    <path v-else-if="name === 'message-circle'" d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/>
+    <path v-else-if="name === 'message-square'" d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/>
+    <path v-else-if="name === 'layout'" d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/>
+    <path v-else-if="name === 'tablet'" d="M18 0H6C4.34 0 3 1.34 3 3v18c0 1.66 1.34 3 3 3h12c1.66 0 3-1.34 3-3V3c0-1.66-1.34-3-3-3zm-4 22h-4v-1h4v1zm5-3H5V3h14v16z"/>
+    <path v-else-if="name === 'smartphone'" d="M17 1H7c-1.1 0-2 .9-2 2v18c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2V3c0-1.1-.9-2-2-2zm-5 20h-2v-2h2v2zm4-4H8v-1h8v1zm0-3H8V9h8v5z"/>
+    <path v-else-if="name === 'copy'" d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/>
+    <path v-else-if="name === 'trash'" d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/>
+    <path v-else-if="name === 'help-circle'" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17h-2v-2h2v2zm2.07-7.75l-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H8c0-2.21 1.79-4 4-4s4 1.79 4 4c0 .88-.36 1.68-.93 2.25z"/>
+    <path v-else-if="name === 'headphones'" d="M12 3a9 9 0 0 0-9 9v6h3v-6a6 6 0 0 1 12 0v6h3v-6a9 9 0 0 0-9-9z"/>
+    <path v-else-if="name === 'activity'" d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+    <path v-else-if="name === 'file-text'" d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/>
+    <path v-else-if="name === 'backup'" d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/>
+    <path v-else-if="name === 'send'" d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
     <circle v-else-if="name === 'dot'" cx="12" cy="12" r="6"/>
   </svg>
 </template>

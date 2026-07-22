@@ -104,13 +104,7 @@ export default {
         console.log('开始加载人格列表...');
         const list = await personaApi.list();
         console.log('人格列表数据:', list);
-        if (Array.isArray(list)) {
-          personas.value = list;
-        } else if (list && list.data) {
-          personas.value = list.data;
-        } else {
-          personas.value = [];
-        }
+        personas.value = Array.isArray(list) ? list : [];
       } catch (error) {
         console.error('加载人格列表失败:', error);
         showToast('加载人格列表失败', 'error');
@@ -122,7 +116,7 @@ export default {
         const result = await personaApi.getDefault();
         console.log('默认人格响应:', result);
         if (result && typeof result === 'object') {
-          defaultPersonaId.value = result.defaultPersonaId || result.data?.defaultPersonaId;
+          defaultPersonaId.value = result.defaultPersonaId;
         }
       } catch (error) {
         console.error('加载默认人格失败:', error);

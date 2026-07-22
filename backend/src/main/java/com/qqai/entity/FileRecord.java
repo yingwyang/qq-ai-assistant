@@ -53,6 +53,9 @@ public class FileRecord {
     
     private Integer duration;  // 音视频时长(秒)
 
+    @Column(length = 20)
+    private Long uploaderId;  // 上传者用户ID
+
     private boolean active = true;  // 文件记录是否有效（清理后=false）
 
     private LocalDateTime createdAt;
@@ -114,6 +117,9 @@ public class FileRecord {
     
     public Integer getDuration() { return duration; }
     public void setDuration(Integer duration) { this.duration = duration; }
+
+    public Long getUploaderId() { return uploaderId; }
+    public void setUploaderId(Long uploaderId) { this.uploaderId = uploaderId; }
 
     public boolean isActive() { return active; }
     public void setActive(boolean active) { this.active = active; }

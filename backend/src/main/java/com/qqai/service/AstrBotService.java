@@ -1,7 +1,8 @@
 package com.qqai.service;
 
-import com.alibaba.fastjson.JSON;
-import com.alibaba.fastjson.JSONObject;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.apache.hc.client5.http.classic.methods.HttpPost;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpResponse;
@@ -31,6 +32,8 @@ public class AstrBotService {
     @Autowired
     private CloseableHttpClient httpClient;
 
+    private final ObjectMapper objectMapper = new ObjectMapper();
+
     private Process astrbotProcess;
 
     public String summarizeMessage(String content) throws Exception {
@@ -38,7 +41,7 @@ public class AstrBotService {
         httpPost.setHeader("Content-Type", "application/json");
         httpPost.setHeader("Authorization", "Bearer " + astrBotToken);
 
-        JSONObject requestBody = new JSONObject();
+        ObjectNode requestBody = objectMapper.createObjectNode();
         requestBody.put("message", "请总结以下内容：" + content);
         requestBody.put("model", "gpt-3.5-turbo");
         requestBody.put("temperature", 0.7);
@@ -55,8 +58,9 @@ public class AstrBotService {
                 responseContent.append(line);
             }
 
-            JSONObject responseJson = JSON.parseObject(responseContent.toString());
-            return responseJson.getString("response");
+            JsonNode responseJson = objectMapper.readTree(responseContent.toString());
+            JsonNode responseNode = responseJson.get("response");
+            return responseNode != null ? responseNode.asText() : null;
         }
     }
 

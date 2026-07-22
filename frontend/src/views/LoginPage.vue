@@ -26,8 +26,8 @@
           <div class="brand-icon"><Icon name="robot" :size="56" /></div>
           <div class="icon-ring"></div>
         </div>
-        <h1 class="brand-title">铃音聊天助手</h1>
-        <p class="brand-subtitle">智能QQ群聊管理AI对话平台</p>
+        <h1 class="brand-title">QQ AI 助手</h1>
+        <p class="brand-subtitle">智能群聊管理与 AI 对话平台</p>
         <div class="brand-decoration">
           <span class="decor-line"></span>
           <span class="decor-dot"></span>
@@ -256,20 +256,23 @@ export default {
       errorMessage.value = '';
 
       try {
-        const response = await authApi.login(loginForm.username, loginForm.password);
+        const data = await authApi.login(loginForm.username, loginForm.password);
 
-        localStorage.setItem('auth_token', response.token);
-        localStorage.setItem('user_role', response.role || 'USER');
+        localStorage.setItem('auth_token', data.token);
+        localStorage.setItem('user_role', data.role || 'USER');
         localStorage.setItem('user_info', JSON.stringify({
-          username: response.username,
-          nickname: response.nickname,
-          role: response.role,
-          avatar: response.avatar
+          username: data.username,
+          nickname: data.nickname,
+          role: data.role,
+          avatar: data.avatar,
+          email: data.email,
+          createdAt: data.createdAt,
+          lastLoginTime: data.lastLoginTime
         }));
         localStorage.setItem('isLoggedIn', 'true');
 
         // 登录成功后根据角色跳转
-        if (response.role === 'ADMIN') {
+        if (data.role === 'ADMIN') {
           router.push('/admin');
         } else {
           router.push('/');
@@ -307,20 +310,23 @@ export default {
           registerForm.nickname || registerForm.username
         );
 
-        const response = await authApi.login(registerForm.username, registerForm.password);
+        const data = await authApi.login(registerForm.username, registerForm.password);
 
-        localStorage.setItem('auth_token', response.token);
-        localStorage.setItem('user_role', response.role || 'USER');
+        localStorage.setItem('auth_token', data.token);
+        localStorage.setItem('user_role', data.role || 'USER');
         localStorage.setItem('user_info', JSON.stringify({
-          username: response.username,
-          nickname: response.nickname,
-          role: response.role,
-          avatar: response.avatar
+          username: data.username,
+          nickname: data.nickname,
+          role: data.role,
+          avatar: data.avatar,
+          email: data.email,
+          createdAt: data.createdAt,
+          lastLoginTime: data.lastLoginTime
         }));
         localStorage.setItem('isLoggedIn', 'true');
 
         // 注册并登录成功后根据角色跳转
-        if (response.role === 'ADMIN') {
+        if (data.role === 'ADMIN') {
           router.push('/admin');
         } else {
           router.push('/');

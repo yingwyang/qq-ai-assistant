@@ -12,7 +12,8 @@ import java.time.LocalDateTime;
     @Index(name = "idx_user_time", columnList = "userQq, sendTime"),
     @Index(name = "idx_file_id", columnList = "fileId"),
     @Index(name = "idx_send_time", columnList = "sendTime"),
-    @Index(name = "idx_group_server_time", columnList = "groupId, serverRecvMs")
+    @Index(name = "idx_group_server_time", columnList = "groupId, serverRecvMs"),
+    @Index(name = "idx_user_id", columnList = "userId")
 })
 public class Message {
     
@@ -20,14 +21,17 @@ public class Message {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
     
-    @Column(length = 100)
+    @Column(length = 100, unique = true)
     private String messageId;  // QQ消息唯一ID
     
     @Column(nullable = false, length = 50)
     private String groupId;  // 群号
     
-    @Column(length = 200)
+    @Column(length = 100)
     private String groupName;  // 群名称
+    
+    @Column(name = "user_id")
+    private Long userId;  // 系统用户ID（关联users.id）
     
     @Column(nullable = false, length = 20)
     private String userQq;  // 发送者QQ
@@ -36,7 +40,7 @@ public class Message {
     private String userNickname;  // 发送者昵称
     
     @Enumerated(EnumType.STRING)
-    @Column(nullable = false)
+    @Column(nullable = false, columnDefinition = "VARCHAR(20)")
     private MessageType messageType = MessageType.TEXT;  // 消息类型
     
     @Column(columnDefinition = "TEXT")
@@ -58,6 +62,9 @@ public class Message {
 
     @Column(columnDefinition = "TEXT")
     private String forwardContent;  // 合并转发消息的原始内容（JSON 数组）
+
+    @Column(columnDefinition = "TEXT")
+    private String miniAppContent;  // 小程序分享消息的原始内容（JSON）
 
     @Column(columnDefinition = "TEXT")
     private String aiSummary;  // AI总结内容
@@ -110,7 +117,8 @@ public class Message {
         VOICE,      // 语音
         AT,         // @消息
         REPLY,      // 回复消息
-        FORWARD     // 聊天记录（转发消息）
+        FORWARD,    // 聊天记录（转发消息）
+        APP         // 小程序分享消息
     }
     
     // Getters and Setters
@@ -125,6 +133,9 @@ public class Message {
     
     public String getGroupName() { return groupName; }
     public void setGroupName(String groupName) { this.groupName = groupName; }
+    
+    public Long getUserId() { return userId; }
+    public void setUserId(Long userId) { this.userId = userId; }
     
     public String getUserQq() { return userQq; }
     public void setUserQq(String userQq) { this.userQq = userQq; }
@@ -155,6 +166,9 @@ public class Message {
 
     public String getForwardContent() { return forwardContent; }
     public void setForwardContent(String forwardContent) { this.forwardContent = forwardContent; }
+
+    public String getMiniAppContent() { return miniAppContent; }
+    public void setMiniAppContent(String miniAppContent) { this.miniAppContent = miniAppContent; }
 
     private static final com.fasterxml.jackson.databind.ObjectMapper FORWARD_OBJECT_MAPPER = new com.fasterxml.jackson.databind.ObjectMapper();
 

@@ -42,8 +42,9 @@ public class AstrBotConversationService {
      * 创建新对话
      */
     @Transactional
-    public AstrBotConversation createConversation(String groupId, String userQq, String userNickname, String title, String model) {
+    public AstrBotConversation createConversation(Long userId, String groupId, String userQq, String userNickname, String title, String model) {
         AstrBotConversation conversation = new AstrBotConversation();
+        conversation.setUserId(userId);
         conversation.setGroupId(groupId);
         conversation.setUserQq(userQq);
         conversation.setUserNickname(userNickname);
@@ -54,8 +55,8 @@ public class AstrBotConversationService {
         conversation.setArchived(false);
 
         AstrBotConversation saved = conversationRepository.save(conversation);
-        logger.info("创建新对话: conversationId={}, groupId={}, userQq={}",
-                saved.getConversationId(), groupId, userQq);
+        logger.info("创建新对话: conversationId={}, userId={}, groupId={}, userQq={}",
+                saved.getConversationId(), userId, groupId, userQq);
         return saved;
     }
 
@@ -71,7 +72,7 @@ public class AstrBotConversationService {
      * 如果提供了 conversationId 则查找，否则创建新对话
      */
     @Transactional
-    public AstrBotConversation getOrCreateConversation(String conversationId, String groupId,
+    public AstrBotConversation getOrCreateConversation(String conversationId, Long userId, String groupId,
                                                         String userQq, String userNickname, String model) {
         if (conversationId != null && !conversationId.isEmpty()) {
             Optional<AstrBotConversation> existing = conversationRepository.findByConversationId(conversationId);
@@ -79,7 +80,7 @@ public class AstrBotConversationService {
                 return existing.get();
             }
         }
-        return createConversation(groupId, userQq, userNickname, null, model);
+        return createConversation(userId, groupId, userQq, userNickname, null, model);
     }
 
     /**
@@ -242,9 +243,10 @@ public class AstrBotConversationService {
      */
     public List<AstrBotMessage> getRecentMessages(String conversationId, int limit) {
         List<AstrBotMessage> messages = messageRepository.findRecentMessagesByConversationId(conversationId, limit);
-        // 反转列表，使其按时间正序排列
-        Collections.reverse(messages);
-        return messages;
+        // 复制到新列表后再反转，避免 JPA 返回不可修改列表导致 UnsupportedOperationException
+        List<AstrBotMessage> result = new ArrayList<>(messages);
+        Collections.reverse(result);
+        return result;
     }
 
     /**

@@ -51,6 +51,9 @@ public class FilePurgeService {
     @Autowired
     private MessageRepository messageRepository;
 
+    @Autowired
+    private AuditLogService auditLogService;
+
     /** 本地媒体文件存储根目录 */
     @Value("${file.storage.local-path:./uploads/images}")
     private String localStoragePath;
@@ -153,6 +156,26 @@ public class FilePurgeService {
 
         log.info("purgeMedia finished: {} files, {} bytes", totalFiles, totalBytes);
         return new PurgeResult(totalFiles, totalBytes, deletedFiles, null);
+    }
+
+    /**
+     * 执行清理操作，并写入审计日志。
+     *
+     * @param types    要清理的文件类型
+     * @param operator 操作人用户名
+     */
+    public PurgeResult purgeMedia(List<String> types, String operator) {
+        PurgeResult result = purgeMedia(types);
+        String action = "FILE_PURGE";
+        String target = "types:" + (types == null ? "[]" : types);
+        if (result.getTotalDeleted() > 0 || (result.getNote() != null && result.getNote().contains("IO 错误"))) {
+            auditLogService.log(operator, action, target, "SUCCESS",
+                    "清理 " + result.getTotalDeleted() + " 个文件, 释放 " + result.getFreedMB());
+        } else {
+            auditLogService.log(operator, action, target, "SUCCESS",
+                    result.getNote() != null ? result.getNote() : "无文件被清理");
+        }
+        return result;
     }
 
     private boolean matchExtension(Path p, Set<String> exts) {
@@ -340,6 +363,21 @@ public class FilePurgeService {
 
         String note = skipped > 0 ? "跳过 " + skipped + " 个无效或无法删除的文件" : null;
         return new PurgeResult(totalDeleted, totalBytes, deletedFiles, note);
+    }
+
+    /**
+     * 根据 ID 批量删除本地媒体文件，并写入审计日志。
+     *
+     * @param ids     Base64 编码的相对路径列表
+     * @param operator 操作人用户名
+     */
+    public PurgeResult deleteFilesByIds(List<String> ids, String operator) {
+        PurgeResult result = deleteFilesByIds(ids);
+        auditLogService.log(operator, "FILE_DELETE", "files:" + (ids == null ? 0 : ids.size()),
+                "SUCCESS",
+                "删除 " + result.getTotalDeleted() + " 个文件, 释放 " + result.getFreedMB()
+                        + (result.getNote() != null ? ", " + result.getNote() : ""));
+        return result;
     }
 
     private void deactivateFileRecordIfExists(Path filePath, Path root) {

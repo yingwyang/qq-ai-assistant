@@ -16,7 +16,7 @@ class SummaryCardPlugin implements AiResponsePlugin {
 
     String format(String text, Map context) {
         text.replaceAll(/(?m)^(?:摘要|Summary)[：:]\s*(.+)$/) { match, title ->
-            "<details>\n<summary>摘要：${title}</summary>\n\n${match}\n</details>"
+            "<details>\n<summary>摘要：${title}</summary>\n\n${title}\n</details>"
         }
     }
 }

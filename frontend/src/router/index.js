@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router';
 import LoginPage from '../views/LoginPage.vue';
 import HomeView from '../views/HomeView.vue';
+import UserCenter from '../views/UserCenter.vue';
 
 const routes = [
   {
@@ -13,6 +14,12 @@ const routes = [
     path: '/',
     name: 'Home',
     component: HomeView,
+    meta: { requiresAuth: true }
+  },
+  {
+    path: '/user-center',
+    name: 'UserCenter',
+    component: UserCenter,
     meta: { requiresAuth: true }
   },
   {
@@ -29,28 +36,57 @@ const router = createRouter({
 });
 
 // 路由守卫：检查登录状态和管理员权限
-router.beforeEach((to, from, next) => {
+router.beforeEach(async (to, from, next) => {
   const token = localStorage.getItem('auth_token');
   const isLoggedIn = !!token;
-  const userRole = localStorage.getItem('user_role') || 'USER';
-  const isAdmin = userRole === 'ADMIN';
+  const cachedRole = localStorage.getItem('user_role') || 'USER';
 
   if (to.meta.requiresAuth && !isLoggedIn) {
     // 未登录且访问需要授权的页面，跳转到登录页
     next('/login');
-  } else if (to.meta.requiresAdmin && !isAdmin) {
-    // 非管理员访问管理员页面，跳转到首页
-    next('/');
-  } else if (to.path === '/login' && isLoggedIn) {
+    return;
+  }
+
+  if (to.meta.requiresAdmin) {
+    if (!isLoggedIn) {
+      next('/login');
+      return;
+    }
+    // 必须向后端确认真实角色，localStorage 的 user_role 仅用于 UI 展示
+    try {
+      const res = await fetch('/api/auth/me', {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      });
+      if (res.status === 401) {
+        localStorage.removeItem('auth_token');
+        localStorage.removeItem('user_role');
+        next('/login');
+        return;
+      }
+      const data = await res.json();
+      const realRole = data?.data?.role || data?.role || cachedRole;
+      localStorage.setItem('user_role', realRole);
+      if (realRole !== 'ADMIN') {
+        next('/');
+        return;
+      }
+    } catch (e) {
+      next('/');
+      return;
+    }
+  }
+
+  if (to.path === '/login' && isLoggedIn) {
     // 已登录但访问登录页，根据角色跳转
-    if (isAdmin) {
+    if (cachedRole === 'ADMIN') {
       next('/admin');
     } else {
       next('/');
     }
-  } else {
-    next();
+    return;
   }
+
+  next();
 });
 
 export default router;

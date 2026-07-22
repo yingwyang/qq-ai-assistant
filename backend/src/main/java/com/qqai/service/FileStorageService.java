@@ -5,6 +5,8 @@ import com.qqai.repository.FileRecordRepository;
 import io.minio.*;
 import io.minio.http.Method;
 import net.coobird.thumbnailator.Thumbnails;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -24,6 +26,8 @@ import java.util.concurrent.TimeUnit;
 @Service
 public class FileStorageService {
 
+    private static final Logger log = LoggerFactory.getLogger(FileStorageService.class);
+
     @Autowired
     private MinioClient minioClient;
 
@@ -40,7 +44,7 @@ public class FileStorageService {
     /**
      * 上传文件
      */
-    public FileRecord uploadFile(MultipartFile file, FileRecord.FileType fileType) throws Exception {
+    public FileRecord uploadFile(MultipartFile file, FileRecord.FileType fileType, Long uploaderId) throws Exception {
         // 生成文件ID
         String fileId = UUID.randomUUID().toString().replace("-", "");
         
@@ -96,6 +100,7 @@ public class FileStorageService {
         fileRecord.setThumbnailUrl(thumbnailUrl);
         fileRecord.setWidth(width);
         fileRecord.setHeight(height);
+        if (uploaderId != null) fileRecord.setUploaderId(uploaderId);
 
         return fileRecordRepository.save(fileRecord);
     }
@@ -103,7 +108,7 @@ public class FileStorageService {
     /**
      * 上传字节数组文件
      */
-    public FileRecord uploadBytes(byte[] data, String fileName, FileRecord.FileType fileType, String mimeType) throws Exception {
+    public FileRecord uploadBytes(byte[] data, String fileName, FileRecord.FileType fileType, String mimeType, Long uploaderId) throws Exception {
         String fileId = UUID.randomUUID().toString().replace("-", "");
         String folder = getFolderByType(fileType);
         String extension = getExtension(fileName);
@@ -132,6 +137,7 @@ public class FileStorageService {
         fileRecord.setBucketName(bucketName);
         fileRecord.setObjectKey(objectName);
         fileRecord.setUrl(fileUrl);
+        if (uploaderId != null) fileRecord.setUploaderId(uploaderId);
 
         return fileRecordRepository.save(fileRecord);
     }
@@ -218,7 +224,7 @@ public class FileStorageService {
 
             return getFileUrl(thumbnailObjectName);
         } catch (Exception e) {
-            System.err.println("生成缩略图失败: " + e.getMessage());
+            log.error("生成缩略图失败: {}", e.getMessage());
             return null;
         }
     }

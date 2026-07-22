@@ -48,12 +48,13 @@
                     <span v-if="binding.isDefault" class="default-badge">默认</span>
                   </div>
                 </li>
-                <li 
-                  v-for="group in getGroupsByQq(binding.qqNumber)" 
+                <li
+                  v-for="group in getGroupsByQq(binding.qqNumber)"
                   :key="group.groupId"
                   class="nav-item group-item"
                   :class="{ active: selectedGroupId === group.groupId }"
                   @click="selectGroup(group.groupId)"
+                  @contextmenu.prevent="showContextMenu($event, group.groupId)"
                 >
                   <div class="group-avatar">
                     <img 
@@ -107,11 +108,46 @@
       </button>
     </div>
 
+    <!-- 右键删除菜单 -->
+    <div
+      v-if="contextMenuVisible"
+      class="context-menu"
+      :style="{ top: contextMenuPosition.top + 'px', left: contextMenuPosition.left + 'px' }"
+      @click.stop
+    >
+      <div class="context-menu-header">删除群消息</div>
+      <div class="context-menu-item" @click="deleteMessagesByType('IMAGE')">
+        <span class="context-menu-icon"><Icon name="image" :size="14" /></span>
+        删除图片消息
+      </div>
+      <div class="context-menu-item" @click="deleteMessagesByType('VIDEO')">
+        <span class="context-menu-icon"><Icon name="video" :size="14" /></span>
+        删除视频消息
+      </div>
+      <div class="context-menu-item" @click="deleteMessagesByType('AUDIO')">
+        <span class="context-menu-icon"><Icon name="audio" :size="14" /></span>
+        删除音频/语音消息
+      </div>
+      <div class="context-menu-item" @click="deleteMessagesByType('TEXT')">
+        <span class="context-menu-icon"><Icon name="text" :size="14" /></span>
+        删除文本消息
+      </div>
+      <div class="context-menu-item" @click="deleteMessagesByType('FORWARD')">
+        <span class="context-menu-icon"><Icon name="forward" :size="14" /></span>
+        删除聊天记录
+      </div>
+      <div class="context-menu-divider"></div>
+      <div class="context-menu-item danger" @click="deleteMessagesByType('ALL')">
+        <span class="context-menu-icon"><Icon name="delete" :size="14" /></span>
+        删除所有消息
+      </div>
+    </div>
   </div>
 </template>
 
 <script>
 import { ref, onMounted, onUnmounted, watch, computed } from 'vue';
+import { useRouter } from 'vue-router';
 import { messageApi, userApi } from '../services/api';
 import Icon from './Icon.vue';
 import { showToast } from './Toast.vue';
@@ -134,8 +170,9 @@ export default {
       default: false
     }
   },
-  emits: ['tab-change', 'logout', 'open-login-modal', 'open-system-modal', 'open-user-profile', 'select-group', 'open-persona-manager', 'open-admin-dashboard'],
+  emits: ['tab-change', 'logout', 'open-login-modal', 'open-system-modal', 'open-user-profile', 'select-group', 'open-persona-manager'],
   setup(props, { emit }) {
+    const router = useRouter();
     const isCollapsedLocal = ref(false);
     const activeTab = ref('recent');
     const recentGroups = ref([]);
@@ -143,6 +180,11 @@ export default {
     const qqBindings = ref([]);
     const selectedGroupId = ref('');
     let refreshInterval = null;
+
+    // 右键菜单状态
+    const contextMenuVisible = ref(false);
+    const contextMenuPosition = ref({ top: 0, left: 0 });
+    const contextMenuGroupId = ref('');
 
     // 暴露给父组件的方法
     const refreshGroups = () => {
@@ -203,7 +245,11 @@ export default {
     };
 
     const openAdminDashboard = () => {
-      emit('open-admin-dashboard');
+      if (props.userInfo?.role === 'ADMIN') {
+        router.push('/admin');
+      } else {
+        router.push('/user-center');
+      }
     };
 
     const selectGroup = async (groupId) => {
@@ -221,6 +267,61 @@ export default {
       }
 
       emit('select-group', groupId);
+    };
+
+    const showContextMenu = (event, groupId) => {
+      contextMenuGroupId.value = groupId;
+      contextMenuPosition.value = {
+        top: event.clientY,
+        left: event.clientX
+      };
+      contextMenuVisible.value = true;
+    };
+
+    const hideContextMenu = () => {
+      contextMenuVisible.value = false;
+      contextMenuGroupId.value = '';
+    };
+
+    const deleteMessagesByType = async (type) => {
+      const groupId = contextMenuGroupId.value;
+      hideContextMenu();
+      if (!groupId) return;
+
+      const typeMap = {
+        IMAGE: { types: ['IMAGE'], label: '图片消息', hasMedia: true },
+        VIDEO: { types: ['VIDEO'], label: '视频消息', hasMedia: true },
+        AUDIO: { types: ['AUDIO', 'VOICE'], label: '音频/语音消息', hasMedia: true },
+        TEXT: { types: ['TEXT'], label: '文本消息', hasMedia: false },
+        FORWARD: { types: ['FORWARD'], label: '聊天记录', hasMedia: false },
+        ALL: { types: ['TEXT', 'IMAGE', 'VIDEO', 'AUDIO', 'VOICE', 'FILE', 'FORWARD', 'AT', 'REPLY'], label: '所有消息', hasMedia: true }
+      };
+      const config = typeMap[type];
+      if (!config) return;
+
+      const confirmed = await showConfirm({
+        title: `确认删除${config.label}`,
+        message: `确定要删除该群聊的${config.label}吗？此操作不可恢复。`,
+        confirmText: '删除',
+        cancelText: '取消'
+      });
+      if (!confirmed) return;
+
+      try {
+        const result = await messageApi.deleteMessagesByTypes(groupId, config.types, config.hasMedia);
+        if (result && typeof result.deletedCount === 'number') {
+          showToast(`已删除 ${result.deletedCount} 条${config.label}`, 'success');
+          // 立即刷新群聊列表（最后消息时间、未读数等）
+          loadRecentGroups();
+          // 通知父组件重新加载当前群聊消息
+          emit('select-group', groupId);
+        } else {
+          showToast(result?.message || '删除失败', 'error');
+        }
+      } catch (error) {
+        console.error('删除消息失败:', error);
+        showToast('删除失败: ' + error.message, 'error');
+      }
     };
 
     const getGroupsByQq = (qqNumber) => {
@@ -286,9 +387,9 @@ export default {
       try {
         // 从 API 获取最近对话的群聊（后端从 JWT 自动获取用户ID，按 group_read_state 计算未读）
         console.log('开始加载最近对话...');
-        const groups = await messageApi.getRecentGroups();
-        console.log('获取到的群聊数据:', groups);
-        recentGroups.value = groups;
+        const res = await messageApi.getRecentGroups();
+        console.log('获取到的群聊数据:', res);
+        recentGroups.value = Array.isArray(res) ? res : [];
         console.log('recentGroups.value:', recentGroups.value);
       } catch (error) {
         console.error('加载最近对话失败:', error);
@@ -300,21 +401,27 @@ export default {
     onMounted(() => {
       loadRecentGroups();
       loadQqBindings();
-      
-      // 每15秒自动刷新群聊列表，确保收到新消息的群能及时移至顶层
+
+      // 每5秒自动刷新群聊列表，确保收到新消息的群能及时移至顶层
       refreshInterval = setInterval(() => {
         if (props.isLoggedIn) {
           loadRecentGroups();
           loadQqBindings();
         }
-      }, 15000);
+      }, 5000);
+
+      // 点击页面其他区域关闭右键菜单
+      document.addEventListener('click', hideContextMenu);
+      document.addEventListener('scroll', hideContextMenu, true);
     });
-    
+
     // 组件卸载时清除定时器
     onUnmounted(() => {
       if (refreshInterval) {
         clearInterval(refreshInterval);
       }
+      document.removeEventListener('click', hideContextMenu);
+      document.removeEventListener('scroll', hideContextMenu, true);
     });
 
     // 监听登录状态变化，当登录状态改变时重新加载群聊列表和QQ绑定
@@ -351,7 +458,12 @@ export default {
       handleAvatarError,
       getGroupAvatar,
       refreshGroups,
-      userAvatarUrl
+      userAvatarUrl,
+      contextMenuVisible,
+      contextMenuPosition,
+      showContextMenu,
+      hideContextMenu,
+      deleteMessagesByType
     };
   }
 };
@@ -776,5 +888,61 @@ export default {
 
 .sidebar::-webkit-scrollbar-thumb:hover {
   background: #4a637a;
+}
+
+/* 右键菜单 */
+.context-menu {
+  position: fixed;
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  min-width: 160px;
+  z-index: 2000;
+  padding: 6px 0;
+  font-size: 13px;
+  color: #2c3e50;
+}
+
+.context-menu-header {
+  padding: 6px 14px;
+  font-weight: 600;
+  color: #7f8c8d;
+  border-bottom: 1px solid #eee;
+  margin-bottom: 4px;
+}
+
+.context-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.context-menu-item:hover {
+  background-color: #f5f5f5;
+}
+
+.context-menu-item.danger {
+  color: #e74c3c;
+}
+
+.context-menu-item.danger:hover {
+  background-color: #ffebee;
+}
+
+.context-menu-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  color: #7f8c8d;
+}
+
+.context-menu-divider {
+  height: 1px;
+  background-color: #eee;
+  margin: 4px 0;
 }
 </style>

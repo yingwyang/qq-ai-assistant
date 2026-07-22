@@ -1,79 +1,55 @@
 package com.qqai.controller;
 
+import com.qqai.common.AvatarResolver;
+import com.qqai.common.SecurityHelper;
 import com.qqai.entity.User;
 import com.qqai.entity.UserQqBinding;
 import com.qqai.repository.UserQqBindingRepository;
-import com.qqai.repository.UserRepository;
+import com.qqai.service.QqVerificationService;
+import com.qqai.service.UserService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.nio.file.StandardCopyOption;
 import java.util.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 @RestController
 @RequestMapping("/api/user")
 public class UserProfileController {
 
+    private static final Logger log = LoggerFactory.getLogger(UserProfileController.class);
+
     @Autowired
-    private UserRepository userRepository;
+    private UserService userService;
+
+    @Autowired
+    private AvatarResolver avatarResolver;
+
+    @Autowired
+    private SecurityHelper securityHelper;
+
+    @Autowired
+    private QqVerificationService qqVerificationService;
 
     @Autowired
     private UserQqBindingRepository userQqBindingRepository;
-
-    /**
-     * 校验头像文件是否真实存在，不存在则返回 null，避免前端请求 404
-     */
-    private String resolveAvatarUrl(String avatar) {
-        if (avatar == null || avatar.isBlank()) {
-            return null;
-        }
-        if (avatar.startsWith("http")) {
-            return avatar;
-        }
-        String relative = avatar.startsWith("/") ? avatar.substring(1) : avatar;
-        Path filePath = Paths.get(relative).toAbsolutePath().normalize();
-        Path basePath = Paths.get("uploads/avatars").toAbsolutePath().normalize();
-        if (!filePath.startsWith(basePath)) {
-            return null;
-        }
-        return Files.exists(filePath) ? avatar : null;
-    }
-
-    /**
-     * 获取当前登录用户ID
-     */
-    private Long getCurrentUserId() {
-        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-        if (authentication != null && authentication.isAuthenticated()) {
-            String username = authentication.getName();
-            // 从数据库查询用户ID
-            Optional<User> userOpt = userRepository.findByUsername(username);
-            return userOpt.map(User::getId).orElse(null);
-        }
-        return null;
-    }
 
     /**
      * 获取当前登录用户信息
      */
     @GetMapping("/profile")
     public ResponseEntity<?> getUserProfile() {
-        Long userId = getCurrentUserId();
+        Long userId = securityHelper.getCurrentUserId();
         if (userId == null) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(Map.of("error", "未登录", "code", 401));
         }
 
-        Optional<User> userOpt = userRepository.findById(userId);
+        Optional<User> userOpt = userService.findById(userId);
         if (userOpt.isEmpty()) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND)
                     .body(Map.of("error", "用户不存在", "code", 404));
@@ -85,7 +61,7 @@ public class UserProfileController {
         profile.put("username", user.getUsername());
         profile.put("nickname", user.getNickname());
         profile.put("role", user.getRole());
-        profile.put("avatar", resolveAvatarUrl(user.getAvatar()));
+        profile.put("avatar", avatarResolver.resolveAvatarUrl(user.getAvatar()));
         profile.put("createdAt", user.getCreatedAt());
 
         return ResponseEntity.ok(profile);
@@ -96,28 +72,18 @@ public class UserProfileController {
      */
     @PutMapping("/profile")
     public ResponseEntity<?> updateUserProfile(@RequestBody Map<String, String> updates) {
-        Long userId = getCurrentUserId();
+        Long userId = securityHelper.getCurrentUserId();
         if (userId == null) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(Map.of("error", "未登录", "code", 401));
         }
 
-        Optional<User> userOpt = userRepository.findById(userId);
+        Optional<User> userOpt = userService.updateProfile(userId, updates);
         if (userOpt.isEmpty()) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND)
                     .body(Map.of("error", "用户不存在", "code", 404));
         }
 
-        User user = userOpt.get();
-        
-        if (updates.containsKey("nickname")) {
-            user.setNickname(updates.get("nickname"));
-        }
-        if (updates.containsKey("avatar")) {
-            user.setAvatar(updates.get("avatar"));
-        }
-
-        userRepository.save(user);
         return ResponseEntity.ok(Map.of("message", "更新成功"));
     }
 
@@ -126,13 +92,13 @@ public class UserProfileController {
      */
     @GetMapping("/qq-bindings")
     public ResponseEntity<?> getUserQqBindings() {
-        Long userId = getCurrentUserId();
+        Long userId = securityHelper.getCurrentUserId();
         if (userId == null) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(Map.of("error", "未登录", "code", 401));
         }
 
-        List<UserQqBinding> bindings = userQqBindingRepository.findByUserIdAndActiveTrue(userId);
+        List<UserQqBinding> bindings = userService.findQqBindingsByUserIdAndActiveTrue(userId);
         List<Map<String, Object>> result = new ArrayList<>();
         
         for (UserQqBinding binding : bindings) {
@@ -155,11 +121,65 @@ public class UserProfileController {
     }
 
     /**
-     * 绑定QQ账号
+     * 发送QQ绑定验证码
+     */
+    @PostMapping("/qq-bindings/send-code")
+    public ResponseEntity<?> sendQqBindingCode(@RequestBody Map<String, String> request) {
+        Long userId = securityHelper.getCurrentUserId();
+        if (userId == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("error", "未登录", "code", 401));
+        }
+
+        String qqNumber = request.get("qqNumber");
+        if (qqNumber == null || qqNumber.trim().isEmpty()) {
+            return ResponseEntity.badRequest()
+                    .body(Map.of("error", "QQ号不能为空", "code", 400));
+        }
+
+        // 检查是否已绑定（只检查激活状态的）
+        boolean alreadyBound = userService.existsByUserIdAndQqNumberAndActiveTrue(userId, qqNumber);
+        log.info("发送验证码前检查 - userId={}, qqNumber={}, alreadyBound={}", userId, qqNumber, alreadyBound);
+        if (alreadyBound) {
+            return ResponseEntity.badRequest()
+                    .body(Map.of("error", "该QQ号已绑定", "code", 400));
+        }
+
+        // 检查该QQ是否已被其他用户绑定（全局唯一）
+        List<UserQqBinding> existingBindings = userQqBindingRepository.findByQqNumberAndActiveTrue(qqNumber);
+        log.info("全局绑定检查 - qqNumber={}, existingBindings数量={}", qqNumber, existingBindings.size());
+        for (UserQqBinding binding : existingBindings) {
+            log.info("绑定记录 - id={}, userId={}, active={}", binding.getId(), binding.getUserId(), binding.isActive());
+            if (!binding.getUserId().equals(userId)) {
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "该QQ号已被其他用户绑定", "code", 400));
+            }
+        }
+
+        // 检查是否已有未过期的验证码
+        if (qqVerificationService.hasValidCode(qqNumber)) {
+            return ResponseEntity.ok(Map.of("message", "验证码已发送，请检查QQ私信", "code", 200));
+        }
+
+        // 发送验证码
+        boolean sent = qqVerificationService.sendVerificationCode(qqNumber);
+        if (sent) {
+            return ResponseEntity.ok(Map.of(
+                "message", "验证码已发送到您的QQ私信，请查收",
+                "expiresIn", 300  // 5分钟 = 300秒
+            ));
+        } else {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "验证码发送失败，请检查QQ号是否正确或稍后重试", "code", 500));
+        }
+    }
+
+    /**
+     * 绑定QQ账号（需要验证码）
      */
     @PostMapping("/qq-bindings")
     public ResponseEntity<?> bindQqAccount(@RequestBody Map<String, String> request) {
-        Long userId = getCurrentUserId();
+        Long userId = securityHelper.getCurrentUserId();
         if (userId == null) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(Map.of("error", "未登录", "code", 401));
@@ -168,44 +188,57 @@ public class UserProfileController {
         String qqNumber = request.get("qqNumber");
         String nickname = request.get("nickname");
         String avatar = request.get("avatar");
+        String verificationCode = request.get("verificationCode");
 
         if (qqNumber == null || qqNumber.trim().isEmpty()) {
             return ResponseEntity.badRequest()
                     .body(Map.of("error", "QQ号不能为空", "code", 400));
         }
 
+        if (verificationCode == null || verificationCode.trim().isEmpty()) {
+            return ResponseEntity.badRequest()
+                    .body(Map.of("error", "请输入验证码", "code", 400));
+        }
+
         // 检查是否已绑定（只检查激活状态的）
-        if (userQqBindingRepository.existsByUserIdAndQqNumberAndActiveTrue(userId, qqNumber)) {
+        boolean alreadyBound = userService.existsByUserIdAndQqNumberAndActiveTrue(userId, qqNumber);
+        log.info("发送验证码前检查 - userId={}, qqNumber={}, alreadyBound={}", userId, qqNumber, alreadyBound);
+        if (alreadyBound) {
             return ResponseEntity.badRequest()
                     .body(Map.of("error", "该QQ号已绑定", "code", 400));
         }
 
-        // 检查是否有已解绑的记录，有则重新激活
-        Optional<UserQqBinding> existingBindingOpt = userQqBindingRepository.findByUserIdAndQqNumber(userId, qqNumber);
-        if (existingBindingOpt.isPresent()) {
-            UserQqBinding existing = existingBindingOpt.get();
-            existing.setActive(true);
-            existing.setNickname(nickname);
-            existing.setAvatar(avatar);
-            userQqBindingRepository.save(existing);
-            return ResponseEntity.ok(Map.of("message", "绑定成功", "qqNumber", qqNumber));
+        // 检查该QQ是否已被其他用户绑定（全局唯一）
+        List<UserQqBinding> existingBindings = userQqBindingRepository.findByQqNumberAndActiveTrue(qqNumber);
+        log.info("全局绑定检查 - qqNumber={}, existingBindings数量={}", qqNumber, existingBindings.size());
+        for (UserQqBinding binding : existingBindings) {
+            log.info("绑定记录 - id={}, userId={}, active={}", binding.getId(), binding.getUserId(), binding.isActive());
+            if (!binding.getUserId().equals(userId)) {
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "该QQ号已被其他用户绑定", "code", 400));
+            }
         }
 
-        // 创建绑定记录
-        UserQqBinding binding = new UserQqBinding();
-        binding.setUserId(userId);
-        binding.setQqNumber(qqNumber);
-        binding.setNickname(nickname);
-        binding.setAvatar(avatar);
-        binding.setActive(true);
-        
-        // 如果是第一个绑定的账号，设为默认
-        long bindingCount = userQqBindingRepository.countByUserIdAndActiveTrue(userId);
-        binding.setDefault(bindingCount == 0);
-
-        userQqBindingRepository.save(binding);
-
-        return ResponseEntity.ok(Map.of("message", "绑定成功", "qqNumber", qqNumber));
+        // 验证验证码
+        QqVerificationService.VerificationResult result = qqVerificationService.verifyCode(qqNumber, verificationCode);
+        switch (result) {
+            case NO_CODE:
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "请先获取验证码", "code", 400));
+            case EXPIRED:
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "验证码已过期，请重新获取", "code", 400));
+            case INVALID:
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "验证码错误，请重新输入", "code", 400));
+            case SUCCESS:
+                // 验证通过，执行绑定
+                userService.bindQqAccount(userId, qqNumber, nickname, avatar);
+                return ResponseEntity.ok(Map.of("message", "绑定成功", "qqNumber", qqNumber));
+            default:
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "验证失败", "code", 400));
+        }
     }
 
     /**
@@ -213,38 +246,27 @@ public class UserProfileController {
      */
     @DeleteMapping("/qq-bindings/{bindingId}")
     public ResponseEntity<?> unbindQqAccount(@PathVariable Long bindingId) {
-        Long userId = getCurrentUserId();
+        Long userId = securityHelper.getCurrentUserId();
         if (userId == null) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(Map.of("error", "未登录", "code", 401));
         }
 
-        Optional<UserQqBinding> bindingOpt = userQqBindingRepository.findById(bindingId);
-        if (bindingOpt.isEmpty()) {
-            return ResponseEntity.status(HttpStatus.NOT_FOUND)
-                    .body(Map.of("error", "绑定记录不存在", "code", 404));
-        }
-
-        UserQqBinding binding = bindingOpt.get();
-        if (!binding.getUserId().equals(userId)) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                    .body(Map.of("error", "无权操作", "code", 403));
-        }
-
-        // 软删除
-        binding.setActive(false);
-        userQqBindingRepository.save(binding);
-
-        // 如果解绑的是默认账号，且还有其他激活的账号，将第一个设为默认
-        if (binding.isDefault()) {
-            List<UserQqBinding> remainingBindings = userQqBindingRepository.findByUserIdAndActiveTrue(userId);
-            if (!remainingBindings.isEmpty()) {
-                remainingBindings.get(0).setDefault(true);
-                userQqBindingRepository.save(remainingBindings.get(0));
+        try {
+            userService.unbindQqAccount(userId, bindingId);
+            return ResponseEntity.ok(Map.of("message", "解绑成功"));
+        } catch (RuntimeException e) {
+            String msg = e.getMessage();
+            if ("绑定记录不存在".equals(msg)) {
+                return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                        .body(Map.of("error", msg, "code", 404));
             }
+            if ("无权操作".equals(msg)) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                        .body(Map.of("error", msg, "code", 403));
+            }
+            return ResponseEntity.badRequest().body(Map.of("error", msg, "code", 400));
         }
-
-        return ResponseEntity.ok(Map.of("message", "解绑成功"));
     }
 
     /**
@@ -252,38 +274,27 @@ public class UserProfileController {
      */
     @PutMapping("/qq-bindings/{bindingId}/default")
     public ResponseEntity<?> setDefaultQqAccount(@PathVariable Long bindingId) {
-        Long userId = getCurrentUserId();
+        Long userId = securityHelper.getCurrentUserId();
         if (userId == null) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(Map.of("error", "未登录", "code", 401));
         }
 
-        Optional<UserQqBinding> bindingOpt = userQqBindingRepository.findById(bindingId);
-        if (bindingOpt.isEmpty()) {
-            return ResponseEntity.status(HttpStatus.NOT_FOUND)
-                    .body(Map.of("error", "绑定记录不存在", "code", 404));
-        }
-
-        UserQqBinding binding = bindingOpt.get();
-        if (!binding.getUserId().equals(userId)) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                    .body(Map.of("error", "无权操作", "code", 403));
-        }
-
-        // 取消其他默认账号（只考虑激活的）
-        List<UserQqBinding> userBindings = userQqBindingRepository.findByUserIdAndActiveTrue(userId);
-        for (UserQqBinding b : userBindings) {
-            if (b.isDefault()) {
-                b.setDefault(false);
-                userQqBindingRepository.save(b);
+        try {
+            userService.setDefaultQqAccount(userId, bindingId);
+            return ResponseEntity.ok(Map.of("message", "设置成功"));
+        } catch (RuntimeException e) {
+            String msg = e.getMessage();
+            if ("绑定记录不存在".equals(msg)) {
+                return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                        .body(Map.of("error", msg, "code", 404));
             }
+            if ("无权操作".equals(msg)) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                        .body(Map.of("error", msg, "code", 403));
+            }
+            return ResponseEntity.badRequest().body(Map.of("error", msg, "code", 400));
         }
-
-        // 设置新的默认账号
-        binding.setDefault(true);
-        userQqBindingRepository.save(binding);
-
-        return ResponseEntity.ok(Map.of("message", "设置成功"));
     }
 
     /**
@@ -291,13 +302,13 @@ public class UserProfileController {
      */
     @GetMapping("/qq-bindings/default")
     public ResponseEntity<?> getDefaultQqBinding() {
-        Long userId = getCurrentUserId();
+        Long userId = securityHelper.getCurrentUserId();
         if (userId == null) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(Map.of("error", "未登录", "code", 401));
         }
 
-        Optional<UserQqBinding> bindingOpt = userQqBindingRepository.findByUserIdAndIsDefaultTrue(userId);
+        Optional<UserQqBinding> bindingOpt = userService.findDefaultQqBindingByUserId(userId);
         if (bindingOpt.isEmpty()) {
             return ResponseEntity.ok(Map.of("qqNumber", null, "message", "未设置默认QQ账号"));
         }
@@ -317,7 +328,7 @@ public class UserProfileController {
      */
     @PostMapping("/avatar")
     public ResponseEntity<?> uploadAvatar(@RequestPart("file") MultipartFile file) {
-        Long userId = getCurrentUserId();
+        Long userId = securityHelper.getCurrentUserId();
         if (userId == null) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(Map.of("error", "未登录", "code", 401));
@@ -342,41 +353,13 @@ public class UserProfileController {
         }
 
         try {
-            // 创建上传目录（用户头像隔离到 uploads/avatars/users）
-            String uploadDir = "uploads/avatars/users";
-            Path uploadPath = Paths.get(uploadDir);
-            if (!Files.exists(uploadPath)) {
-                Files.createDirectories(uploadPath);
-            }
-
-            // 生成文件名
-            String originalFilename = file.getOriginalFilename();
-            String extension = originalFilename != null && originalFilename.contains(".")
-                    ? originalFilename.substring(originalFilename.lastIndexOf("."))
-                    : ".jpg";
-            String filename = userId + "_" + System.currentTimeMillis() + extension;
-
-            // 保存文件
-            Path filePath = uploadPath.resolve(filename);
-            Files.copy(file.getInputStream(), filePath, StandardCopyOption.REPLACE_EXISTING);
-
-            // 生成访问URL
-            String avatarUrl = "/uploads/avatars/users/" + filename;
-
-            // 更新用户头像
-            Optional<User> userOpt = userRepository.findById(userId);
-            if (userOpt.isPresent()) {
-                User user = userOpt.get();
-                user.setAvatar(avatarUrl);
-                userRepository.save(user);
-            }
-
+            String avatarUrl = userService.uploadAvatar(userId, file);
             return ResponseEntity.ok(Map.of(
                     "message", "上传成功",
                     "avatarUrl", avatarUrl
             ));
 
-        } catch (IOException e) {
+        } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(Map.of("error", "上传失败: " + e.getMessage(), "code", 500));
         }

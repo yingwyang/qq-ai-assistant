@@ -1,7 +1,7 @@
 package com.qqai.websocket;
 
-import com.alibaba.fastjson.JSON;
-import com.alibaba.fastjson.JSONObject;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -24,6 +24,8 @@ public class FrontendMessageWebSocketHandler extends TextWebSocketHandler {
     private final Map<String, WebSocketSession> sessions = new ConcurrentHashMap<>();
     private final Map<String, Set<String>> groupSubscriptions = new ConcurrentHashMap<>();
 
+    private final ObjectMapper objectMapper = new ObjectMapper();
+
     @Override
     public void afterConnectionEstablished(WebSocketSession session) {
         sessions.put(session.getId(), session);
@@ -33,17 +35,17 @@ public class FrontendMessageWebSocketHandler extends TextWebSocketHandler {
 
     @Override
     protected void handleTextMessage(WebSocketSession session, TextMessage message) throws Exception {
-        JSONObject json = JSON.parseObject(message.getPayload());
-        String action = json.getString("action");
+        JsonNode json = objectMapper.readTree(message.getPayload());
+        String action = json.get("action").asText();
 
         if ("subscribe".equals(action)) {
-            String groupId = json.getString("groupId");
+            String groupId = json.has("groupId") ? json.get("groupId").asText() : null;
             if (groupId != null && !groupId.isEmpty()) {
                 groupSubscriptions.computeIfAbsent(session.getId(), id -> new CopyOnWriteArraySet<>()).add(groupId);
                 session.sendMessage(new TextMessage("{\"type\":\"subscribed\",\"groupId\":\"" + groupId + "\"}"));
             }
         } else if ("unsubscribe".equals(action)) {
-            String groupId = json.getString("groupId");
+            String groupId = json.has("groupId") ? json.get("groupId").asText() : null;
             Set<String> subs = groupSubscriptions.get(session.getId());
             if (subs != null && groupId != null) {
                 subs.remove(groupId);

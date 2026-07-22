@@ -1,12 +1,15 @@
 package com.qqai.websocket;
 
-import com.alibaba.fastjson.JSON;
-import com.alibaba.fastjson.JSONObject;
-import com.alibaba.fastjson.JSONArray;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.qqai.entity.Message;
 import com.qqai.service.MessageService;
 import com.qqai.service.NapCatService;
 import com.qqai.repository.MessageRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -28,6 +31,8 @@ import java.util.concurrent.ConcurrentHashMap;
 @Component
 public class NapCatWebSocketHandler extends TextWebSocketHandler {
 
+    private static final Logger log = LoggerFactory.getLogger(NapCatWebSocketHandler.class);
+
     @Autowired
     private MessageService messageService;
 
@@ -45,23 +50,25 @@ public class NapCatWebSocketHandler extends TextWebSocketHandler {
     // 存储所有连接的会话
     private static final Map<String, WebSocketSession> sessions = new ConcurrentHashMap<>();
 
+    private final ObjectMapper objectMapper = new ObjectMapper();
+
     @Override
     public void afterConnectionEstablished(WebSocketSession session) throws Exception {
         String sessionId = session.getId();
         sessions.put(sessionId, session);
-        System.out.println("NapCat WebSocket连接已建立: " + sessionId);
-        System.out.println("当前连接数: " + sessions.size());
+        log.info("NapCat WebSocket连接已建立: {}", sessionId);
+        log.info("当前连接数: {}", sessions.size());
     }
 
     @Override
     protected void handleTextMessage(WebSocketSession session, TextMessage message) throws Exception {
         String payload = message.getPayload();
-        System.out.println("收到NapCat消息: " + payload);
+        log.debug("收到NapCat消息: {}", payload);
 
         try {
             // 解析OneBot 11协议消息
-            JSONObject json = JSON.parseObject(payload);
-            String postType = json.getString("post_type");
+            ObjectNode json = (ObjectNode) objectMapper.readTree(payload);
+            String postType = json.has("post_type") ? json.get("post_type").asText() : null;
 
             // 只处理消息事件（包括自己发送的消息 message_sent）
             if ("message".equals(postType) || "message_sent".equals(postType)) {
@@ -72,16 +79,15 @@ public class NapCatWebSocketHandler extends TextWebSocketHandler {
             sendResponse(session, json);
 
         } catch (Exception e) {
-            System.err.println("处理消息时出错: " + e.getMessage());
-            e.printStackTrace();
+            log.error("处理消息时出错: {}", e.getMessage(), e);
         }
     }
 
     /**
      * 处理消息事件
      */
-    private void handleMessageEvent(JSONObject json) {
-        String messageType = json.getString("message_type");
+    private void handleMessageEvent(ObjectNode json) {
+        String messageType = json.has("message_type") ? json.get("message_type").asText() : null;
 
         // 只处理群聊消息
         if (!"group".equals(messageType)) {
@@ -89,32 +95,32 @@ public class NapCatWebSocketHandler extends TextWebSocketHandler {
         }
 
         // 提取消息信息
-        Long groupId = json.getLong("group_id");
-        JSONObject sender = json.getJSONObject("sender");
-        Long userId = sender.getLong("user_id");
-        String nickname = sender.getString("nickname");
-        String rawMessage = json.getString("raw_message");
-        Integer messageId = json.getInteger("message_id");
-        Long rawMsgTime = json.getLong("time");
-        Integer msgSeq = json.getInteger("message_seq");
+        Long groupId = json.has("group_id") ? json.get("group_id").asLong() : null;
+        ObjectNode sender = (ObjectNode) json.get("sender");
+        Long userId = (sender != null && sender.has("user_id")) ? sender.get("user_id").asLong() : null;
+        String nickname = (sender != null && sender.has("nickname")) ? sender.get("nickname").asText() : null;
+        String rawMessage = json.has("raw_message") ? json.get("raw_message").asText() : null;
+        Integer messageId = json.has("message_id") ? json.get("message_id").asInt() : null;
+        Long rawMsgTime = json.has("time") ? json.get("time").asLong() : null;
+        Integer msgSeq = json.has("message_seq") ? json.get("message_seq").asInt() : null;
 
         // 动态获取当前登录QQ：优先使用上报的 self_id，否则使用配置兜底
-        Long selfIdLong = json.getLong("self_id");
+        Long selfIdLong = json.has("self_id") ? json.get("self_id").asLong() : null;
         String currentSelfQq = selfIdLong != null ? String.valueOf(selfIdLong)
                 : (fallbackSelfQq != null && !fallbackSelfQq.isEmpty() ? fallbackSelfQq : null);
 
         if (groupId == null || userId == null) {
-            System.err.println("消息缺少必要字段");
+            log.warn("消息缺少必要字段");
             return;
         }
 
         String finalMessageId = messageId != null ? String.valueOf(messageId) : null;
         if (finalMessageId != null && messageRepository.existsByMessageId(finalMessageId)) {
-            System.out.println("消息已存在，跳过: messageId=" + finalMessageId);
+            log.debug("消息已存在，跳过: messageId={}", finalMessageId);
             return;
         }
 
-        System.out.println("收到群聊消息: 群" + groupId + " 用户" + userId + ": " + rawMessage);
+        log.info("收到群聊消息: 群{} 用户{}: {}", groupId, userId, rawMessage);
 
         // 创建消息实体
         Message message = new Message();
@@ -128,24 +134,24 @@ public class NapCatWebSocketHandler extends TextWebSocketHandler {
         message.setContent(rawMessage);
         if (msgType == Message.MessageType.FORWARD) {
             // 优先从 NapCat 解析后的 message 数组中提取子消息（需要 parseMultMsg=true）
-            JSONArray parsedForwardMessages = napCatService.extractForwardMessagesFromPayload(json);
+            ArrayNode parsedForwardMessages = napCatService.extractForwardMessagesFromPayload(json);
             if (parsedForwardMessages != null && !parsedForwardMessages.isEmpty()) {
                 napCatService.downloadForwardMediaToLocal(parsedForwardMessages, String.valueOf(groupId));
-                message.setForwardContent(parsedForwardMessages.toJSONString());
-                System.out.println("WebSocket 从 message 数组解析到合并转发消息详情, 共 " + parsedForwardMessages.size() + " 条子消息");
+                message.setForwardContent(parsedForwardMessages.toString());
+                log.info("WebSocket 从 message 数组解析到合并转发消息详情, 共 {} 条子消息", parsedForwardMessages.size());
             } else {
                 // Fallback：尝试通过 API 拉取（需要 NapCat 本地缓存该消息）
                 String forwardId = extractForwardId(rawMessage);
                 if (forwardId != null && !forwardId.isEmpty()) {
                     try {
-                        JSONArray forwardMessages = napCatService.getForwardMsg(forwardId);
+                        ArrayNode forwardMessages = napCatService.getForwardMsg(forwardId);
                         if (forwardMessages != null && !forwardMessages.isEmpty()) {
                             napCatService.downloadForwardMediaToLocal(forwardMessages, String.valueOf(groupId));
-                            message.setForwardContent(forwardMessages.toJSONString());
-                            System.out.println("WebSocket 合并转发消息详情已拉取, forwardId=" + forwardId + ", 共 " + forwardMessages.size() + " 条子消息");
+                            message.setForwardContent(forwardMessages.toString());
+                            log.info("WebSocket 合并转发消息详情已拉取, forwardId={}, 共 {} 条子消息", forwardId, forwardMessages.size());
                         }
                     } catch (Exception e) {
-                        System.err.println("WebSocket 拉取合并转发消息详情失败, forwardId=" + forwardId + ": " + e.getMessage());
+                        log.error("WebSocket 拉取合并转发消息详情失败, forwardId={}: {}", forwardId, e.getMessage());
                     }
                 }
             }
@@ -174,10 +180,9 @@ public class NapCatWebSocketHandler extends TextWebSocketHandler {
         // 保存到数据库
         try {
             Message savedMessage = messageService.saveMessage(message);
-            System.out.println("消息已保存到数据库, ID: " + savedMessage.getId());
+            log.info("消息已保存到数据库, ID: {}", savedMessage.getId());
         } catch (Exception e) {
-            System.err.println("保存消息失败: " + e.getMessage());
-            e.printStackTrace();
+            log.error("保存消息失败: {}", e.getMessage(), e);
         }
     }
 
@@ -221,7 +226,7 @@ public class NapCatWebSocketHandler extends TextWebSocketHandler {
                 return matcher.group(1).trim();
             }
         } catch (Exception e) {
-            System.err.println("解析 forward CQ 码失败: " + e.getMessage());
+            log.error("解析 forward CQ 码失败: {}", e.getMessage());
         }
         return null;
     }
@@ -253,7 +258,7 @@ public class NapCatWebSocketHandler extends TextWebSocketHandler {
         } catch (NumberFormatException e) {
             // id 不是数字，忽略
         } catch (Exception e) {
-            System.err.println("解析 reply CQ 码失败: " + e.getMessage());
+            log.error("解析 reply CQ 码失败: {}", e.getMessage());
         }
         return null;
     }
@@ -262,7 +267,7 @@ public class NapCatWebSocketHandler extends TextWebSocketHandler {
      * 构造被引用消息的内容摘要。
      * 优先使用目标消息自身内容（移除 CQ:reply 码后）；
      * 如果目标消息本身也是一条引用且没有额外文本，则回退到目标所引用的内容，
-     * 避免“引用的引用”在预览中显示为空或错误索引。
+     * 避免"引用的引用"在预览中显示为空或错误索引。
      */
     private String buildReplyToContent(Message target) {
         if (target == null) {
@@ -288,18 +293,18 @@ public class NapCatWebSocketHandler extends TextWebSocketHandler {
     /**
      * 发送响应给NapCat
      */
-    private void sendResponse(WebSocketSession session, JSONObject received) {
+    private void sendResponse(WebSocketSession session, ObjectNode received) {
         try {
             // OneBot 11 快速操作响应
-            JSONObject response = new JSONObject();
+            ObjectNode response = objectMapper.createObjectNode();
             response.put("status", "ok");
             response.put("retcode", 0);
-            response.put("data", null);
-            response.put("echo", received.get("echo"));
+            response.set("data", null);
+            response.set("echo", received.get("echo"));
 
-            session.sendMessage(new TextMessage(response.toJSONString()));
+            session.sendMessage(new TextMessage(response.toString()));
         } catch (IOException e) {
-            System.err.println("发送响应失败: " + e.getMessage());
+            log.error("发送响应失败: {}", e.getMessage());
         }
     }
 
@@ -307,13 +312,13 @@ public class NapCatWebSocketHandler extends TextWebSocketHandler {
     public void afterConnectionClosed(WebSocketSession session, CloseStatus status) throws Exception {
         String sessionId = session.getId();
         sessions.remove(sessionId);
-        System.out.println("NapCat WebSocket连接已关闭: " + sessionId);
-        System.out.println("当前连接数: " + sessions.size());
+        log.info("NapCat WebSocket连接已关闭: {}", sessionId);
+        log.info("当前连接数: {}", sessions.size());
     }
 
     @Override
     public void handleTransportError(WebSocketSession session, Throwable exception) throws Exception {
-        System.err.println("WebSocket传输错误: " + exception.getMessage());
+        log.error("WebSocket传输错误: {}", exception.getMessage());
         sessions.remove(session.getId());
     }
 

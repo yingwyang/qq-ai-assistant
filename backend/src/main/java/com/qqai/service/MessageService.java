@@ -6,14 +6,19 @@ import com.qqai.repository.GroupRepository;
 import com.qqai.repository.MessageRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import com.qqai.event.MessageSavedEvent;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Pageable;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.alibaba.fastjson.JSONArray;
-import com.alibaba.fastjson.JSONObject;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -57,6 +62,14 @@ public class MessageService {
     @Autowired
     private NapCatService napCatService;
 
+    @Autowired
+    private ApplicationEventPublisher eventPublisher;
+
+    @Value("${file.storage.local-path:./uploads/images}")
+    private String localStoragePath;
+
+    private final ObjectMapper objectMapper = new ObjectMapper();
+
     public Message saveMessage(Message message) {
         if (message.getSendTime() == null) {
             message.setSendTime(LocalDateTime.now());
@@ -68,7 +81,7 @@ public class MessageService {
         message.setArchived(false);
         Message savedMessage = messageRepository.save(message);
         messageBroadcastService.broadcastNewMessage(savedMessage);
-        processMessageAsync(savedMessage.getId());
+        eventPublisher.publishEvent(new MessageSavedEvent(savedMessage));
         return savedMessage;
     }
 
@@ -76,6 +89,15 @@ public class MessageService {
         return messageRepository.existsByMessageId(messageId);
     }
 
+    public Optional<Message> findByMessageId(String messageId) {
+        return messageRepository.findByMessageId(messageId);
+    }
+
+    public List<Message> findByFileId(String fileId) {
+        return messageRepository.findByFileId(fileId);
+    }
+
+    @Deprecated
     @Async
     public void processMessageAsync(Long messageId) {
         Optional<Message> messageOpt = messageRepository.findById(messageId);
@@ -133,7 +155,7 @@ public class MessageService {
     public void processAllUnprocessedMessages() {
         List<Message> unprocessedMessages = getUnprocessedMessages();
         for (Message message : unprocessedMessages) {
-            processMessage(message);
+            eventPublisher.publishEvent(new MessageSavedEvent(message));
         }
     }
 
@@ -178,32 +200,32 @@ public class MessageService {
                 }
             }
         } catch (Exception e) {
-            System.err.println("提取 @目标 QQ 失败: " + e.getMessage());
+            log.error("提取 @目标 QQ 失败: {}", e.getMessage());
         }
 
         // 3. 优先从 NapCat 拉取完整群成员列表
         try {
-            JSONArray members = napCatService.getGroupMemberList(groupId, true);
+            ArrayNode members = napCatService.getGroupMemberList(groupId, true);
             if (members != null) {
                 for (int i = 0; i < members.size(); i++) {
-                    JSONObject member = members.getJSONObject(i);
+                    ObjectNode member = (ObjectNode) members.get(i);
                     if (member == null) continue;
-                    Object userIdObj = member.get("user_id");
+                    JsonNode userIdObj = member.get("user_id");
                     if (userIdObj == null) userIdObj = member.get("userId");
                     if (userIdObj == null) continue;
-                    String qq = String.valueOf(userIdObj);
+                    String qq = userIdObj.asText();
                     // 优先使用群名片(card)，其次昵称(nickname)
-                    String nickname = member.getString("card");
-                    if (nickname == null || nickname.isBlank()) {
-                        nickname = member.getString("nickname");
+                    String nickname = member.has("card") ? member.get("card").asText() : "";
+                    if (nickname.isBlank()) {
+                        nickname = member.has("nickname") ? member.get("nickname").asText() : "";
                     }
-                    if (nickname != null && !nickname.isBlank()) {
+                    if (!nickname.isBlank()) {
                         nicknameMap.put(qq, nickname);
                     }
                 }
             }
         } catch (Exception e) {
-            System.err.println("从 NapCat 加载群成员失败，回退到本地消息发送者: " + e.getMessage());
+            log.error("从 NapCat 加载群成员失败，回退到本地消息发送者: {}", e.getMessage());
         }
 
         // 4. 兜底：对本地消息中出现但列表里仍缺失的 QQ 单独调用 get_group_member_info
@@ -213,26 +235,26 @@ public class MessageService {
                 continue;
             }
             try {
-                JSONObject member = napCatService.getGroupMemberInfo(groupId, qq);
+                ObjectNode member = napCatService.getGroupMemberInfo(groupId, qq);
                 if (member != null) {
-                    Object userIdObj = member.get("user_id");
+                    JsonNode userIdObj = member.get("user_id");
                     if (userIdObj == null) userIdObj = member.get("userId");
                     if (userIdObj == null) continue;
-                    String returnedQq = String.valueOf(userIdObj);
-                    String nickname = member.getString("card");
-                    if (nickname == null || nickname.isBlank()) {
-                        nickname = member.getString("nickname");
+                    String returnedQq = userIdObj.asText();
+                    String nickname = member.has("card") ? member.get("card").asText() : "";
+                    if (nickname.isBlank()) {
+                        nickname = member.has("nickname") ? member.get("nickname").asText() : "";
                     }
-                    if (nickname != null && !nickname.isBlank()) {
+                    if (!nickname.isBlank()) {
                         nicknameMap.put(returnedQq, nickname);
                     }
                 }
             } catch (Exception e) {
-                System.err.println("兜底查询群成员信息失败 (qq=" + qq + "): " + e.getMessage());
+                log.error("兜底查询群成员信息失败 (qq={}): {}", qq, e.getMessage());
             }
         }
 
-        System.out.println("群" + groupId + "昵称映射数量: " + nicknameMap.size());
+        log.info("群{}昵称映射数量: {}", groupId, nicknameMap.size());
         List<Map<String, Object>> result = new ArrayList<>();
         for (Map.Entry<String, String> entry : nicknameMap.entrySet()) {
             Map<String, Object> map = new HashMap<>();
@@ -320,31 +342,42 @@ public class MessageService {
             log.warn("查询 group_read_state 失败: {}", e.getMessage());
         }
 
-        // 3. 计算每个群的未读数
+        // 3. 单条 SQL 批量查询 lastRecvMs + unreadCount（合并 2 次单独查询，消除 N+1）
+        Map<String, Long> lastRecvMsMap = new HashMap<>();
+        Map<String, Long> unreadCountMap = new HashMap<>();
+        try {
+            List<Object[]> stats = messageRepository.recentGroupStats(userId, groupIds);
+            if (stats != null) {
+                for (Object[] row : stats) {
+                    String gid = (String) row[0];
+                    Long lastMs = row[1] != null ? ((Number) row[1]).longValue() : 0L;
+                    Long unread = row[2] != null ? ((Number) row[2]).longValue() : 0L;
+                    if (gid != null) {
+                        if (lastMs > 0) lastRecvMsMap.put(gid, lastMs);
+                        unreadCountMap.put(gid, unread);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.warn("批量查询群聊统计（最后时间+未读数）失败: {}", e.getMessage());
+        }
+
+        // 4. 组装每个群的结果
         for (Group group : groups) {
             Map<String, Object> groupMap = new HashMap<>();
-            groupMap.put("groupId", group.getGroupId());
+            String gid = group.getGroupId();
+            groupMap.put("groupId", gid);
             groupMap.put("groupName",
-                    group.getGroupName() != null ? group.getGroupName() : "群聊 " + group.getGroupId());
+                    group.getGroupName() != null ? group.getGroupName() : "群聊 " + gid);
             groupMap.put("ownerQq", group.getOwnerQq() != null ? group.getOwnerQq() : "");
             groupMap.put("avatar",
                     group.getAvatar() != null ? group.getAvatar()
-                            : "https://q.qlogo.cn/headimg_dl?dst_uin=" + group.getGroupId() + "&spec=100");
+                            : "https://q.qlogo.cn/headimg_dl?dst_uin=" + gid + "&spec=100");
 
-            LocalDateTime lastRead = readTimeMap.get(group.getGroupId());
-            Long unreadCount;
-            if (lastRead != null) {
-                Long sinceMs = localDateTimeToEpochMs(lastRead);
-                unreadCount = sinceMs != null
-                        ? messageRepository.countUnreadMessagesSince(group.getGroupId(), sinceMs)
-                        : 0L;
-            } else {
-                // 首次进入系统的用户：默认未读 = 0，避免显示一堆老消息未读
-                unreadCount = 0L;
-            }
+            Long unreadCount = unreadCountMap.getOrDefault(gid, 0L);
             groupMap.put("unreadCount", unreadCount);
 
-            Long lastRecvMs = messageRepository.findLastMessageTime(group.getGroupId());
+            Long lastRecvMs = lastRecvMsMap.get(gid);
             LocalDateTime lastMessageTime = epochMsToLocalDateTime(lastRecvMs);
             groupMap.put("lastMessageTime",
                     lastMessageTime != null ? lastMessageTime.toString()
@@ -457,6 +490,34 @@ public class MessageService {
     }
 
     /**
+     * 按群聊和消息类型批量删除消息（软删除）。
+     *
+     * @param groupId      群聊 ID
+     * @param types        消息类型列表（如 TEXT, IMAGE, VIDEO, AUDIO, VOICE, FORWARD）
+     * @param selfQqList   当前用户绑定的 QQ 号列表（用于权限校验）
+     * @param userId       当前用户 ID
+     * @param deleteMedia  是否同时删除关联媒体文件
+     * @return 实际删除的消息数量
+     */
+    @Transactional
+    public int deleteMessagesByGroupAndTypes(String groupId, List<Message.MessageType> types,
+                                              List<String> selfQqList, Long userId, boolean deleteMedia) {
+        if (groupId == null || groupId.isEmpty() || types == null || types.isEmpty()
+                || selfQqList == null || selfQqList.isEmpty()) {
+            return 0;
+        }
+        List<Message> messages = messageRepository.findByGroupIdAndMessageTypes(groupId, types);
+        if (messages == null || messages.isEmpty()) {
+            return 0;
+        }
+        List<Long> ids = messages.stream()
+                .filter(m -> m.getSelfQq() != null && selfQqList.contains(m.getSelfQq()))
+                .map(Message::getId)
+                .collect(java.util.stream.Collectors.toList());
+        return deleteMessagesByIds(ids, selfQqList, userId, deleteMedia);
+    }
+
+    /**
      * 从消息 content / fileId 中尝试解析本地文件（以 /images/ 开头的相对路径或绝对路径）。
      * 找不到本地文件时返回 null（避免上层代码 NPE）。
      */
@@ -464,7 +525,8 @@ public class MessageService {
         String content = message.getContent();
         if (content != null && content.startsWith("/images/")) {
             String relative = content.startsWith("/") ? content.substring(1) : content;
-            java.nio.file.Path path = java.nio.file.Paths.get(System.getProperty("user.dir"), "backend", relative);
+            String relativePath = relative.startsWith("images/") ? relative.substring("images/".length()) : relative;
+            java.nio.file.Path path = java.nio.file.Paths.get(localStoragePath).resolve(relativePath);
             return path.toFile();
         }
         return null;

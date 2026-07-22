@@ -1,13 +1,18 @@
 package com.qqai.controller;
 
-import com.alibaba.fastjson.JSON;
-import com.alibaba.fastjson.JSONObject;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.qqai.entity.AstrBotConversation;
 import com.qqai.entity.AstrBotMessage;
 import com.qqai.entity.Message;
+import com.qqai.common.SecurityHelper;
 import com.qqai.plugin.PluginManager;
 import com.qqai.service.AstrBotConversationService;
 import com.qqai.service.MessageService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
@@ -31,6 +36,8 @@ import java.util.ArrayList;
 @RequestMapping("/api/astrbot")
 public class AstrBotController {
 
+    private static final Logger log = LoggerFactory.getLogger(AstrBotController.class);
+
     @Autowired
     private MessageService messageService;
 
@@ -39,6 +46,9 @@ public class AstrBotController {
 
     @Autowired
     private PluginManager pluginManager;
+
+    @Autowired
+    private SecurityHelper securityHelper;
 
     @Autowired
     private jakarta.persistence.EntityManager entityManager;
@@ -51,24 +61,26 @@ public class AstrBotController {
 
     private final RestTemplate restTemplate = new RestTemplate();
 
+    private final ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
+
     /**
      * 接收 AstrBot 的消息推送
      * 这是 AstrBot 主动推送到 SpringBoot 的消息
      */
     @PostMapping("/callback")
     public ResponseEntity<?> receiveFromAstrBot(@RequestBody String payload) {
-        System.out.println("【AstrBot回调】收到消息: " + payload);
+        log.info("【AstrBot回调】收到消息: {}", payload);
 
         try {
-            JSONObject json = JSON.parseObject(payload);
-            
+            JsonNode json = objectMapper.readTree(payload);
+
             // 解析 AstrBot 消息格式
-            String messageType = json.getString("message_type");
-            String content = json.getString("message");
-            String senderId = json.getString("sender_id");
-            String senderName = json.getString("sender_name");
-            String groupId = json.getString("group_id");
-            String sessionId = json.getString("session_id");
+            String messageType = json.has("message_type") ? json.get("message_type").asText() : null;
+            String content = json.has("message") ? json.get("message").asText() : null;
+            String senderId = json.has("sender_id") ? json.get("sender_id").asText() : null;
+            String senderName = json.has("sender_name") ? json.get("sender_name").asText() : null;
+            String groupId = json.has("group_id") ? json.get("group_id").asText() : null;
+            String sessionId = json.has("session_id") ? json.get("session_id").asText() : null;
             
             // 如果是群消息或私聊消息，存入数据库
             if (groupId != null || sessionId != null) {
@@ -91,14 +103,14 @@ public class AstrBotController {
                 message.setSelfMessage(false);
                 
                 Message saved = messageService.saveMessage(message);
-                System.out.println("AstrBot消息已保存, ID: " + saved.getId());
+                log.info("AstrBot消息已保存, ID: {}", saved.getId());
             }
             
             Map<String, Object> okResult = new HashMap<>();
             okResult.put("status", "ok");
             return ResponseEntity.ok(okResult);
         } catch (Exception e) {
-            System.err.println("处理AstrBot消息失败: " + e.getMessage());
+            log.error("处理AstrBot消息失败: {}", e.getMessage());
             e.printStackTrace();
             Map<String, Object> errorResult = new HashMap<>();
             errorResult.put("status", "error");
@@ -132,18 +144,18 @@ public class AstrBotController {
             if (messages.isEmpty() && !groupId.matches("\\d+")) {
                 // 查询群号
                 String sql = "SELECT group_id FROM chat_groups WHERE group_name = ? AND active = 1 LIMIT 1";
-                System.out.println("尝试用群名查询群号: " + groupId);
+                log.debug("尝试用群名查询群号: {}", groupId);
                 try {
                     jakarta.persistence.Query query = entityManager.createNativeQuery(sql);
                     query.setParameter(1, groupId);
                     Object result = query.getSingleResult();
                     if (result != null) {
                         String actualGroupId = result.toString();
-                        System.out.println("找到群号: " + actualGroupId);
+                        log.debug("找到群号: {}", actualGroupId);
                         messages = messageService.getMessagesByGroupId(actualGroupId);
                     }
                 } catch (Exception e) {
-                    System.out.println("群名查询失败: " + e.getMessage());
+                    log.warn("群名查询失败: {}", e.getMessage());
                 }
             }
             
@@ -211,7 +223,7 @@ public class AstrBotController {
             // 解析响应
             String responseBody = response.getBody();
             StringBuilder replyText = new StringBuilder();
-            
+
             if (responseBody != null) {
                 String[] lines = responseBody.split("\n");
                 for (String line : lines) {
@@ -219,10 +231,10 @@ public class AstrBotController {
                     if (line.startsWith("data: ")) {
                         String jsonData = line.substring(6);
                         try {
-                            JSONObject json = JSON.parseObject(jsonData);
-                            String type = json.getString("type");
+                            JsonNode json = objectMapper.readTree(jsonData);
+                            String type = json.has("type") ? json.get("type").asText() : null;
                             if ("plain".equals(type)) {
-                                String data = json.getString("data");
+                                String data = json.has("data") ? json.get("data").asText() : null;
                                 if (data != null) {
                                     replyText.append(data);
                                 }
@@ -255,26 +267,32 @@ public class AstrBotController {
             analyzeContext.put("analysisType", analysisType);
             analysis = pluginManager.applyPlugins(analysis, analyzeContext);
             
-            System.out.println("AstrBot 分析结果: " + analysis);
+            log.info("AstrBot 分析结果: {}", analysis);
 
             // 返回分析结果
-            JSONObject result = new JSONObject();
+            ObjectNode result = objectMapper.createObjectNode();
             result.put("status", "ok");
             result.put("analysis", analysis);
-            
+
             return ResponseEntity.ok()
                 .header("Content-Type", "application/json; charset=UTF-8")
-                .body(result.toJSONString());
+                .body(objectMapper.writeValueAsString(result));
             
         } catch (Exception e) {
-            System.err.println("AstrBot 分析请求失败: " + e.getMessage());
+            log.error("AstrBot 分析请求失败: {}", e.getMessage());
             e.printStackTrace();
-            JSONObject error = new JSONObject();
-            error.put("status", "error");
-            error.put("message", e.getMessage());
-            return ResponseEntity.ok()
-                .header("Content-Type", "application/json; charset=UTF-8")
-                .body(error.toJSONString());
+            try {
+                ObjectNode error = objectMapper.createObjectNode();
+                error.put("status", "error");
+                error.put("message", e.getMessage());
+                return ResponseEntity.ok()
+                    .header("Content-Type", "application/json; charset=UTF-8")
+                    .body(objectMapper.writeValueAsString(error));
+            } catch (Exception ex) {
+                return ResponseEntity.ok()
+                    .header("Content-Type", "application/json; charset=UTF-8")
+                    .body("{\"status\":\"error\",\"message\":\"" + e.getMessage() + "\"}");
+            }
         }
     }
 
@@ -318,17 +336,19 @@ public class AstrBotController {
             return ResponseEntity.badRequest().body(errorResult);
         }
 
+        String currentConversationId = null;
         try {
-            // 1. 获取或创建对话
+            Long userId = securityHelper.getCurrentUserId();
             AstrBotConversation conversation = conversationService.getOrCreateConversation(
-                    conversationId, groupId, userQq, userNickname, model);
-            String currentConversationId = conversation.getConversationId();
+                    conversationId, userId, groupId, userQq, userNickname, model);
+            currentConversationId = conversation.getConversationId();
 
-            // 2. 保存用户消息到数据库
-            conversationService.addUserMessage(currentConversationId, message, null);
-
-            // 3. 构建对话上下文（最近10条消息）
+            // 2. 先构建对话上下文（最近10条历史消息，不包含当前这条）
+            // 避免当前消息在 body.message 和 context 中重复出现，导致模型混乱
             List<Map<String, String>> context = conversationService.buildConversationContext(currentConversationId, 10);
+
+            // 3. 保存用户消息到数据库
+            conversationService.addUserMessage(currentConversationId, message, null);
 
             // 4. 调用 AstrBot HTTP API
             String url = astrBotApiUrl + "/api/v1/chat";
@@ -385,10 +405,10 @@ public class AstrBotController {
             Integer promptTokens = null;
             Integer completionTokens = null;
             Integer totalTokens = null;
-            
+
             if (responseBody != null) {
-                System.out.println("AstrBot 原始响应: " + responseBody.substring(0, Math.min(500, responseBody.length())));
-                
+                log.debug("AstrBot 原始响应: {}", responseBody.substring(0, Math.min(500, responseBody.length())));
+
                 // 解析 SSE 格式的数据行
                 String[] lines = responseBody.split("\n");
                 for (String line : lines) {
@@ -396,10 +416,10 @@ public class AstrBotController {
                     if (line.startsWith("data: ")) {
                         String jsonData = line.substring(6);
                         try {
-                            JSONObject json = JSON.parseObject(jsonData);
-                            String type = json.getString("type");
+                            JsonNode json = objectMapper.readTree(jsonData);
+                            String type = json.has("type") ? json.get("type").asText() : null;
                             if ("plain".equals(type)) {
-                                String data = json.getString("data");
+                                String data = json.has("data") ? json.get("data").asText() : null;
                                 if (data != null) {
                                     // 过滤掉工具调用的 JSON 内容
                                     // 检查是否是工具调用结果（包含 id + ts + result 或 id + name 等特征）
@@ -412,12 +432,12 @@ public class AstrBotController {
                                 }
                             }
                             // 尝试解析 token 使用量
-                            if (json.containsKey("usage")) {
-                                JSONObject usage = json.getJSONObject("usage");
+                            if (json.has("usage")) {
+                                JsonNode usage = json.get("usage");
                                 if (usage != null) {
-                                    promptTokens = usage.getInteger("prompt_tokens");
-                                    completionTokens = usage.getInteger("completion_tokens");
-                                    totalTokens = usage.getInteger("total_tokens");
+                                    promptTokens = usage.has("prompt_tokens") ? usage.get("prompt_tokens").asInt() : null;
+                                    completionTokens = usage.has("completion_tokens") ? usage.get("completion_tokens").asInt() : null;
+                                    totalTokens = usage.has("total_tokens") ? usage.get("total_tokens").asInt() : null;
                                 }
                             }
                         } catch (Exception e) {
@@ -426,7 +446,7 @@ public class AstrBotController {
                     }
                 }
             }
-            
+
             String finalReply = replyText.toString().trim();
             if (finalReply.isEmpty()) {
                 finalReply = "抱歉，我没有理解您的问题。";
@@ -439,38 +459,53 @@ public class AstrBotController {
             replyContext.put("groupId", groupId);
             replyContext.put("userId", userQq);
             finalReply = pluginManager.applyPlugins(finalReply, replyContext);
-            
-            System.out.println("AstrBot 最终回复: " + finalReply);
-            
+
+            log.debug("AstrBot 最终回复: {}", finalReply);
+
             // 6. 保存 AI 回复到数据库
             conversationService.addAssistantMessage(
-                    currentConversationId, finalReply, model, 
+                    currentConversationId, finalReply, model,
                     totalTokens, promptTokens, completionTokens);
 
             // 7. 如果是新对话，自动生成标题
             if (conversation.getMessageCount() <= 2 && conversation.getTitle().equals("新对话")) {
                 conversationService.autoGenerateTitle(currentConversationId);
             }
-            
+
             // 8. 构建 JSON 响应
-            JSONObject result = new JSONObject();
+            ObjectNode result = objectMapper.createObjectNode();
             result.put("status", "ok");
             result.put("data", finalReply);
             result.put("conversationId", currentConversationId);
             result.put("messageCount", conversation.getMessageCount() + 2); // +2 因为刚保存了两条消息
-            
-            // 直接返回 JSONObject，让 Spring 自动转换为 JSON
+
+            // 直接返回 ObjectNode，让 Spring 自动转换为 JSON
             return ResponseEntity.ok(result);
-            
+
         } catch (Exception e) {
-            System.err.println("发送消息到 AstrBot 失败: " + e.getMessage());
+            log.error("发送消息到 AstrBot 失败: {}", e.getMessage());
             e.printStackTrace();
-            JSONObject error = new JSONObject();
+            
+            String errorMsg = e.getMessage();
+            String fallbackMessage = errorMsg != null ? errorMsg : "调用 AstrBot 服务失败，请检查服务是否启动";
+            
+            if (currentConversationId != null) {
+                try {
+                    conversationService.addAssistantMessage(
+                            currentConversationId, fallbackMessage, model,
+                            null, null, null);
+                    log.info("AstrBot错误消息已保存到对话: {}", currentConversationId);
+                } catch (Exception saveEx) {
+                    log.warn("保存错误消息失败: {}", saveEx.getMessage());
+                }
+            }
+            
+            ObjectNode error = objectMapper.createObjectNode();
             error.put("status", "error");
-            error.put("message", e.getMessage());
+            error.put("message", fallbackMessage);
             return ResponseEntity.ok()
                 .header("Content-Type", "application/json; charset=UTF-8")
-                .body(error.toJSONString());
+                .body(error);
         }
     }
 
@@ -497,15 +532,15 @@ public class AstrBotController {
                 conversations = conversationService.getAllActiveConversations();
             }
 
-            JSONObject result = new JSONObject();
+            ObjectNode result = objectMapper.createObjectNode();
             result.put("status", "ok");
-            result.put("data", conversations);
-            return ResponseEntity.ok(result.toJSONString());
+            result.putPOJO("data", conversations);
+            return ResponseEntity.ok(result);
         } catch (Exception e) {
-            JSONObject error = new JSONObject();
+            ObjectNode error = objectMapper.createObjectNode();
             error.put("status", "error");
             error.put("message", e.getMessage());
-            return ResponseEntity.ok(error.toJSONString());
+            return ResponseEntity.ok(error);
         }
     }
 
@@ -517,20 +552,20 @@ public class AstrBotController {
         try {
             Optional<AstrBotConversation> conversation = conversationService.getConversation(conversationId);
             if (conversation.isPresent()) {
-                JSONObject result = new JSONObject();
+                ObjectNode result = objectMapper.createObjectNode();
                 result.put("status", "ok");
-                result.put("data", conversation.get());
-                return ResponseEntity.ok(result.toJSONString());
+                result.putPOJO("data", conversation.get());
+                return ResponseEntity.ok(result);
             } else {
                 Map<String, Object> errorResult = new HashMap<>();
                 errorResult.put("error", "对话不存在");
                 return ResponseEntity.status(404).body(errorResult);
             }
         } catch (Exception e) {
-            JSONObject error = new JSONObject();
+            ObjectNode error = objectMapper.createObjectNode();
             error.put("status", "error");
             error.put("message", e.getMessage());
-            return ResponseEntity.ok(error.toJSONString());
+            return ResponseEntity.ok(error);
         }
     }
 
@@ -544,15 +579,15 @@ public class AstrBotController {
             @RequestParam(defaultValue = "50") int size) {
         try {
             List<AstrBotMessage> messages = conversationService.getConversationMessages(conversationId);
-            JSONObject result = new JSONObject();
+            ObjectNode result = objectMapper.createObjectNode();
             result.put("status", "ok");
-            result.put("data", messages);
-            return ResponseEntity.ok(result.toJSONString());
+            result.putPOJO("data", messages);
+            return ResponseEntity.ok(result);
         } catch (Exception e) {
-            JSONObject error = new JSONObject();
+            ObjectNode error = objectMapper.createObjectNode();
             error.put("status", "error");
             error.put("message", e.getMessage());
-            return ResponseEntity.ok(error.toJSONString());
+            return ResponseEntity.ok(error);
         }
     }
 
@@ -562,6 +597,7 @@ public class AstrBotController {
     @PostMapping("/conversations")
     public ResponseEntity<?> createConversation(@RequestBody Map<String, Object> request) {
         try {
+            Long userId = securityHelper.getCurrentUserId();
             String groupId = (String) request.get("groupId");
             String userQq = (String) request.get("userQq");
             String userNickname = (String) request.get("userNickname");
@@ -569,17 +605,17 @@ public class AstrBotController {
             String model = (String) request.get("model");
 
             AstrBotConversation conversation = conversationService.createConversation(
-                    groupId, userQq, userNickname, title, model);
+                    userId, groupId, userQq, userNickname, title, model);
 
-            JSONObject result = new JSONObject();
+            ObjectNode result = objectMapper.createObjectNode();
             result.put("status", "ok");
-            result.put("data", conversation);
-            return ResponseEntity.ok(result.toJSONString());
+            result.putPOJO("data", conversation);
+            return ResponseEntity.ok(result);
         } catch (Exception e) {
-            JSONObject error = new JSONObject();
+            ObjectNode error = objectMapper.createObjectNode();
             error.put("status", "error");
             error.put("message", e.getMessage());
-            return ResponseEntity.ok(error.toJSONString());
+            return ResponseEntity.ok(error);
         }
     }
 
@@ -597,10 +633,10 @@ public class AstrBotController {
             okResult.put("status", "ok");
             return ResponseEntity.ok(okResult);
         } catch (Exception e) {
-            JSONObject error = new JSONObject();
+            ObjectNode error = objectMapper.createObjectNode();
             error.put("status", "error");
             error.put("message", e.getMessage());
-            return ResponseEntity.ok(error.toJSONString());
+            return ResponseEntity.ok(error);
         }
     }
 
@@ -615,10 +651,10 @@ public class AstrBotController {
             okResult.put("status", "ok");
             return ResponseEntity.ok(okResult);
         } catch (Exception e) {
-            JSONObject error = new JSONObject();
+            ObjectNode error = objectMapper.createObjectNode();
             error.put("status", "error");
             error.put("message", e.getMessage());
-            return ResponseEntity.ok(error.toJSONString());
+            return ResponseEntity.ok(error);
         }
     }
 
@@ -633,10 +669,10 @@ public class AstrBotController {
             okResult.put("status", "ok");
             return ResponseEntity.ok(okResult);
         } catch (Exception e) {
-            JSONObject error = new JSONObject();
+            ObjectNode error = objectMapper.createObjectNode();
             error.put("status", "error");
             error.put("message", e.getMessage());
-            return ResponseEntity.ok(error.toJSONString());
+            return ResponseEntity.ok(error);
         }
     }
 
@@ -647,15 +683,15 @@ public class AstrBotController {
     public ResponseEntity<?> getConversationStats(@PathVariable String conversationId) {
         try {
             Map<String, Object> stats = conversationService.getConversationStats(conversationId);
-            JSONObject result = new JSONObject();
+            ObjectNode result = objectMapper.createObjectNode();
             result.put("status", "ok");
-            result.put("data", stats);
-            return ResponseEntity.ok(result.toJSONString());
+            result.putPOJO("data", stats);
+            return ResponseEntity.ok(result);
         } catch (Exception e) {
-            JSONObject error = new JSONObject();
+            ObjectNode error = objectMapper.createObjectNode();
             error.put("status", "error");
             error.put("message", e.getMessage());
-            return ResponseEntity.ok(error.toJSONString());
+            return ResponseEntity.ok(error);
         }
     }
 }

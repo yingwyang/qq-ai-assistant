@@ -1,0 +1,23 @@
+# 敏感配置文件
+src/main/resources/application.yml
+
+# 编译输出
+target/
+!.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+
+# IDE
+.idea/
+*.iws
+*.iml
+*.ipr
+.vscode/
+
+# 日志
+*.log
+logs/
+
+# 临时文件
+uploads/temp/
+uploads/archive/

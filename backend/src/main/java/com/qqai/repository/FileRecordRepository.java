@@ -19,6 +19,8 @@ public interface FileRecordRepository extends JpaRepository<FileRecord, Long> {
 
     Optional<FileRecord> findByFileId(String fileId);
 
+    Optional<FileRecord> findByUploaderId(Long uploaderId);
+
     List<FileRecord> findByFileType(FileRecord.FileType fileType);
 
     List<FileRecord> findByCreatedAtBefore(LocalDateTime date);

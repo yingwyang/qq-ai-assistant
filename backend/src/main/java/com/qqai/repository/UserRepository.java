@@ -1,6 +1,8 @@
 package com.qqai.repository;
 
 import com.qqai.entity.User;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
@@ -23,4 +25,9 @@ public interface UserRepository extends JpaRepository<User, Long> {
      * 检查用户名/账号是否存在
      */
     boolean existsByUsername(String username);
+
+    /**
+     * 按用户名或昵称模糊搜索（分页）
+     */
+    Page<User> findByUsernameContainingOrNicknameContaining(String username, String nickname, Pageable pageable);
 }

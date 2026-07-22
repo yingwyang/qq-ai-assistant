@@ -118,6 +118,36 @@
       <span class="face-text">[表情 {{ faceId }}]</span>
     </div>
     
+    <!-- 小程序分享消息 -->
+    <div v-else-if="isMiniAppMessage" class="message-mini-app">
+      <div class="mini-app-card" @click="openMiniAppUrl">
+        <div class="mini-app-header">
+          <div class="mini-app-icon">
+            <img v-if="miniAppData.icon" :src="miniAppData.icon" @error="onMiniAppIconError" />
+            <div v-else class="mini-app-icon-placeholder">
+              <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="#666" stroke-width="2">
+                <rect x="3" y="3" width="18" height="18" rx="2"/>
+                <path d="M8 8h8M8 16h8M8 12h8"/>
+              </svg>
+            </div>
+          </div>
+          <div class="mini-app-info">
+            <div class="mini-app-title">{{ miniAppData.title || '[小程序]' }}</div>
+            <div class="mini-app-desc">{{ miniAppData.desc || miniAppData.description }}</div>
+            <div class="mini-app-source">{{ miniAppData.appName || miniAppData.source }}</div>
+          </div>
+          <div class="mini-app-arrow">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#999" stroke-width="2">
+              <path d="M5 12h14M12 5l7 7-7 7"/>
+            </svg>
+          </div>
+        </div>
+        <div v-if="miniAppData.preview" class="mini-app-preview">
+          <img :src="miniAppData.preview" @error="onMiniAppPreviewError" />
+        </div>
+      </div>
+    </div>
+    
     <!-- 文本消息 -->
     <RichTextRenderer v-else class="message-text" :content="displayContent" />
   </div>
@@ -127,6 +157,7 @@
 import { computed, ref } from 'vue';
 import { showToast } from './Toast.vue';
 import RichTextRenderer from './RichTextRenderer.vue';
+import { systemApi } from '../services/api';
 
 export default {
   name: 'MessageContent',
@@ -150,11 +181,15 @@ export default {
       return text
         .replace(/&#91;/g, '[')
         .replace(/&#93;/g, ']')
+        .replace(/&#44;/g, ',')
         .replace(/&amp;/g, '&')
         .replace(/&lt;/g, '<')
         .replace(/&gt;/g, '>')
         .replace(/&quot;/g, '"')
-        .replace(/&#39;/g, "'");
+        .replace(/&#39;/g, "'")
+        .replace(/&#34;/g, '"')
+        .replace(/&#10;/g, '\n')
+        .replace(/&#13;/g, '\r');
     };
     const content = computed(() => decodeHtmlEntities(props.message.content || '').trim());
     const imageError = ref(false);
@@ -413,6 +448,181 @@ export default {
       return false;
     });
     
+    // 判断是否是小程序分享消息
+    const isMiniAppMessage = computed(() => {
+      if (props.message.messageType === 'APP') return true;
+      if (content.value.includes('[CQ:json')) return true;
+      if (props.message.miniAppContent) return true;
+      return false;
+    });
+    
+    // 从 JSON 对象提取小程序信息
+    const extractMiniAppInfo = (json) => {
+      if (!json) return {};
+      
+      let result = {};
+      
+      if (json.meta && json.meta.detail_1) {
+        const meta = json.meta.detail_1;
+        result = {
+          title: meta.title || meta.desc || '小程序',
+          desc: meta.desc || meta.title || '',
+          icon: meta.icon || meta.thumb || '',
+          preview: meta.preview || meta.image || '',
+          url: meta.url || meta.qqdocurl || meta.jumpUrl || '',
+          appName: meta.title || json.host?.nick || '小程序'
+        };
+      } else if (json.meta && json.meta.news) {
+        const news = json.meta.news;
+        result = {
+          title: news.title || '新闻',
+          desc: news.desc || '',
+          icon: news.tagIcon || news.icon || '',
+          preview: news.preview || news.image || '',
+          url: news.jumpUrl || news.url || '',
+          appName: news.tag || '新闻'
+        };
+      } else if (json.app && json.app.meta) {
+        const meta = json.app.meta;
+        result = {
+          title: meta.title || json.app.name || '小程序',
+          desc: meta.description || meta.desc || '',
+          icon: meta.icon || meta.thumb || '',
+          preview: meta.preview || '',
+          url: meta.url || json.app.url || '',
+          appName: meta.title || json.app.name || '小程序'
+        };
+      } else if (json.data) {
+        const data = json.data;
+        result = {
+          title: data.title || data.appName || '小程序',
+          desc: data.desc || data.description || '',
+          icon: data.icon || '',
+          preview: data.preview || '',
+          url: data.url || data.jumpUrl || '',
+          appName: data.source || data.appName || '小程序'
+        };
+      } else {
+        result = {
+          title: json.title || json.appName || '小程序',
+          desc: json.desc || json.description || '',
+          icon: json.icon || '',
+          preview: json.preview || '',
+          url: json.url || json.jumpUrl || '',
+          appName: json.source || '小程序'
+        };
+      }
+      
+      console.log('解析出的小程序数据:', result);
+      return result;
+    };
+    
+    // 解析小程序数据
+    const miniAppData = computed(() => {
+      let miniAppContent = props.message.miniAppContent;
+      
+      // 如果 miniAppContent 为空，尝试从 content 中的 [CQ:json,data=...] 提取
+      if (!miniAppContent && content.value && content.value.includes('[CQ:json')) {
+        const dataMatch = content.value.match(/data=({.+})/);
+        if (dataMatch && dataMatch[1]) {
+          miniAppContent = dataMatch[1];
+          console.log('从 content 提取到小程序JSON数据, 长度:', miniAppContent.length);
+        }
+      }
+      
+      if (!miniAppContent) {
+        console.log('miniAppContent为空, 尝试从content提取...');
+        // 如果 content 中包含 json 字符串，尝试提取
+        if (content.value) {
+          const jsonMatch = content.value.match(/{.+}/);
+          if (jsonMatch) {
+            try {
+              const json = JSON.parse(decodeHtmlEntities(jsonMatch[0]));
+              return extractMiniAppInfo(json);
+            } catch (e) {
+              // 忽略解析错误
+            }
+          }
+        }
+        return {};
+      }
+      
+      try {
+        let jsonStr = decodeHtmlEntities(miniAppContent);
+        console.log('解码后的小程序JSON长度:', jsonStr.length);
+        console.log('解码后的小程序JSON片段:', jsonStr.substring(0, 300));
+        
+        // 尝试解析 JSON，如果失败则尝试提取第一个有效的 JSON 对象
+        let json = null;
+        try {
+          json = JSON.parse(jsonStr);
+        } catch (parseErr) {
+          // 可能是字符串包含多个 JSON 或额外字符，尝试提取第一个 {} 包裹的对象
+          const firstBrace = jsonStr.indexOf('{');
+          if (firstBrace >= 0) {
+            let braceCount = 0;
+            let endPos = -1;
+            for (let i = firstBrace; i < jsonStr.length; i++) {
+              if (jsonStr[i] === '{') braceCount++;
+              else if (jsonStr[i] === '}') {
+                braceCount--;
+                if (braceCount === 0) {
+                  endPos = i;
+                  break;
+                }
+              }
+            }
+            if (endPos > firstBrace) {
+              const extracted = jsonStr.substring(firstBrace, endPos + 1);
+              console.log('尝试提取第一个JSON对象:', extracted.substring(0, 200));
+              json = JSON.parse(extracted);
+            }
+          }
+          if (!json) throw parseErr;
+        }
+        return extractMiniAppInfo(json);
+      } catch (e) {
+        console.error('解析小程序数据失败:', e);
+        console.error('原始数据前200字符:', miniAppContent.substring(0, 200));
+        console.error('原始数据长度:', miniAppContent.length);
+        return {};
+      }
+    });
+    
+    const openMiniAppUrl = () => {
+      console.log('点击小程序卡片', miniAppData.value);
+      let url = miniAppData.value.url;
+      
+      if (!url) {
+        url = content.value.match(/url=([^,\]]+)/);
+        if (url && url[1]) {
+          url = url[1].replace(/&amp;/g, '&').trim();
+        } else {
+          url = '';
+        }
+      }
+      
+      console.log('小程序URL:', url);
+      if (url) {
+        if (!url.startsWith('http://') && !url.startsWith('https://')) {
+          url = 'https://' + url;
+        }
+        console.log('打开链接:', url);
+        window.open(url, '_blank');
+      } else {
+        console.warn('小程序URL为空');
+        showToast('无法获取小程序链接', 'info');
+      }
+    };
+    
+    const onMiniAppIconError = (e) => {
+      e.target.style.display = 'none';
+    };
+    
+    const onMiniAppPreviewError = (e) => {
+      e.target.parentElement.style.display = 'none';
+    };
+    
     // 获取本地媒体URL
     const getLocalMediaUrl = (path) => {
       if (!path) return '';
@@ -606,8 +816,10 @@ export default {
     };
     
     // 语音播放控制（使用 new Audio 避免进入聊天时自动加载触发错误提示）
-    const toggleVoicePlay = () => {
-      const url = voiceUrl.value;
+    const isConverting = ref(false);
+    const convertedVoiceUrl = ref('');
+    const toggleVoicePlay = async () => {
+      let url = voiceUrl.value;
       console.log('语音播放点击, voiceUrl:', url);
       if (!url) {
         showToast('音频地址为空', 'error');
@@ -625,6 +837,44 @@ export default {
         return;
       }
 
+      // 检查是否为浏览器不支持的格式（.amr/.silk），需要转码
+      const isUnsupportedFormat = /\.(amr|silk)(\?.*)?$/i.test(url);
+      if (isUnsupportedFormat) {
+        // 如果已转码过，直接使用转码后的 URL
+        if (convertedVoiceUrl.value) {
+          url = convertedVoiceUrl.value;
+        } else {
+          isConverting.value = true;
+          showToast('正在转码语音格式...', 'info');
+          try {
+            // 提取原始相对路径（去除 domain 部分）
+            let relativePath = url;
+            if (url.startsWith('http')) {
+              const urlObj = new URL(url);
+              relativePath = urlObj.pathname;
+            }
+            const data = await systemApi.convertVoice(relativePath);
+            if (data && data.audioUrl) {
+              // 使用转码后的 URL
+              const newUrl = getLocalMediaUrl(data.audioUrl);
+              convertedVoiceUrl.value = newUrl;
+              url = newUrl;
+              showToast('语音转码成功', 'success');
+            } else {
+              showToast(data?.message || '语音转码失败', 'error');
+              isConverting.value = false;
+              return;
+            }
+          } catch (err) {
+            console.error('语音转码失败:', err);
+            showToast('语音转码失败: ' + (err.message || '未知错误'), 'error');
+            isConverting.value = false;
+            return;
+          }
+          isConverting.value = false;
+        }
+      }
+
       const audio = new Audio(url);
       currentAudio = audio;
 
@@ -640,7 +890,6 @@ export default {
       audio.addEventListener('error', (e) => {
         const errorCode = audio.error?.code;
         console.warn('语音加载错误:', url, 'code:', errorCode);
-        // 网络错误 / 文件不存在（常见为上传目录被清理）——提示"音频已删除"
         if (errorCode === 2 || errorCode === 4 || errorCode === 1) {
           showToast('音频已删除', 'info');
         } else {
@@ -688,6 +937,11 @@ export default {
       isVoiceMessage,
       isVideoMessage,
       isFaceMessage,
+      isMiniAppMessage,
+      miniAppData,
+      openMiniAppUrl,
+      onMiniAppIconError,
+      onMiniAppPreviewError,
       imageError,
       videoError,
       imageUrl,
@@ -705,7 +959,8 @@ export default {
       toggleVoicePlay,
       onImageError,
       onVideoError,
-      isPlaying
+      isPlaying,
+      isConverting
     };
   }
 };
@@ -1069,5 +1324,108 @@ export default {
 .placeholder-label {
   font-size: 12px;
   color: #999;
+}
+
+/* 小程序分享消息 */
+.message-mini-app {
+  max-width: 320px;
+}
+
+.mini-app-card {
+  display: flex;
+  flex-direction: column;
+  background-color: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.2s;
+  overflow: hidden;
+}
+
+.mini-app-card:hover {
+  background-color: #f8f9fa;
+  border-color: rgba(0, 0, 0, 0.12);
+}
+
+.mini-app-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+}
+
+.mini-app-icon {
+  flex-shrink: 0;
+  width: 48px;
+  height: 48px;
+  border-radius: 8px;
+  overflow: hidden;
+  background-color: #f0f0f0;
+}
+
+.mini-app-icon img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.mini-app-icon-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.mini-app-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.mini-app-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: #333;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mini-app-desc {
+  font-size: 12px;
+  color: #666;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mini-app-source {
+  font-size: 11px;
+  color: #999;
+}
+
+.mini-app-arrow {
+  flex-shrink: 0;
+  opacity: 0.6;
+}
+
+.mini-app-preview {
+  width: 100%;
+}
+
+.mini-app-preview img {
+  width: 100%;
+  max-height: 200px;
+  object-fit: cover;
+  cursor: pointer;
+  transition: transform 0.2s;
+  display: block;
+}
+
+.mini-app-preview img:hover {
+  transform: scale(1.02);
 }
 </style>

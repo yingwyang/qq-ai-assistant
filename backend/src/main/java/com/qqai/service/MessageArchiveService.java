@@ -2,6 +2,8 @@ package com.qqai.service;
 
 import com.qqai.entity.Message;
 import com.qqai.repository.MessageRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -21,6 +23,8 @@ import java.util.List;
 @Service
 public class MessageArchiveService {
 
+    private static final Logger log = LoggerFactory.getLogger(MessageArchiveService.class);
+
     @Autowired
     private MessageRepository messageRepository;
 
@@ -36,7 +40,7 @@ public class MessageArchiveService {
     @Scheduled(cron = "${archive.cron:0 0 2 * * ?}")
     @Transactional
     public void archiveOldMessages() {
-        System.out.println("开始执行消息归档任务...");
+        log.info("开始执行消息归档任务...");
         
         LocalDateTime cutoffDate = LocalDateTime.now().minusDays(archiveDaysBefore);
         
@@ -44,11 +48,11 @@ public class MessageArchiveService {
         List<Message> oldMessages = messageRepository.findBySendTimeBeforeAndArchivedFalse(cutoffDate);
         
         if (oldMessages.isEmpty()) {
-            System.out.println("没有需要归档的消息");
+            log.info("没有需要归档的消息");
             return;
         }
         
-        System.out.println("找到 " + oldMessages.size() + " 条需要归档的消息");
+        log.info("找到 {} 条需要归档的消息", oldMessages.size());
         
         // 按月份分组归档
         String currentMonth = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy_MM"));
@@ -63,7 +67,7 @@ public class MessageArchiveService {
         }
         messageRepository.saveAll(oldMessages);
         
-        System.out.println("消息归档完成，已归档 " + oldMessages.size() + " 条消息");
+        log.info("消息归档完成，已归档 {} 条消息", oldMessages.size());
     }
 
     /**
@@ -86,9 +90,9 @@ public class MessageArchiveService {
                 }
             }
             
-            System.out.println("消息已归档到文件: " + archiveFile.getAbsolutePath());
+            log.info("消息已归档到文件: {}", archiveFile.getAbsolutePath());
         } catch (IOException e) {
-            System.err.println("归档消息失败: " + e.getMessage());
+            log.error("归档消息失败: {}", e.getMessage());
             throw new RuntimeException("归档失败", e);
         }
     }
@@ -114,7 +118,7 @@ public class MessageArchiveService {
     @Scheduled(cron = "0 0 3 * * ?") // 每天凌晨3点执行
     @Transactional
     public void cleanupArchivedMessages() {
-        System.out.println("开始清理已归档消息...");
+        log.info("开始清理已归档消息...");
         
         LocalDateTime cutoffDate = LocalDateTime.now().minusDays(archiveDaysBefore + 30); // 归档后30天才删除
         
@@ -122,7 +126,7 @@ public class MessageArchiveService {
         
         if (!archivedMessages.isEmpty()) {
             messageRepository.deleteAll(archivedMessages);
-            System.out.println("已删除 " + archivedMessages.size() + " 条已归档消息");
+            log.info("已删除 {} 条已归档消息", archivedMessages.size());
         }
     }
 

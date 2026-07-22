@@ -1,21 +1,24 @@
 spring:
   datasource:
-    url: ${DB_URL:jdbc:mysql://localhost:3306/qq_chat?useSSL=false&serverTimezone=Asia/Shanghai&characterEncoding=UTF-8&allowPublicKeyRetrieval=true}
+    url: ${DB_URL:jdbc:mysql://localhost:3306/qq_chat?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false}
     username: ${DB_USERNAME:root}
-    password: ${DB_PASSWORD:***REMOVED***}
-    driver-class-name: com.mysql.cj.jdbc.Driver
+    password: ${DB_PASSWORD:}
+    driver-class-name: ${DB_DRIVER:com.mysql.cj.jdbc.Driver}
   jpa:
     hibernate:
-      ddl-auto: update
+      ddl-auto: ${JPA_DDL_AUTO:update}
     show-sql: ${JPA_SHOW_SQL:false}
     properties:
       hibernate:
-        dialect: org.hibernate.dialect.MySQLDialect
+        dialect: ${HIBERNATE_DIALECT:org.hibernate.dialect.MySQLDialect}
         format_sql: true
         jdbc:
           batch_size: 50
         order_inserts: true
         order_updates: true
+  flyway:
+    enabled: ${FLYWAY_ENABLED:true}
+    locations: classpath:db/migration
   servlet:
     multipart:
       enabled: true
@@ -25,25 +28,35 @@ spring:
 
 server:
   port: ${SERVER_PORT:8081}
+  error:
+    include-stacktrace: never
+    include-message: never
+    include-binding-errors: never
 
 # AstrBot配置
 astrbot:
   api-url: ${ASTRBOT_API_URL:http://localhost:6185}
-  token: ${ASTRBOT_TOKEN:abk_6CJKaVnl8233_QVKJr_3ID1ns8cd5EIeCtSv31YjV84}
+  token: ${ASTRBOT_TOKEN:}
   data-path: ${ASTRBOT_DATA_PATH:D:/ai/Documents/qq-web/Astrbot/data}
 
 # NapCat配置
 napcat:
-  api-url: ${NAPCAT_API_URL:http://localhost:6099}
+  api-url: ${NAPCAT_API_URL:http://localhost:6100}
   onebot-api-url: ${NAPCAT_ONEBOT_API_URL:http://localhost:6100}
+  webui-url: ${NAPCAT_WEBUI_URL:http://127.0.0.1:6099}
   token: ${NAPCAT_TOKEN:***REMOVED***}
   webhook-token: ${NAPCAT_WEBHOOK_TOKEN:***REMOVED***}
-  self-qq: ${NAPCAT_SELF_QQ:3649735451}
+  self-qq: ${NAPCAT_SELF_QQ:2488130337}
 
 # GPT-SoVITS配置
 gpt-sovits:
-  api-url: ${GPT_SOVITS_API_URL:http://localhost:7860}
-  token: ${GPT_SOVITS_TOKEN:your-gpt-sovits-token}
+  api-url: ${GPT_SOVITS_API_URL:http://localhost:8000}
+  token: ${GPT_SOVITS_TOKEN:}
+  ref-audio-path: ${GPT_SOVITS_REF_AUDIO_PATH:D:/ai/Documents/qq-web/GPT-SoVITS-v2pro-20250604-nvidia50/reference/ref_01.wav}
+  prompt-text: ${GPT_SOVITS_PROMPT_TEXT:大家好，今天是个美好的日子。}
+  prompt-lang: ${GPT_SOVITS_PROMPT_LANG:zh}
+  text-lang: ${GPT_SOVITS_TEXT_LANG:zh}
+  output-dir: ${GPT_SOVITS_OUTPUT_DIR:D:/ai/Documents/qq-web/qq-ai-assistant/backend/uploads/tts}
 
 # MinIO配置
 minio:
@@ -79,5 +92,24 @@ archive:
 
 # JWT配置
 jwt:
-  secret: ${JWT_SECRET:your-256-bit-secret-key-for-jwt-signing-qq-ai-assistant}
+  secret: ${JWT_SECRET:***REMOVED***}
   expiration: ${JWT_EXPIRATION:86400000}
+
+# 注册与账户安全配置
+app:
+  registration:
+    enabled: ${APP_REGISTRATION_ENABLED:true}
+    rate-limit-per-ip: 5
+    rate-limit-window-minutes: 1
+
+---
+# Dev profile: 开发环境使用 Hibernate 自动更新，便于快速迭代
+spring:
+  config:
+    activate:
+      on-profile: dev
+  jpa:
+    hibernate:
+      ddl-auto: update
+  flyway:
+    enabled: false

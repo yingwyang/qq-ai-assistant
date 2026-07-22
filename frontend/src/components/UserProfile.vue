@@ -91,22 +91,36 @@
     </div>
 
     <!-- 绑定QQ弹窗 -->
-    <div v-if="showBindQqModal" class="modal-overlay" @click.self="showBindQqModal = false">
+    <div v-if="showBindQqModal" class="modal-overlay" @click.self="closeBindModal">
       <div class="modal-content">
         <h3>绑定QQ账号</h3>
+        <p class="bind-hint">需验证QQ主人身份，验证码将发送到该QQ的私信</p>
         <div class="form-group">
           <label>QQ号</label>
-          <input v-model="bindForm.qqNumber" type="text" placeholder="请输入QQ号" />
+          <div class="input-with-btn">
+            <input v-model="bindForm.qqNumber" type="text" placeholder="请输入QQ号" :disabled="codeSent" />
+            <button 
+              class="btn-send-code" 
+              @click="sendVerificationCode" 
+              :disabled="isSendingCode || countdown > 0 || !bindForm.qqNumber.trim()"
+            >
+              {{ countdown > 0 ? `${countdown}秒后重试` : (isSendingCode ? '发送中...' : '获取验证码') }}
+            </button>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>验证码</label>
+          <input v-model="bindForm.verificationCode" type="text" placeholder="请输入QQ私信收到的验证码" maxlength="6" />
         </div>
         <div class="form-group">
           <label>昵称（可选）</label>
           <input v-model="bindForm.nickname" type="text" placeholder="请输入昵称" />
         </div>
         <div class="form-actions">
-          <button class="btn-confirm" @click="bindQq" :disabled="isBinding">
+          <button class="btn-confirm" @click="bindQq" :disabled="isBinding || !bindForm.verificationCode.trim()">
             {{ isBinding ? '绑定中...' : '绑定' }}
           </button>
-          <button class="btn-cancel" @click="showBindQqModal = false">取消</button>
+          <button class="btn-cancel" @click="closeBindModal">取消</button>
         </div>
       </div>
     </div>
@@ -185,6 +199,10 @@ export default {
     const avatarPreview = ref('');
     const avatarFile = ref(null);
     const avatarInput = ref(null);
+    const isSendingCode = ref(false);
+    const codeSent = ref(false);
+    const countdown = ref(0);
+    let countdownTimer = null;
 
     const editForm = reactive({
       nickname: ''
@@ -192,7 +210,8 @@ export default {
 
     const bindForm = reactive({
       qqNumber: '',
-      nickname: ''
+      nickname: '',
+      verificationCode: ''
     });
 
     // 加载用户信息
@@ -243,10 +262,55 @@ export default {
       }
     };
 
+    // 发送验证码
+    const sendVerificationCode = async () => {
+      if (!bindForm.qqNumber.trim()) {
+        showToast('请输入QQ号', 'warning');
+        return;
+      }
+
+      isSendingCode.value = true;
+      try {
+        await userApi.sendQqBindingCode(bindForm.qqNumber.trim());
+        codeSent.value = true;
+        countdown.value = 60;
+        countdownTimer = setInterval(() => {
+          countdown.value--;
+          if (countdown.value <= 0) {
+            clearInterval(countdownTimer);
+          }
+        }, 1000);
+        showToast('验证码已发送到QQ私信，请查收', 'success');
+      } catch (error) {
+        console.error('发送验证码失败:', error);
+        showToast('发送失败: ' + error.message, 'error');
+      } finally {
+        isSendingCode.value = false;
+      }
+    };
+
+    // 关闭绑定弹窗
+    const closeBindModal = () => {
+      showBindQqModal.value = false;
+      bindForm.qqNumber = '';
+      bindForm.nickname = '';
+      bindForm.verificationCode = '';
+      codeSent.value = false;
+      countdown.value = 0;
+      if (countdownTimer) {
+        clearInterval(countdownTimer);
+        countdownTimer = null;
+      }
+    };
+
     // 绑定QQ
     const bindQq = async () => {
       if (!bindForm.qqNumber.trim()) {
         showToast('请输入QQ号', 'warning');
+        return;
+      }
+      if (!bindForm.verificationCode.trim()) {
+        showToast('请输入验证码', 'warning');
         return;
       }
 
@@ -254,11 +318,10 @@ export default {
       try {
         await userApi.bindQq({
           qqNumber: bindForm.qqNumber.trim(),
-          nickname: bindForm.nickname.trim() || undefined
+          nickname: bindForm.nickname.trim() || undefined,
+          verificationCode: bindForm.verificationCode.trim()
         });
-        showBindQqModal.value = false;
-        bindForm.qqNumber = '';
-        bindForm.nickname = '';
+        closeBindModal();
         await loadQqBindings();
         emit('profile-updated');
         showToast('QQ账号绑定成功', 'success');
@@ -371,6 +434,9 @@ export default {
       showAvatarUpload,
       avatarPreview,
       avatarInput,
+      isSendingCode,
+      codeSent,
+      countdown,
       editForm,
       bindForm,
       defaultAvatar,
@@ -378,6 +444,8 @@ export default {
       startEdit,
       cancelEdit,
       saveProfile,
+      sendVerificationCode,
+      closeBindModal,
       bindQq,
       unbindQq,
       setDefaultQq,
@@ -802,6 +870,45 @@ button:disabled {
   border-radius: 4px;
   font-size: 14px;
   box-sizing: border-box;
+}
+
+.bind-hint {
+  font-size: 13px;
+  color: #e67e22;
+  margin: -10px 0 16px 0;
+  padding: 8px 12px;
+  background-color: #fef5e7;
+  border-radius: 4px;
+}
+
+.input-with-btn {
+  display: flex;
+  gap: 8px;
+}
+
+.input-with-btn input {
+  flex: 1;
+}
+
+.btn-send-code {
+  padding: 8px 14px;
+  background-color: #3498db;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+  min-width: 100px;
+}
+
+.btn-send-code:hover:not(:disabled) {
+  background-color: #2980b9;
+}
+
+.btn-send-code:disabled {
+  background-color: #bdc3c7;
+  cursor: not-allowed;
 }
 
 .form-actions {

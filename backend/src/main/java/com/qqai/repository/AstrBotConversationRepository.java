@@ -40,6 +40,16 @@ public interface AstrBotConversationRepository extends JpaRepository<AstrBotConv
     List<AstrBotConversation> findByUserQqOrderByTimeUpdatedDesc(String userQq);
 
     /**
+     * 根据系统用户ID查找对话列表
+     */
+    List<AstrBotConversation> findByUserIdOrderByTimeUpdatedDesc(Long userId);
+
+    /**
+     * 根据系统用户ID和群号查找对话列表
+     */
+    List<AstrBotConversation> findByUserIdAndGroupIdOrderByTimeUpdatedDesc(Long userId, String groupId);
+
+    /**
      * 查找未归档的对话
      */
     List<AstrBotConversation> findByArchivedFalseOrderByTimeUpdatedDesc();

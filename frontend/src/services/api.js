@@ -6,35 +6,41 @@ const getToken = () => localStorage.getItem('auth_token');
 function handleUnauthorized() {
   localStorage.removeItem('auth_token');
   localStorage.removeItem('isLoggedIn');
-  window.location.reload();
-  throw new Error('登录已过期，请重新登录');
+  localStorage.removeItem('user_role');
 }
 
 async function parseResponse(response) {
-  if (response.status === 401) {
-    handleUnauthorized();
-  }
-
+  // 读取响应体文本
   const responseText = await response.text();
 
-  if (!response.ok) {
-    let errorData;
+  // 解析 JSON（如果可能）
+  let parsed = null;
+  if (responseText) {
     try {
-      errorData = JSON.parse(responseText);
+      parsed = JSON.parse(responseText);
     } catch {
-      errorData = { message: responseText };
+      parsed = null;
     }
-    throw new Error(errorData.error || errorData.message || `HTTP error! status: ${response.status}`);
   }
 
-  if (!responseText) return null;
-
-  try {
-    return JSON.parse(responseText);
-  } catch (parseError) {
-    console.error('JSON parse error. Response text:', responseText.substring(0, 200));
-    throw new Error(`服务器返回了无效的 JSON 数据: ${parseError.message}`);
+  // 401/403 统一处理为未授权
+  if (response.status === 401 || response.status === 403) {
+    handleUnauthorized();
+    const msg = parsed?.error || parsed?.message || '登录已过期，请重新登录';
+    throw new Error(msg);
   }
+
+  // 其他错误状态码
+  if (!response.ok) {
+    const msg = parsed?.error || parsed?.message || `HTTP error! status: ${response.status}`;
+    throw new Error(msg);
+  }
+
+  // 空响应体
+  if (!parsed) return null;
+
+  // 统一返回 data 字段；无 data 字段时返回整个响应体
+  return parsed.data !== undefined ? parsed.data : parsed;
 }
 
 async function request(endpoint, options = {}) {
@@ -135,6 +141,11 @@ export const messageApi = {
     method: 'POST',
     body: JSON.stringify({ messageIds, deleteMedia: !!deleteMedia }),
   }),
+  deleteMessagesByTypes: (groupId, types, deleteMedia) =>
+    request(`/messages/group/${encodeURIComponent(groupId)}/delete-by-types`, {
+      method: 'POST',
+      body: JSON.stringify({ types, deleteMedia: !!deleteMedia }),
+    }),
   purgeMedia: (types) => request('/messages/purge-media', {
     method: 'POST',
     body: JSON.stringify({ types }),
@@ -170,7 +181,16 @@ export const systemApi = {
   stopNapCat: () => request('/system/stop-napcat', { method: 'POST' }),
   startGptSovits: () => request('/system/start-gptsovits', { method: 'POST' }),
   stopGptSovits: () => request('/system/stop-gptsovits', { method: 'POST' }),
+  generateVoice: (text) => request('/system/tts', {
+    method: 'POST',
+    body: JSON.stringify({ text }),
+  }),
+  convertVoice: (path) => request('/system/convert-voice', {
+    method: 'POST',
+    body: JSON.stringify({ path }),
+  }),
   getComponentStatus: () => request('/system/component-status'),
+  getNapCatWebUiUrl: () => request('/system/napcat/webui-url'),
   getNapCatQrCode: () => request('/system/napcat/qrcode'),
   getNapCatQrCodePath: () => request('/system/napcat/qrcode-path'),
   checkNapCatLoginStatus: () => request('/system/napcat/login-status'),
@@ -235,6 +255,10 @@ export const userApi = {
     return uploadRequest('/avatar/upload', formData);
   },
   getQqBindings: () => request('/user/qq-bindings'),
+  sendQqBindingCode: (qqNumber) => request('/user/qq-bindings/send-code', {
+    method: 'POST',
+    body: JSON.stringify({ qqNumber }),
+  }),
   bindQq: (params) => request('/user/qq-bindings', {
     method: 'POST',
     body: JSON.stringify(params),
@@ -275,14 +299,29 @@ export const authApi = {
     body: JSON.stringify({ username, password, nickname }),
   }),
   getCurrentUser: () => request('/auth/me'),
+  updateProfile: (nickname, email) => request('/auth/profile', {
+    method: 'PUT',
+    body: JSON.stringify({ nickname, email }),
+  }),
   changePassword: (oldPassword, newPassword) => request('/auth/change-password', {
     method: 'POST',
     body: JSON.stringify({ oldPassword, newPassword }),
   }),
+  logout: () => request('/auth/logout', {
+    method: 'POST',
+    body: JSON.stringify({}),
+  }),
 };
 
 export const adminApi = {
-  getUsers: () => request('/admin/users'),
+  getUsers: (params = {}) => {
+    const queryParams = new URLSearchParams();
+    if (params.page !== undefined) queryParams.append('page', params.page);
+    if (params.size !== undefined) queryParams.append('size', params.size);
+    if (params.keyword) queryParams.append('keyword', params.keyword);
+    const query = queryParams.toString();
+    return request(`/admin/users${query ? '?' + query : ''}`);
+  },
   updateUserRole: (id, role) => request(`/admin/users/${id}/role`, {
     method: 'PUT',
     body: JSON.stringify({ role }),
@@ -292,7 +331,44 @@ export const adminApi = {
     body: JSON.stringify({ active }),
   }),
   deleteUser: (id) => request(`/admin/users/${id}`, { method: 'DELETE' }),
+  getConfig: () => request('/admin/config'),
+  updateConfig: (data) => request('/admin/config', {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  }),
+  triggerBackup: () => request('/admin/backup', { method: 'POST' }),
+  getBackupList: () => request('/admin/backup/list'),
+  downloadBackupUrl: (fileName) => {
+    const token = getToken();
+    return `${API_BASE_URL}/admin/backup/${encodeURIComponent(fileName)}/download${token ? '?token=' + token : ''}`;
+  },
+  triggerArchive: (days) => request(`/admin/archive?days=${days}`, { method: 'POST' }),
+  getLogs: (params = {}) => {
+    const query = new URLSearchParams();
+    if (params.level) query.append('level', params.level);
+    if (params.page != null) query.append('page', params.page);
+    if (params.size != null) query.append('size', params.size);
+    const qs = query.toString();
+    return request(`/admin/logs${qs ? '?' + qs : ''}`);
+  },
+  getAuditLogs: (params = {}) => {
+    const query = new URLSearchParams();
+    if (params.keyword) query.append('keyword', params.keyword);
+    if (params.action) query.append('action', params.action);
+    if (params.page != null) query.append('page', params.page);
+    if (params.size != null) query.append('size', params.size);
+    const qs = query.toString();
+    return request(`/admin/audit-logs${qs ? '?' + qs : ''}`);
+  },
 };
+
+export async function logout() {
+  const res = await request('/auth/logout', {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+  return res;
+}
 
 export const detectFileType = (file) => {
   const mimeType = file.type;

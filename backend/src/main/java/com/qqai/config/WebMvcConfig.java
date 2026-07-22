@@ -1,5 +1,7 @@
 package com.qqai.config;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.ResourceHandlerRegistry;
@@ -12,6 +14,8 @@ import java.io.File;
  */
 @Configuration
 public class WebMvcConfig implements WebMvcConfigurer {
+
+    private static final Logger log = LoggerFactory.getLogger(WebMvcConfig.class);
 
     @Value("${file.storage.local-path:./uploads/images}")
     private String localImagePath;
@@ -32,7 +36,7 @@ public class WebMvcConfig implements WebMvcConfigurer {
                 .addResourceLocations("file:" + absolutePath + "/")
                 .setCachePeriod(3600); // 缓存1小时
         
-        System.out.println("静态资源映射配置: /images/** -> file:" + absolutePath + "/");
+        log.info("静态资源映射配置: /images/** -> file:{}/", absolutePath);
         
         // 配置头像上传目录映射（groups 与 users 子目录自动包含在该映射下）
         File avatarDir = new File("uploads/avatars");
@@ -47,7 +51,7 @@ public class WebMvcConfig implements WebMvcConfigurer {
                 .addResourceLocations("file:" + avatarPath + "/")
                 .setCachePeriod(3600);
 
-        System.out.println("静态资源映射配置: /uploads/avatars/** -> file:" + avatarPath + "/");
+        log.info("静态资源映射配置: /uploads/avatars/** -> file:{}/", avatarPath);
 
         // 配置整个 uploads 目录映射（媒体文件管理预览需要）
         File uploadsDir = new File("uploads");
@@ -59,6 +63,6 @@ public class WebMvcConfig implements WebMvcConfigurer {
                 .addResourceLocations("file:" + uploadsPath + "/")
                 .setCachePeriod(3600);
 
-        System.out.println("静态资源映射配置: /uploads/** -> file:" + uploadsPath + "/");
+        log.info("静态资源映射配置: /uploads/** -> file:{}/", uploadsPath);
     }
 }

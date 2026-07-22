@@ -1,29 +1,40 @@
 package com.qqai.controller;
 
+import com.qqai.common.AvatarResolver;
+import com.qqai.common.RateLimiterService;
+import com.qqai.config.AppRegistrationProperties;
+import com.qqai.dto.auth.AuthResponse;
+import com.qqai.dto.auth.ChangePasswordRequest;
+import com.qqai.dto.auth.LoginRequest;
+import com.qqai.dto.auth.RegisterRequest;
+import com.qqai.dto.auth.UpdateProfileRequest;
+import com.qqai.dto.common.ApiResponse;
 import com.qqai.entity.User;
-import com.qqai.repository.UserRepository;
+import com.qqai.service.UserService;
 import com.qqai.security.JwtUtil;
+import com.qqai.security.TokenBlacklistService;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 
 @RestController
 @RequestMapping("/api/auth")
-@CrossOrigin(origins = "*")
+@Validated
 public class AuthController {
 
     @Autowired
-    private UserRepository userRepository;
+    private UserService userService;
 
     @Autowired
     private PasswordEncoder passwordEncoder;
@@ -31,84 +42,95 @@ public class AuthController {
     @Autowired
     private JwtUtil jwtUtil;
 
-    /**
-     * 校验头像文件是否真实存在，不存在则返回 null，避免前端请求 404
-     */
-    private String resolveAvatarUrl(String avatar) {
-        if (avatar == null || avatar.isBlank()) {
-            return null;
-        }
-        if (avatar.startsWith("http")) {
-            return avatar;
-        }
-        String relative = avatar.startsWith("/") ? avatar.substring(1) : avatar;
-        Path filePath = Paths.get(relative).toAbsolutePath().normalize();
-        Path basePath = Paths.get("uploads/avatars").toAbsolutePath().normalize();
-        if (!filePath.startsWith(basePath)) {
-            return null;
-        }
-        return Files.exists(filePath) ? avatar : null;
-    }
+    @Autowired
+    private TokenBlacklistService tokenBlacklistService;
+
+    @Autowired
+    private AvatarResolver avatarResolver;
+
+    @Autowired
+    private AppRegistrationProperties registrationProperties;
+
+    @Autowired
+    private RateLimiterService rateLimiterService;
 
     @PostMapping("/login")
-    public ResponseEntity<?> login(@RequestBody Map<String, String> loginRequest) {
-        String username = loginRequest.get("username");
-        String password = loginRequest.get("password");
+    public ResponseEntity<ApiResponse<AuthResponse>> login(@RequestBody @Valid LoginRequest req) {
+        String username = req.username();
+        String password = req.password();
 
-        if (username == null || password == null) {
-            return ResponseEntity.badRequest()
-                    .body(Map.of("error", "用户名和密码不能为空"));
-        }
-
-        Optional<User> userOpt = userRepository.findByUsername(username);
+        Optional<User> userOpt = userService.findByUsername(username);
         if (userOpt.isEmpty()) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(Map.of("error", "用户名或密码错误"));
+                    .body(ApiResponse.error(401, "用户名或密码错误"));
         }
 
         User user = userOpt.get();
 
         if (!user.isActive()) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(Map.of("error", "账号已被禁用"));
+                    .body(ApiResponse.error(401, "账号已被禁用"));
         }
 
         if (!passwordEncoder.matches(password, user.getPassword())) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(Map.of("error", "用户名或密码错误"));
+                    .body(ApiResponse.error(401, "用户名或密码错误"));
         }
 
-        // 更新最后登录时间
         user.setLastLoginTime(LocalDateTime.now());
-        userRepository.save(user);
+        userService.save(user);
 
-        // 生成 JWT token
-        String token = jwtUtil.generateToken(user.getUsername(), user.getRole());
+        Integer tv = user.getTokenVersion() != null ? user.getTokenVersion() : 0;
+        String token = jwtUtil.generateToken(user.getId(), user.getUsername(), user.getRole(), tv);
 
-        Map<String, Object> response = new HashMap<>();
-        response.put("token", token);
-        response.put("username", user.getUsername());
-        response.put("nickname", user.getNickname());
-        response.put("role", user.getRole());
-        response.put("avatar", resolveAvatarUrl(user.getAvatar()));
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
-        return ResponseEntity.ok(response);
+        AuthResponse response = new AuthResponse(
+                token,
+                user.getUsername(),
+                user.getNickname(),
+                user.getRole(),
+                avatarResolver.resolveAvatarUrl(user.getAvatar()),
+                user.getEmail(),
+                user.getCreatedAt() != null ? user.getCreatedAt().format(formatter) : null,
+                user.getLastLoginTime() != null ? user.getLastLoginTime().format(formatter) : null
+        );
+
+        return ResponseEntity.ok(ApiResponse.success(response));
     }
 
     @PostMapping("/register")
-    public ResponseEntity<?> register(@RequestBody Map<String, String> registerRequest) {
-        String username = registerRequest.get("username");
-        String password = registerRequest.get("password");
-        String nickname = registerRequest.get("nickname");
-
-        if (username == null || password == null) {
-            return ResponseEntity.badRequest()
-                    .body(Map.of("error", "用户名和密码不能为空"));
+    public ResponseEntity<ApiResponse<Void>> register(@RequestBody @Valid RegisterRequest req, HttpServletRequest request) {
+        if (!registrationProperties.isEnabled()) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(ApiResponse.error(403, "注册暂未开放"));
         }
 
-        if (userRepository.findByUsername(username).isPresent()) {
+        String pwd = req.password();
+        if (pwd == null || !pwd.matches("^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d)[A-Za-z\\d@$!%*?&]{8,64}$")) {
             return ResponseEntity.badRequest()
-                    .body(Map.of("error", "用户名已存在"));
+                    .body(ApiResponse.error(400, "密码强度不足，至少 8 位且包含大小写字母与数字"));
+        }
+
+        String clientIp = request.getRemoteAddr();
+        String xff = request.getHeader("X-Forwarded-For");
+        if (xff != null && !xff.isBlank()) clientIp = xff.split(",")[0].trim();
+
+        String rateKey = "register:" + clientIp;
+        int maxReq = registrationProperties.getRateLimitPerIp();
+        int winMin = registrationProperties.getRateLimitWindowMinutes();
+        if (!rateLimiterService.isAllowed(rateKey, maxReq, winMin)) {
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                    .body(ApiResponse.error(429, "注册请求过于频繁，请稍后再试"));
+        }
+
+        String username = req.username();
+        String password = req.password();
+        String nickname = req.nickname();
+
+        if (userService.findByUsername(username).isPresent()) {
+            return ResponseEntity.badRequest()
+                    .body(ApiResponse.error(400, "用户名已存在"));
         }
 
         User user = new User();
@@ -118,30 +140,30 @@ public class AuthController {
         user.setRole("USER");
         user.setActive(true);
 
-        userRepository.save(user);
+        userService.save(user);
 
-        return ResponseEntity.ok(Map.of("message", "注册成功"));
+        return ResponseEntity.ok(ApiResponse.success());
     }
 
     @GetMapping("/me")
-    public ResponseEntity<?> getCurrentUser(@RequestHeader("Authorization") String authHeader) {
+    public ResponseEntity<ApiResponse<Map<String, Object>>> getCurrentUser(@RequestHeader("Authorization") String authHeader) {
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(Map.of("error", "未提供有效的认证令牌"));
+                    .body(ApiResponse.error(401, "未提供有效的认证令牌"));
         }
 
         String token = authHeader.substring(7);
         if (!jwtUtil.validateToken(token)) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(Map.of("error", "认证令牌无效或已过期"));
+                    .body(ApiResponse.error(401, "认证令牌无效或已过期"));
         }
 
         String username = jwtUtil.getUsernameFromToken(token);
-        Optional<User> userOpt = userRepository.findByUsername(username);
+        Optional<User> userOpt = userService.findByUsername(username);
 
         if (userOpt.isEmpty()) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(Map.of("error", "用户不存在"));
+                    .body(ApiResponse.error(401, "用户不存在"));
         }
 
         User user = userOpt.get();
@@ -149,52 +171,118 @@ public class AuthController {
         response.put("username", user.getUsername());
         response.put("nickname", user.getNickname());
         response.put("role", user.getRole());
-        response.put("avatar", resolveAvatarUrl(user.getAvatar()));
+        response.put("avatar", avatarResolver.resolveAvatarUrl(user.getAvatar()));
+        response.put("email", user.getEmail());
 
-        return ResponseEntity.ok(response);
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+        response.put("createdAt", user.getCreatedAt() != null ? user.getCreatedAt().format(formatter) : null);
+        response.put("lastLoginTime", user.getLastLoginTime() != null ? user.getLastLoginTime().format(formatter) : null);
+
+        return ResponseEntity.ok(ApiResponse.success(response));
     }
 
-    @PostMapping("/change-password")
-    public ResponseEntity<?> changePassword(
+    @PutMapping("/profile")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> updateProfile(
             @RequestHeader("Authorization") String authHeader,
-            @RequestBody Map<String, String> request) {
+            @RequestBody @Valid UpdateProfileRequest req) {
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(Map.of("error", "未提供有效的认证令牌"));
+                    .body(ApiResponse.error(401, "未提供有效的认证令牌"));
         }
 
         String token = authHeader.substring(7);
         if (!jwtUtil.validateToken(token)) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(Map.of("error", "认证令牌无效或已过期"));
-        }
-
-        String oldPassword = request.get("oldPassword");
-        String newPassword = request.get("newPassword");
-
-        if (oldPassword == null || newPassword == null) {
-            return ResponseEntity.badRequest()
-                    .body(Map.of("error", "旧密码和新密码不能为空"));
+                    .body(ApiResponse.error(401, "认证令牌无效或已过期"));
         }
 
         String username = jwtUtil.getUsernameFromToken(token);
-        Optional<User> userOpt = userRepository.findByUsername(username);
+        Optional<User> userOpt = userService.findByUsername(username);
 
         if (userOpt.isEmpty()) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(Map.of("error", "用户不存在"));
+                    .body(ApiResponse.error(401, "用户不存在"));
+        }
+
+        User user = userOpt.get();
+        if (req.nickname() != null && !req.nickname().isBlank()) {
+            user.setNickname(req.nickname());
+        }
+        if (req.email() != null) {
+            user.setEmail(req.email().isBlank() ? null : req.email());
+        }
+        userService.save(user);
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("username", user.getUsername());
+        response.put("nickname", user.getNickname());
+        response.put("role", user.getRole());
+        response.put("avatar", avatarResolver.resolveAvatarUrl(user.getAvatar()));
+        response.put("email", user.getEmail());
+
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+        response.put("createdAt", user.getCreatedAt() != null ? user.getCreatedAt().format(formatter) : null);
+        response.put("lastLoginTime", user.getLastLoginTime() != null ? user.getLastLoginTime().format(formatter) : null);
+
+        return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
+    @PostMapping("/change-password")
+    public ResponseEntity<ApiResponse<Void>> changePassword(
+            @RequestHeader("Authorization") String authHeader,
+            @RequestBody @Valid ChangePasswordRequest req) {
+        if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(ApiResponse.error(401, "未提供有效的认证令牌"));
+        }
+
+        String token = authHeader.substring(7);
+        if (!jwtUtil.validateToken(token)) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(ApiResponse.error(401, "认证令牌无效或已过期"));
+        }
+
+        String oldPassword = req.oldPassword();
+        String newPassword = req.newPassword();
+
+        String username = jwtUtil.getUsernameFromToken(token);
+        Optional<User> userOpt = userService.findByUsername(username);
+
+        if (userOpt.isEmpty()) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(ApiResponse.error(401, "用户不存在"));
         }
 
         User user = userOpt.get();
 
         if (!passwordEncoder.matches(oldPassword, user.getPassword())) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(Map.of("error", "旧密码错误"));
+                    .body(ApiResponse.error(401, "旧密码错误"));
         }
 
         user.setPassword(passwordEncoder.encode(newPassword));
-        userRepository.save(user);
+        Integer currentTv = user.getTokenVersion() != null ? user.getTokenVersion() : 0;
+        user.setTokenVersion(currentTv + 1);
+        userService.save(user);
 
-        return ResponseEntity.ok(Map.of("message", "密码修改成功"));
+        return ResponseEntity.ok(ApiResponse.success());
+    }
+
+    @PostMapping("/logout")
+    public ResponseEntity<ApiResponse<Void>> logout(@RequestHeader("Authorization") String authHeader) {
+        if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+            return ResponseEntity.ok(ApiResponse.success());
+        }
+
+        String token = authHeader.substring(7);
+        try {
+            if (jwtUtil.validateToken(token)) {
+                String jti = jwtUtil.getJtiFromToken(token);
+                tokenBlacklistService.invalidateJti(jti);
+            }
+        } catch (Exception ignored) {
+        }
+
+        return ResponseEntity.ok(ApiResponse.success());
     }
 }

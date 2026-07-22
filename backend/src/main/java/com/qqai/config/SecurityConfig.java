@@ -3,6 +3,7 @@ package com.qqai.config;
 import com.qqai.security.JwtAuthenticationFilter;
 import com.qqai.websocket.FrontendMessageWebSocketHandler;
 import com.qqai.websocket.NapCatWebSocketHandler;
+import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -11,6 +12,7 @@ import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
@@ -23,6 +25,7 @@ import org.springframework.web.socket.config.annotation.WebSocketHandlerRegistry
 
 @Configuration
 @EnableWebSecurity
+@EnableMethodSecurity
 @EnableWebSocket
 public class SecurityConfig implements WebSocketConfigurer {
 
@@ -45,21 +48,29 @@ public class SecurityConfig implements WebSocketConfigurer {
             .sessionManagement(session -> session
                 .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
             )
+            .exceptionHandling(exception -> exception
+                .authenticationEntryPoint((request, response, authException) -> {
+                    response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+                    response.setContentType("application/json;charset=UTF-8");
+                    response.getWriter().write("{\"error\":\"未登录或登录已过期\",\"code\":401}");
+                })
+            )
             .authorizeHttpRequests(auth -> auth
-                .requestMatchers("/api/auth/**").permitAll()
+                .requestMatchers("/api/auth/login").permitAll()
+                .requestMatchers("/api/auth/register").permitAll()
                 .requestMatchers("/api/system/health").permitAll()
+                .requestMatchers("/").permitAll()
+                .requestMatchers("/webhook").permitAll()
+                .requestMatchers("/api/avatar/**").permitAll()
+                .requestMatchers("/uploads/**").permitAll()
+                .requestMatchers("/images/**").permitAll()
+                .requestMatchers("/api/admin/**").hasRole("ADMIN")
+                .requestMatchers("/api/system/start-astrbot", "/api/system/stop-astrbot", "/api/system/restart-astrbot").hasRole("ADMIN")
+                .requestMatchers("/api/system/start-gptsovits", "/api/system/stop-gptsovits", "/api/system/restart-gptsovits").hasRole("ADMIN")
+                .requestMatchers("/api/system/tts").hasRole("ADMIN")
                 .requestMatchers("/api/system/napcat/qrcode-image").permitAll()
                 .requestMatchers("/api/system/napcat/login-status").permitAll()
                 .requestMatchers("/api/system/component-status").permitAll()
-                .requestMatchers("/api/avatar/**").permitAll()
-                .requestMatchers(HttpMethod.GET, "/api/persona/**").permitAll()
-                .requestMatchers("/api/persona/**").authenticated()
-                .requestMatchers("/api/dashboard/**").authenticated()
-                .requestMatchers("/api/admin/**").hasRole("ADMIN")
-                .requestMatchers("/").permitAll()
-                .requestMatchers("/webhook").permitAll()
-                .requestMatchers("/images/**").permitAll()
-                .requestMatchers("/uploads/**").permitAll()
                 .anyRequest().authenticated()
             )
             .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);

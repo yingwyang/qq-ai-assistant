@@ -32,14 +32,46 @@ export function filterToolJson(text) {
  */
 export function processAstrBotResponse(response) {
   if (!response) return '抱歉，未收到回复。';
-  
-  // 获取原始文本
-  const rawText = response.data || response.message || response;
-  
+
+  // 如果响应本身就是字符串，直接过滤
+  if (typeof response === 'string') {
+    return filterToolJson(response);
+  }
+
+  // 从对象中提取回复文本，支持多种后端返回格式
+  let rawText = '';
+
+  if (typeof response.data === 'string') {
+    rawText = response.data;
+  } else if (response.data && typeof response.data === 'object') {
+    // data 是对象时，尝试提取常见文本字段
+    rawText = response.data.text || response.data.message || response.data.content || JSON.stringify(response.data);
+  }
+
+  // 支持 analyzeGroup 接口返回的 analysis 字段
+  if (!rawText && typeof response.analysis === 'string') {
+    rawText = response.analysis;
+  }
+
+  // 如果 data 没有可用文本，尝试 message 字段
+  if (!rawText && typeof response.message === 'string') {
+    rawText = response.message;
+  }
+
+  // 如果 status 为 error，使用 message 作为错误提示
+  if (!rawText && response.status === 'error' && typeof response.message === 'string') {
+    rawText = response.message;
+  }
+
+  // 兜底：尝试 JSON 序列化
+  if (!rawText && typeof response === 'object') {
+    rawText = JSON.stringify(response);
+  }
+
   if (!rawText || typeof rawText !== 'string') {
     return '抱歉，响应格式异常。';
   }
-  
+
   // 过滤 JSON 内容
   return filterToolJson(rawText);
 }

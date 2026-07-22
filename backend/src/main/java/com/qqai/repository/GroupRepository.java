@@ -44,4 +44,9 @@ public interface GroupRepository extends JpaRepository<Group, Long> {
      * 检查指定登录者的群号是否存在
      */
     boolean existsByGroupIdAndOwnerQq(String groupId, String ownerQq);
+
+    /**
+     * 单条 SQL 判断该群是否属于当前用户绑定的任一 QQ，且 active=true
+     */
+    long countByGroupIdAndOwnerQqInAndActiveTrue(String groupId, List<String> ownerQqList);
 }

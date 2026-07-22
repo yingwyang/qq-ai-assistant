@@ -34,6 +34,12 @@ public class User {
     
     @Column(length = 50)
     private String role = "USER";  // 用户角色：ADMIN, USER
+
+    @Column(length = 255)
+    private String email;  // 邮箱
+
+    @Column(length = 11)
+    private Integer tokenVersion = 0;  // Token 版本号，用于登出/改密码后批量失效
     
     private LocalDateTime lastLoginTime;  // 最后登录时间
     
@@ -79,4 +85,10 @@ public class User {
     
     public String getRole() { return role; }
     public void setRole(String role) { this.role = role; }
+
+    public String getEmail() { return email; }
+    public void setEmail(String email) { this.email = email; }
+
+    public Integer getTokenVersion() { return tokenVersion; }
+    public void setTokenVersion(Integer tokenVersion) { this.tokenVersion = tokenVersion; }
 }

@@ -9,9 +9,10 @@ import java.time.LocalDateTime;
  */
 @Entity
 @Table(name = "astrbot_conversations", indexes = {
-    @Index(name = "idx_conv_group_user", columnList = "groupId, userQq"),
+    @Index(name = "idx_conv_group_user", columnList = "groupId, userId"),
     @Index(name = "idx_conv_time", columnList = "timeUpdated"),
-    @Index(name = "idx_conv_archived", columnList = "archived")
+    @Index(name = "idx_conv_archived", columnList = "archived"),
+    @Index(name = "idx_conv_user", columnList = "userId")
 })
 public class AstrBotConversation {
 
@@ -21,6 +22,9 @@ public class AstrBotConversation {
 
     @Column(name = "conversation_id", length = 64, unique = true, nullable = false)
     private String conversationId;
+
+    @Column(name = "user_id")
+    private Long userId;
 
     @Column(name = "group_id", length = 50)
     private String groupId;
@@ -91,6 +95,14 @@ public class AstrBotConversation {
 
     public void setConversationId(String conversationId) {
         this.conversationId = conversationId;
+    }
+
+    public Long getUserId() {
+        return userId;
+    }
+
+    public void setUserId(Long userId) {
+        this.userId = userId;
     }
 
     public String getGroupId() {

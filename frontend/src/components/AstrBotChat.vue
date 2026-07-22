@@ -126,6 +126,45 @@
               :content="message.text"
               :section-mode="!message.isSelf && !message.isSystem"
             />
+            <!-- AI 回复操作按钮 -->
+            <div v-if="!message.isSelf && !message.isSystem" class="message-actions">
+              <button
+                class="msg-action-btn copy-btn"
+                title="复制内容"
+                @click="copyMessageText(message.text)"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                </svg>
+                <span>复制</span>
+              </button>
+              <button
+                class="msg-action-btn voice-btn"
+                :class="{ generating: message.voiceGenerating, playing: message.audioUrl }"
+                :title="message.audioUrl ? '播放/隐藏语音' : '生成语音'"
+                @click="handleVoiceAction(message)"
+                :disabled="message.voiceGenerating"
+              >
+                <svg v-if="message.voiceGenerating" class="spin-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
+                  <path d="M3 3v5h5"></path>
+                  <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"></path>
+                  <path d="M16 21h5v-5"></path>
+                </svg>
+                <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+                  <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                  <line x1="12" y1="19" x2="12" y2="23"></line>
+                  <line x1="8" y1="23" x2="16" y2="23"></line>
+                </svg>
+                <span>{{ message.voiceGenerating ? '生成中...' : (message.audioUrl ? '播放语音' : '语音生成') }}</span>
+              </button>
+            </div>
+            <!-- 语音播放器 -->
+            <div v-if="message.audioUrl && message.showAudioPlayer" class="voice-player">
+              <audio controls :src="message.audioUrl" @ended="message.showAudioPlayer = false" autoplay></audio>
+            </div>
           </div>
         </div>
       </div>
@@ -160,7 +199,7 @@
 import { ref, onMounted, nextTick, watch } from 'vue';
 import Icon from './Icon.vue';
 import RichTextRenderer from './RichTextRenderer.vue';
-import { astrBotApi, userApi } from '../services/api';
+import { astrBotApi, userApi, systemApi } from '../services/api';
 import { filterToolJson, processAstrBotResponse } from '../utils/messageFilter';
 import { showToast } from './Toast.vue';
 
@@ -217,10 +256,10 @@ export default {
       // 优先从后端获取最新设置
       try {
         const response = await userApi.getSettings(props.userId);
-        if (response && response.status === 'ok' && response.data) {
-          botName.value = response.data.botName || botName.value;
-          botAvatar.value = response.data.botAvatar || botAvatar.value;
-          userAvatar.value = response.data.userAvatar || userAvatar.value;
+        if (response) {
+          botName.value = response.botName || botName.value;
+          botAvatar.value = response.botAvatar || botAvatar.value;
+          userAvatar.value = response.userAvatar || userAvatar.value;
           
           // 同步到 localStorage
           localStorage.setItem('astrbot_bot_name', botName.value);
@@ -280,7 +319,7 @@ export default {
         try {
           const response = await userApi.uploadAvatar(formData);
           console.log('上传响应:', response);
-          if (response && response.status === 'ok') {
+          if (response && response.url) {
             botAvatar.value = response.url;
             console.log('头像URL:', botAvatar.value);
           } else {
@@ -307,9 +346,9 @@ export default {
     // 加载对话列表
     const loadConversations = async () => {
       try {
-        const response = await astrBotApi.getConversations({});
-        if (response && response.status === 'ok' && Array.isArray(response.data)) {
-          conversations.value = response.data;
+        const data = await astrBotApi.getConversations({});
+        if (Array.isArray(data)) {
+          conversations.value = data;
         }
       } catch (error) {
         console.error('加载对话列表失败:', error);
@@ -324,14 +363,14 @@ export default {
         currentConversationId.value = conversationId;
         showConversationList.value = false;
 
-        const convResponse = await astrBotApi.getConversation(conversationId);
-        if (convResponse && convResponse.status === 'ok') {
-          currentConversationTitle.value = convResponse.data.title || '新对话';
+        const convData = await astrBotApi.getConversation(conversationId);
+        if (convData) {
+          currentConversationTitle.value = convData.title || '新对话';
         }
 
-        const msgResponse = await astrBotApi.getConversationMessages(conversationId);
-        if (msgResponse && msgResponse.status === 'ok') {
-          messages.value = (msgResponse.data || []).map(msg => ({
+        const msgData = await astrBotApi.getConversationMessages(conversationId);
+        if (msgData) {
+          messages.value = (Array.isArray(msgData) ? msgData : []).map(msg => ({
             text: msg.content,
             sender: msg.role === 'USER' ? (props.userNickname || '我') : 'AstrBot',
             isSelf: msg.role === 'USER',
@@ -356,9 +395,8 @@ export default {
         if (props.userId) request.userId = props.userId;
         if (props.userNickname) request.userNickname = props.userNickname;
 
-        const response = await astrBotApi.createConversation(request);
-        if (response && response.status === 'ok') {
-          const newConv = response.data;
+        const newConv = await astrBotApi.createConversation(request);
+        if (newConv) {
           conversations.value.unshift(newConv);
           currentConversationId.value = newConv.conversationId;
           currentConversationTitle.value = newConv.title || '新对话';
@@ -398,7 +436,7 @@ export default {
         const response = await astrBotApi.deleteConversation(conversationId);
         console.log('API 响应:', response);
         
-        if (response && response.status === 'ok') {
+        if (response && response.deleted) {
           // 从列表中移除
           const index = conversations.value.findIndex(c => c.conversationId === conversationId);
           console.log('找到对话在列表中的索引:', index);
@@ -499,6 +537,102 @@ export default {
     const scrollToBottom = () => {
       if (messagesContainer.value) {
         messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight;
+      }
+    };
+
+    // 将 HTML 内容转为纯文本（用于复制）
+    const htmlToPlainText = (html) => {
+      if (!html) return '';
+      const temp = document.createElement('div');
+      temp.innerHTML = html;
+      // 保留 details/summary 结构可读性：summary 后换行
+      temp.querySelectorAll('summary').forEach(el => {
+        el.insertAdjacentText('afterend', '\n');
+      });
+      temp.querySelectorAll('br, p, div, li').forEach(el => {
+        el.insertAdjacentText('afterend', '\n');
+      });
+      return temp.innerText || temp.textContent || '';
+    };
+
+    // 复制 AI 回复内容
+    const copyMessageText = async (text) => {
+      const plainText = htmlToPlainText(text);
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(plainText);
+        } else {
+          const textarea = document.createElement('textarea');
+          textarea.value = plainText;
+          textarea.style.position = 'fixed';
+          textarea.style.opacity = '0';
+          document.body.appendChild(textarea);
+          textarea.select();
+          document.execCommand('copy');
+          document.body.removeChild(textarea);
+        }
+        showToast('已复制到剪贴板', 'success');
+      } catch (error) {
+        console.error('复制失败:', error);
+        showToast('复制失败', 'error');
+      }
+    };
+
+    // 将 HTML/Markdown 内容转换为纯文本（用于语音合成）
+    const contentToPlainText = (html) => {
+      if (!html) return '';
+      // 先通过 DOM 解析 HTML 内容
+      const temp = document.createElement('div');
+      temp.innerHTML = html;
+      // 处理 summary/br/p/div/li，保留换行
+      temp.querySelectorAll('summary').forEach(el => {
+        el.insertAdjacentText('afterend', '\n');
+      });
+      temp.querySelectorAll('br, p, div, li').forEach(el => {
+        el.insertAdjacentText('afterend', '\n');
+      });
+      let text = temp.innerText || temp.textContent || '';
+      // 移除 Markdown 图片语法
+      text = text.replace(/!\[[^\]]*\]\([^)]*\)/g, ' ');
+      // 移除 Markdown 链接 [text](url) -> text
+      text = text.replace(/\[([^\]]+)\]\([^)]*\)/g, '$1');
+      // 移除 Markdown 格式符
+      text = text.replace(/[#>*_~`]/g, '');
+      // 合并连续的空白
+      text = text.replace(/\s+/g, ' ').trim();
+      return text;
+    };
+
+    // 处理语音生成/播放
+    const handleVoiceAction = async (message) => {
+      if (message.voiceGenerating) return;
+
+      // 如果已有音频，切换播放器显示
+      if (message.audioUrl) {
+        message.showAudioPlayer = !message.showAudioPlayer;
+        return;
+      }
+
+      message.voiceGenerating = true;
+      try {
+        const plainText = contentToPlainText(message.text);
+        if (!plainText.trim()) {
+          showToast('没有可合成的文本内容', 'warning');
+          return;
+        }
+        const result = await systemApi.generateVoice(plainText);
+        if (result && result.audioUrl) {
+          message.audioUrl = result.audioUrl;
+          message.showAudioPlayer = true;
+          showToast('语音生成成功', 'success');
+        } else {
+          showToast(result?.message || '语音生成失败', 'error');
+        }
+      } catch (error) {
+        console.error('语音生成失败:', error);
+        showToast('语音生成失败: ' + (error.message || '未知错误'), 'error');
+      } finally {
+        message.voiceGenerating = false;
       }
     };
 
@@ -684,7 +818,9 @@ export default {
       saveSettings,
       closeSettings,
       handleBotAvatarError,
-      handleBotAvatarUpload
+      handleBotAvatarUpload,
+      copyMessageText,
+      handleVoiceAction
     };
   }
 };
@@ -1249,6 +1385,69 @@ export default {
   word-break: break-word;
   line-height: 1.5;
   white-space: pre-wrap;
+}
+
+.message-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.msg-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border: none;
+  background: transparent;
+  color: #7f8c8d;
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+
+.msg-action-btn:hover {
+  background-color: rgba(52, 152, 219, 0.1);
+  color: #3498db;
+}
+
+.msg-action-btn svg {
+  flex-shrink: 0;
+}
+
+.msg-action-btn.voice-btn.generating {
+  color: #f39c12;
+  cursor: not-allowed;
+  opacity: 0.9;
+}
+
+.msg-action-btn.voice-btn.playing {
+  color: #27ae60;
+}
+
+.msg-action-btn .spin-icon {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.voice-player {
+  margin-top: 10px;
+  padding: 8px 12px;
+  background: linear-gradient(135deg, #e8f5e9 0%, #f1f8e9 100%);
+  border-radius: 8px;
+  border: 1px solid #c8e6c9;
+}
+
+.voice-player audio {
+  width: 100%;
+  max-width: 400px;
 }
 
 /* 系统消息样式 */

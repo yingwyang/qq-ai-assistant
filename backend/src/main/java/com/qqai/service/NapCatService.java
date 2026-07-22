@@ -1,5 +1,7 @@
 package com.qqai.service;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -8,9 +10,10 @@ import org.apache.hc.client5.http.classic.methods.HttpPost;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpResponse;
 import org.apache.hc.core5.http.io.entity.StringEntity;
-import com.alibaba.fastjson.JSON;
-import com.alibaba.fastjson.JSONArray;
-import com.alibaba.fastjson.JSONObject;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 
@@ -21,6 +24,9 @@ import java.io.IOException;
 
 @Service
 public class NapCatService {
+
+    private static final Logger log = LoggerFactory.getLogger(NapCatService.class);
+
     @Value("${napcat.api-url}")
     private String napcatApiUrl;
 
@@ -30,11 +36,16 @@ public class NapCatService {
     @Value("${napcat.token}")
     private String napcatToken;
 
+    @Value("${napcat.webui-url:http://127.0.0.1:6099}")
+    private String napcatWebuiUrl;
+
     @Autowired
     private CloseableHttpClient httpClient;
 
     @Autowired
     private MediaDownloadService mediaDownloadService;
+
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     private String credential;
 
@@ -91,23 +102,23 @@ public class NapCatService {
                     }
 
                     String responseStr = responseContent.toString();
-                    System.out.println("QR code response from " + endpoint + ": " + responseStr);
+                    log.debug("QR code response from {}: {}", endpoint, responseStr);
                     
                     // 如果返回的是 JSON，尝试解析
                     if (responseStr.startsWith("{")) {
-                        JSONObject responseJson = JSON.parseObject(responseStr);
+                        JsonNode responseJson = objectMapper.readTree(responseStr);
                         // 尝试不同的字段名
-                        if (responseJson.containsKey("qrcodeurl")) {
-                            return responseJson.getString("qrcodeurl");
-                        } else if (responseJson.containsKey("qrCode")) {
-                            return responseJson.getString("qrCode");
-                        } else if (responseJson.containsKey("url")) {
-                            return responseJson.getString("url");
+                        if (responseJson.has("qrcodeurl")) {
+                            return responseJson.get("qrcodeurl").asText();
+                        } else if (responseJson.has("qrCode")) {
+                            return responseJson.get("qrCode").asText();
+                        } else if (responseJson.has("url")) {
+                            return responseJson.get("url").asText();
                         }
                     }
                 }
             } catch (Exception e) {
-                System.out.println("QR endpoint " + endpoint + " failed: " + e.getMessage());
+                log.debug("QR endpoint {} failed: {}", endpoint, e.getMessage());
             }
         }
         
@@ -116,10 +127,10 @@ public class NapCatService {
     }
 
     public boolean checkLoginStatus() throws Exception {
-        System.out.println("Checking NapCat login status...");
+        log.info("Checking NapCat login status...");
         
         // 方法1: 首先检查 NapCat API 是否可访问（优先检查实际登录状态）
-        System.out.println("Method 1: Checking NapCat API accessibility...");
+        log.info("Method 1: Checking NapCat API accessibility...");
         if (isNapCatApiAccessible()) {
             // API 可访问，再检查配置文件
             try {
@@ -139,19 +150,19 @@ public class NapCatService {
                             String fileName = configFile.getName();
                             String qqNumber = fileName.replace("napcat_", "").replace(".json", "");
                             if (qqNumber.matches("\\d+")) {
-                                System.out.println("✅ NapCat is logged in with QQ: " + qqNumber);
+                                log.info("✅ NapCat is logged in with QQ: {}", qqNumber);
                                 return true;
                             }
                         }
                     }
                 }
             } catch (Exception e) {
-                System.out.println("Config check failed: " + e.getMessage());
+                log.debug("Config check failed: {}", e.getMessage());
             }
         }
         
         // 方法2: 检查是否有未过期的二维码（如果有最近生成的二维码，说明正在等待登录）
-        System.out.println("Method 2: Checking QR code status...");
+        log.info("Method 2: Checking QR code status...");
         try {
             String qrCodePath = getNapCatQrCodePath();
             File qrCodeFile = new File(qrCodePath);
@@ -160,16 +171,16 @@ public class NapCatService {
                 long now = System.currentTimeMillis();
                 long fiveMinutes = 5 * 60 * 1000;
                 if (now - lastModified < fiveMinutes) {
-                    System.out.println("Method 2: QR code is recent, NapCat is waiting for login");
+                    log.info("Method 2: QR code is recent, NapCat is waiting for login");
                     return false;
                 }
             }
         } catch (Exception e) {
-            System.out.println("QR code check failed: " + e.getMessage());
+            log.debug("QR code check failed: {}", e.getMessage());
         }
         
         // 方法3: 尝试调用 NapCat API 检查登录状态（备用方案）
-        System.out.println("Method 3: Trying API endpoints...");
+        log.info("Method 3: Trying API endpoints...");
         CloseableHttpClient httpClient = this.httpClient;
         
         // NapCat 使用 URL 参数传递 token: ?token=xxx
@@ -200,39 +211,38 @@ public class NapCatService {
                     }
 
                     String responseStr = responseContent.toString();
-                    System.out.println("Login status response from " + endpoint + ": " + responseStr);
+                    log.debug("Login status response from {}: {}", endpoint, responseStr);
                     
                     // 如果返回的是 JSON，尝试解析
                     if (responseStr.startsWith("{")) {
-                        JSONObject responseJson = JSON.parseObject(responseStr);
-                        
+                        JsonNode responseJson = objectMapper.readTree(responseStr);
+
                         // 检查是否有错误
-                        if (responseJson.containsKey("code") && responseJson.getIntValue("code") == -1) {
-                            System.out.println("Auth failed for endpoint: " + endpoint);
+                        if (responseJson.has("code") && responseJson.get("code").asInt() == -1) {
+                            log.debug("Auth failed for endpoint: {}", endpoint);
                             continue;
                         }
-                        
+
                         // 尝试不同的字段名
-                        if (responseJson.containsKey("isLogin")) {
-                            boolean isLogin = responseJson.getBoolean("isLogin");
-                            System.out.println("✅ Method 2 SUCCESS: isLogin = " + isLogin);
+                        if (responseJson.has("isLogin")) {
+                            boolean isLogin = responseJson.get("isLogin").asBoolean();
+                            log.info("✅ Method 2 SUCCESS: isLogin = {}", isLogin);
                             return isLogin;
-                        } else if (responseJson.containsKey("loggedIn")) {
-                            boolean loggedIn = responseJson.getBoolean("loggedIn");
-                            System.out.println("✅ Method 2 SUCCESS: loggedIn = " + loggedIn);
+                        } else if (responseJson.has("loggedIn")) {
+                            boolean loggedIn = responseJson.get("loggedIn").asBoolean();
+                            log.info("✅ Method 2 SUCCESS: loggedIn = {}", loggedIn);
                             return loggedIn;
-                        } else if (responseJson.containsKey("login")) {
-                            boolean login = responseJson.getBoolean("login");
-                            System.out.println("✅ Method 2 SUCCESS: login = " + login);
+                        } else if (responseJson.has("login")) {
+                            boolean login = responseJson.get("login").asBoolean();
+                            log.info("✅ Method 2 SUCCESS: login = {}", login);
                             return login;
-                        } else if (responseJson.containsKey("data")) {
+                        } else if (responseJson.has("data")) {
                             // 有些 API 返回 data 字段
-                            Object data = responseJson.get("data");
-                            if (data instanceof JSONObject) {
-                                JSONObject dataJson = (JSONObject) data;
-                                if (dataJson.containsKey("isLogin")) {
-                                    boolean isLogin = dataJson.getBoolean("isLogin");
-                                    System.out.println("✅ Method 2 SUCCESS: data.isLogin = " + isLogin);
+                            JsonNode data = responseJson.get("data");
+                            if (data != null && data.isObject()) {
+                                if (data.has("isLogin")) {
+                                    boolean isLogin = data.get("isLogin").asBoolean();
+                                    log.info("✅ Method 2 SUCCESS: data.isLogin = {}", isLogin);
                                     return isLogin;
                                 }
                             }
@@ -240,11 +250,11 @@ public class NapCatService {
                     }
                 }
             } catch (Exception e) {
-                System.out.println("Endpoint " + endpoint + " failed: " + e.getMessage());
+                log.debug("Endpoint {} failed: {}", endpoint, e.getMessage());
             }
         }
         
-        System.out.println("❌ All methods failed, returning false");
+        log.warn("❌ All methods failed, returning false");
         return false;
     }
     
@@ -262,11 +272,11 @@ public class NapCatService {
             
             try (CloseableHttpResponse response = httpClient.execute(httpGet)) {
                 int statusCode = response.getCode();
-                System.out.println("NapCat API check status: " + statusCode);
+                log.debug("NapCat API check status: {}", statusCode);
                 return statusCode == 200;
             }
         } catch (Exception e) {
-            System.out.println("NapCat API accessibility check failed: " + e.getMessage());
+            log.debug("NapCat API accessibility check failed: {}", e.getMessage());
             return false;
         }
     }
@@ -300,7 +310,7 @@ public class NapCatService {
             String qq = fileName.replace("napcat_", "").replace(".json", "");
             return qq.matches("\\d+") ? qq : null;
         } catch (Exception e) {
-            System.err.println("获取最近QQ号失败: " + e.getMessage());
+            log.error("获取最近QQ号失败: {}", e.getMessage());
             return null;
         }
     }
@@ -329,10 +339,10 @@ public class NapCatService {
             ProcessBuilder processBuilder;
             if (qq != null && !qq.isEmpty()) {
                 processBuilder = new ProcessBuilder("cmd.exe", "/c", "start", "/b", launcherPath, qq);
-                System.out.println("Starting NapCat with QQ: " + qq);
+                log.info("Starting NapCat with QQ: {}", qq);
             } else {
                 processBuilder = new ProcessBuilder("cmd.exe", "/c", "start", "/b", launcherPath);
-                System.out.println("Starting NapCat without QQ number (QR code login)");
+                log.info("Starting NapCat without QQ number (QR code login)");
             }
             processBuilder.directory(napcatDir);
             
@@ -342,9 +352,9 @@ public class NapCatService {
             // 等待几秒让 NapCat 启动
             Thread.sleep(5000);
             
-            System.out.println("NapCat started successfully from: " + napcatDir.getAbsolutePath());
+            log.info("NapCat started successfully from: {}", napcatDir.getAbsolutePath());
         } catch (Exception e) {
-            System.err.println("Failed to start NapCat: " + e.getMessage());
+            log.error("Failed to start NapCat: {}", e.getMessage());
             throw e;
         }
     }
@@ -353,15 +363,15 @@ public class NapCatService {
         try {
             if (napcatProcess != null && napcatProcess.isAlive()) {
                 napcatProcess.destroy();
-                System.out.println("NapCat stopped successfully");
+                log.info("NapCat stopped successfully");
             } else {
                 // 如果进程不存在，尝试通过任务管理器结束 QQ 和 NapCat 相关进程
                 Runtime.getRuntime().exec("taskkill /F /IM QQ.exe");
                 Runtime.getRuntime().exec("taskkill /F /IM NapCatWinBootMain.exe");
-                System.out.println("NapCat processes terminated");
+                log.info("NapCat processes terminated");
             }
         } catch (Exception e) {
-            System.err.println("Failed to stop NapCat: " + e.getMessage());
+            log.error("Failed to stop NapCat: {}", e.getMessage());
             throw e;
         }
     }
@@ -379,18 +389,34 @@ public class NapCatService {
     }
 
     /**
+     * 获取 NapCat WebUI 的访问 URL。
+     * token 从后端配置读取，避免硬编码在前端。
+     */
+    public String getWebUiUrl() {
+        String baseUrl = napcatWebuiUrl != null ? napcatWebuiUrl.trim() : "http://127.0.0.1:6099";
+        if (baseUrl.endsWith("/")) {
+            baseUrl = baseUrl.substring(0, baseUrl.length() - 1);
+        }
+        String token = napcatToken != null ? napcatToken.trim() : "";
+        if (!token.isEmpty()) {
+            return baseUrl + "/webui?token=" + token;
+        }
+        return baseUrl + "/webui";
+    }
+
+    /**
      * 获取群成员列表
      */
-    public JSONArray getGroupMemberList(String groupId) {
+    public ArrayNode getGroupMemberList(String groupId) {
         return getGroupMemberList(groupId, false);
     }
 
     /**
      * 获取群成员列表（支持强制刷新缓存）
      */
-    public JSONArray getGroupMemberList(String groupId, boolean noCache) {
+    public ArrayNode getGroupMemberList(String groupId, boolean noCache) {
         if (groupId == null || groupId.isBlank()) {
-            return new JSONArray();
+            return objectMapper.createArrayNode();
         }
         String baseUrl = onebotApiUrl != null && !onebotApiUrl.isBlank() ? onebotApiUrl : napcatApiUrl;
         CloseableHttpClient httpClient = this.httpClient;
@@ -398,14 +424,14 @@ public class NapCatService {
         httpPost.setHeader("Content-Type", "application/json");
         httpPost.setHeader("Authorization", "Bearer " + napcatToken);
 
-        JSONObject body = new JSONObject();
+        ObjectNode body = objectMapper.createObjectNode();
         try {
             body.put("group_id", Long.parseLong(groupId));
         } catch (NumberFormatException e) {
             body.put("group_id", groupId);
         }
         body.put("no_cache", noCache);
-        httpPost.setEntity(new StringEntity(body.toJSONString()));
+        httpPost.setEntity(new StringEntity(body.toString()));
 
         try (CloseableHttpResponse response = httpClient.execute(httpPost)) {
             BufferedReader reader = new BufferedReader(
@@ -417,27 +443,27 @@ public class NapCatService {
                 responseContent.append(line);
             }
             String responseStr = responseContent.toString();
-            System.out.println("获取群" + groupId + "成员列表响应: " + (responseStr.length() > 500 ? responseStr.substring(0, 500) + "..." : responseStr));
+            log.debug("获取群{}成员列表响应: {}", groupId, responseStr.length() > 500 ? responseStr.substring(0, 500) + "..." : responseStr);
 
-            JSONObject json = JSON.parseObject(responseStr);
-            if ("ok".equals(json.getString("status")) && json.containsKey("data")) {
-                JSONArray data = json.getJSONArray("data");
-                System.out.println("获取群" + groupId + "成员列表成功，共 " + data.size() + " 人");
+            JsonNode json = objectMapper.readTree(responseStr);
+            if ("ok".equals(json.get("status").asText()) && json.has("data")) {
+                ArrayNode data = (ArrayNode) json.get("data");
+                log.info("获取群{}成员列表成功，共 {} 人", groupId, data.size());
                 return data;
             } else {
-                System.err.println("获取群成员列表返回非预期状态: status=" + json.getString("status") + ", retcode=" + json.getInteger("retcode"));
+                log.warn("获取群成员列表返回非预期状态: status={}, retcode={}", json.has("status") ? json.get("status").asText() : "null", json.has("retcode") ? json.get("retcode").asInt() : "null");
             }
         } catch (Exception e) {
-            System.err.println("获取群成员列表失败 (groupId=" + groupId + "): " + e.getMessage());
+            log.error("获取群成员列表失败 (groupId={}): {}", groupId, e.getMessage());
             e.printStackTrace();
         }
-        return new JSONArray();
+        return objectMapper.createArrayNode();
     }
 
     /**
      * 获取单个群成员信息（用于列表查询失败或缺少特定成员时的兜底）
      */
-    public JSONObject getGroupMemberInfo(String groupId, String userId) {
+    public ObjectNode getGroupMemberInfo(String groupId, String userId) {
         if (groupId == null || groupId.isBlank() || userId == null || userId.isBlank()) {
             return null;
         }
@@ -447,7 +473,7 @@ public class NapCatService {
         httpPost.setHeader("Content-Type", "application/json");
         httpPost.setHeader("Authorization", "Bearer " + napcatToken);
 
-        JSONObject body = new JSONObject();
+        ObjectNode body = objectMapper.createObjectNode();
         try {
             body.put("group_id", Long.parseLong(groupId));
         } catch (NumberFormatException e) {
@@ -459,7 +485,7 @@ public class NapCatService {
             body.put("user_id", userId);
         }
         body.put("no_cache", false);
-        httpPost.setEntity(new StringEntity(body.toJSONString()));
+        httpPost.setEntity(new StringEntity(body.toString()));
 
         try (CloseableHttpResponse response = httpClient.execute(httpPost)) {
             BufferedReader reader = new BufferedReader(
@@ -471,14 +497,14 @@ public class NapCatService {
                 responseContent.append(line);
             }
             String responseStr = responseContent.toString();
-            System.out.println("获取群" + groupId + "成员" + userId + "信息响应: " + (responseStr.length() > 300 ? responseStr.substring(0, 300) + "..." : responseStr));
+            log.debug("获取群{}成员{}信息响应: {}", groupId, userId, responseStr.length() > 300 ? responseStr.substring(0, 300) + "..." : responseStr);
 
-            JSONObject json = JSON.parseObject(responseStr);
-            if ("ok".equals(json.getString("status")) && json.containsKey("data")) {
-                return json.getJSONObject("data");
+            JsonNode json = objectMapper.readTree(responseStr);
+            if ("ok".equals(json.get("status").asText()) && json.has("data")) {
+                return (ObjectNode) json.get("data");
             }
         } catch (Exception e) {
-            System.err.println("获取群成员信息失败 (groupId=" + groupId + ", userId=" + userId + "): " + e.getMessage());
+            log.error("获取群成员信息失败 (groupId={}, userId={}): {}", groupId, userId, e.getMessage());
         }
         return null;
     }
@@ -486,16 +512,16 @@ public class NapCatService {
     /**
      * 获取群列表
      */
-    public JSONArray getGroupList() throws Exception {
+    public ArrayNode getGroupList() throws Exception {
         String baseUrl = onebotApiUrl != null && !onebotApiUrl.isBlank() ? onebotApiUrl : napcatApiUrl;
         CloseableHttpClient httpClient = this.httpClient;
         HttpPost httpPost = new HttpPost(baseUrl + "/get_group_list");
         httpPost.setHeader("Content-Type", "application/json");
         httpPost.setHeader("Authorization", "Bearer " + napcatToken);
 
-        JSONObject body = new JSONObject();
+        ObjectNode body = objectMapper.createObjectNode();
         body.put("no_cache", false);
-        httpPost.setEntity(new StringEntity(body.toJSONString()));
+        httpPost.setEntity(new StringEntity(body.toString()));
 
         try (CloseableHttpResponse response = httpClient.execute(httpPost)) {
             BufferedReader reader = new BufferedReader(
@@ -507,22 +533,22 @@ public class NapCatService {
                 responseContent.append(line);
             }
             String responseStr = responseContent.toString();
-            System.out.println("获取群列表响应: " + responseStr);
+            log.debug("获取群列表响应: {}", responseStr);
 
-            JSONObject json = JSON.parseObject(responseStr);
-            if ("ok".equals(json.getString("status")) && json.containsKey("data")) {
-                return json.getJSONArray("data");
+            JsonNode json = objectMapper.readTree(responseStr);
+            if ("ok".equals(json.get("status").asText()) && json.has("data")) {
+                return (ArrayNode) json.get("data");
             }
-            return new JSONArray();
+            return objectMapper.createArrayNode();
         }
     }
 
     /**
      * 获取合并转发消息详情
      */
-    public JSONArray getForwardMsg(String forwardId) {
+    public ArrayNode getForwardMsg(String forwardId) {
         if (forwardId == null || forwardId.isBlank()) {
-            return new JSONArray();
+            return objectMapper.createArrayNode();
         }
         String baseUrl = onebotApiUrl != null && !onebotApiUrl.isBlank() ? onebotApiUrl : napcatApiUrl;
         CloseableHttpClient httpClient = this.httpClient;
@@ -535,9 +561,9 @@ public class NapCatService {
                 httpPost.setHeader("Content-Type", "application/json");
                 httpPost.setHeader("Authorization", "Bearer " + napcatToken);
 
-                JSONObject body = new JSONObject();
+                ObjectNode body = objectMapper.createObjectNode();
                 body.put(param[0], param[1]);
-                httpPost.setEntity(new StringEntity(body.toJSONString()));
+                httpPost.setEntity(new StringEntity(body.toString()));
 
                 try (CloseableHttpResponse response = httpClient.execute(httpPost)) {
                     BufferedReader reader = new BufferedReader(
@@ -549,14 +575,14 @@ public class NapCatService {
                         responseContent.append(line);
                     }
                     String responseStr = responseContent.toString();
-                    System.out.println("获取合并转发消息详情响应 (" + param[0] + "=" + forwardId + "): " +
-                            (responseStr.length() > 300 ? responseStr.substring(0, 300) + "..." : responseStr));
+                    log.debug("获取合并转发消息详情响应 ({}={}): {}", param[0], forwardId,
+                            responseStr.length() > 500 ? responseStr.substring(0, 500) + "..." : responseStr);
 
-                    JSONObject json = JSON.parseObject(responseStr);
-                    if ("ok".equals(json.getString("status")) && json.containsKey("data")) {
-                        JSONObject data = json.getJSONObject("data");
-                        if (data != null && data.containsKey("messages")) {
-                            JSONArray messages = data.getJSONArray("messages");
+                    JsonNode json = objectMapper.readTree(responseStr);
+                    if ("ok".equals(json.get("status").asText()) && json.has("data")) {
+                        ObjectNode data = (ObjectNode) json.get("data");
+                        if (data != null && data.has("messages")) {
+                            ArrayNode messages = (ArrayNode) data.get("messages");
                             if (messages != null && !messages.isEmpty()) {
                                 return normalizeForwardMessages(messages);
                             }
@@ -564,10 +590,10 @@ public class NapCatService {
                     }
                 }
             } catch (Exception e) {
-                System.err.println("获取合并转发消息详情失败 (" + param[0] + "=" + forwardId + "): " + e.getMessage());
+                log.error("获取合并转发消息详情失败 ({}={}): {}", param[0], forwardId, e.getMessage());
             }
         }
-        return new JSONArray();
+        return objectMapper.createArrayNode();
     }
 
     /**
@@ -575,23 +601,23 @@ public class NapCatService {
      * 当 NapCat 配置 parseMultMsg=true 时，forward 类型的 segment 的 data.content 中
      * 会包含解析后的子消息数组。
      */
-    public JSONArray extractForwardMessagesFromPayload(JSONObject payload) {
+    public ArrayNode extractForwardMessagesFromPayload(ObjectNode payload) {
         if (payload == null) {
             return null;
         }
-        JSONArray messageArray = payload.getJSONArray("message");
+        ArrayNode messageArray = (ArrayNode) payload.get("message");
         if (messageArray == null || messageArray.isEmpty()) {
             return null;
         }
         for (int i = 0; i < messageArray.size(); i++) {
-            JSONObject segment = messageArray.getJSONObject(i);
+            ObjectNode segment = (ObjectNode) messageArray.get(i);
             if (segment == null) {
                 continue;
             }
-            if ("forward".equals(segment.getString("type"))) {
-                JSONObject data = segment.getJSONObject("data");
+            if ("forward".equals(segment.get("type").asText())) {
+                ObjectNode data = (ObjectNode) segment.get("data");
                 if (data != null) {
-                    JSONArray content = data.getJSONArray("content");
+                    ArrayNode content = (ArrayNode) data.get("content");
                     if (content != null && !content.isEmpty()) {
                         return normalizeForwardMessages(content);
                     }
@@ -605,48 +631,50 @@ public class NapCatService {
      * 将 NapCat 返回的合并转发消息数组转换为前端期望的统一格式。
      * 统一字段：id, userQq, userNickname, sendTime(毫秒时间戳), content, messageType。
      */
-    public JSONArray normalizeForwardMessages(JSONArray rawMessages) {
-        JSONArray result = new JSONArray();
+    public ArrayNode normalizeForwardMessages(ArrayNode rawMessages) {
+        ArrayNode result = objectMapper.createArrayNode();
         if (rawMessages == null) {
             return result;
         }
         for (int i = 0; i < rawMessages.size(); i++) {
-            JSONObject raw = rawMessages.getJSONObject(i);
+            ObjectNode raw = (ObjectNode) rawMessages.get(i);
             if (raw == null) continue;
 
-            JSONObject normalized = new JSONObject();
+            ObjectNode normalized = objectMapper.createObjectNode();
             // 消息ID
-            Object msgIdObj = raw.get("message_id");
+            JsonNode msgIdObj = raw.get("message_id");
             if (msgIdObj == null) msgIdObj = raw.get("msgId");
             if (msgIdObj == null) msgIdObj = raw.get("real_id");
-            normalized.put("id", msgIdObj != null ? String.valueOf(msgIdObj) : ("forward-msg-" + i));
+            normalized.put("id", msgIdObj != null ? msgIdObj.asText() : ("forward-msg-" + i));
 
             // 发送者信息
-            JSONObject sender = raw.getJSONObject("sender");
+            ObjectNode sender = (ObjectNode) raw.get("sender");
             if (sender != null) {
-                Object userIdObj = sender.get("user_id");
+                JsonNode userIdObj = sender.get("user_id");
                 if (userIdObj == null) userIdObj = sender.get("userId");
-                normalized.put("userQq", userIdObj != null ? String.valueOf(userIdObj) : "");
-                normalized.put("userNickname", sender.getString("nickname"));
+                normalized.put("userQq", userIdObj != null ? userIdObj.asText() : "");
+                normalized.put("userNickname", sender.has("nickname") ? sender.get("nickname").asText() : "");
             } else {
                 normalized.put("userQq", "");
-                normalized.put("userNickname", raw.getString("nickname"));
+                normalized.put("userNickname", raw.has("nickname") ? raw.get("nickname").asText() : "");
             }
 
             // 时间：NapCat 通常返回秒级时间戳，前端 JS Date 需要毫秒
-            Long timeSeconds = raw.getLong("time");
-            if (timeSeconds == null) timeSeconds = raw.getLong("timestamp");
-            normalized.put("sendTime", timeSeconds != null ? timeSeconds * 1000 : null);
-            normalized.put("timestamp", timeSeconds != null ? timeSeconds * 1000 : null);
+            long timeSeconds = raw.has("time") ? raw.get("time").asLong() : 0;
+            if (timeSeconds == 0 && raw.has("timestamp")) timeSeconds = raw.get("timestamp").asLong();
+            if (timeSeconds != 0) {
+                normalized.put("sendTime", timeSeconds * 1000);
+                normalized.put("timestamp", timeSeconds * 1000);
+            }
 
             // 内容：优先 raw_message，其次从 message 数组构造
-            String content = raw.getString("raw_message");
+            String content = raw.has("raw_message") ? raw.get("raw_message").asText() : null;
             // 嵌套合并转发的子消息可能位于 data.content 中
-            JSONArray childMessageArray = raw.getJSONArray("message");
+            ArrayNode childMessageArray = (ArrayNode) raw.get("message");
             if (childMessageArray == null || childMessageArray.isEmpty()) {
-                JSONObject data = raw.getJSONObject("data");
+                ObjectNode data = (ObjectNode) raw.get("data");
                 if (data != null) {
-                    childMessageArray = data.getJSONArray("content");
+                    childMessageArray = (ArrayNode) data.get("content");
                 }
             }
             if (content == null || content.isEmpty()) {
@@ -658,16 +686,16 @@ public class NapCatService {
 
             // 嵌套合并转发：从 message 数组或 data.content 中递归解析子消息
             if ("FORWARD".equals(messageType) && childMessageArray != null && !childMessageArray.isEmpty()) {
-                JSONArray nestedForwardMessages = null;
-                JSONObject firstChild = childMessageArray.getJSONObject(0);
+                ArrayNode nestedForwardMessages = null;
+                ObjectNode firstChild = (ObjectNode) childMessageArray.get(0);
                 // 子数组元素如果是 segment（有 type 字段），需要先提取 forward segment 的 data.content
-                if (firstChild != null && firstChild.getString("type") != null) {
+                if (firstChild != null && firstChild.has("type")) {
                     for (int j = 0; j < childMessageArray.size(); j++) {
-                        JSONObject seg = childMessageArray.getJSONObject(j);
-                        if (seg != null && "forward".equals(seg.getString("type"))) {
-                            JSONObject segData = seg.getJSONObject("data");
+                        ObjectNode seg = (ObjectNode) childMessageArray.get(j);
+                        if (seg != null && "forward".equals(seg.get("type").asText())) {
+                            ObjectNode segData = (ObjectNode) seg.get("data");
                             if (segData != null) {
-                                JSONArray segContent = segData.getJSONArray("content");
+                                ArrayNode segContent = (ArrayNode) segData.get("content");
                                 if (segContent != null && !segContent.isEmpty()) {
                                     nestedForwardMessages = normalizeForwardMessages(segContent);
                                     break;
@@ -680,7 +708,7 @@ public class NapCatService {
                     nestedForwardMessages = normalizeForwardMessages(childMessageArray);
                 }
                 if (nestedForwardMessages != null && !nestedForwardMessages.isEmpty()) {
-                    normalized.put("forwardMessages", nestedForwardMessages);
+                    normalized.set("forwardMessages", nestedForwardMessages);
                 }
             }
 
@@ -693,15 +721,15 @@ public class NapCatService {
      * 下载合并转发子消息中的远程媒体到本地，并在子消息对象中补充 localUrl 字段。
      * 递归处理嵌套的合并转发消息。
      */
-    public void downloadForwardMediaToLocal(JSONArray forwardMessages, String groupId) {
+    public void downloadForwardMediaToLocal(ArrayNode forwardMessages, String groupId) {
         if (forwardMessages == null || forwardMessages.isEmpty() || groupId == null || groupId.isBlank()) {
             return;
         }
         for (int i = 0; i < forwardMessages.size(); i++) {
-            JSONObject msg = forwardMessages.getJSONObject(i);
+            ObjectNode msg = (ObjectNode) forwardMessages.get(i);
             if (msg == null) continue;
-            String type = msg.getString("messageType");
-            String content = msg.getString("content");
+            String type = msg.has("messageType") ? msg.get("messageType").asText() : "";
+            String content = msg.has("content") ? msg.get("content").asText() : "";
 
             String localUrl = null;
             if (content != null && !content.isBlank()) {
@@ -722,7 +750,7 @@ public class NapCatService {
                             break;
                     }
                 } catch (Exception e) {
-                    System.err.println("下载合并转发子消息媒体失败 (" + type + "): " + e.getMessage());
+                    log.error("下载合并转发子消息媒体失败 ({}): {}", type, e.getMessage());
                 }
             }
             if (localUrl != null && !localUrl.isBlank()) {
@@ -731,7 +759,7 @@ public class NapCatService {
 
             // 递归处理嵌套合并转发
             if ("FORWARD".equals(type)) {
-                JSONArray nested = msg.getJSONArray("forwardMessages");
+                ArrayNode nested = (ArrayNode) msg.get("forwardMessages");
                 if (nested != null && !nested.isEmpty()) {
                     downloadForwardMediaToLocal(nested, groupId);
                 }
@@ -742,42 +770,42 @@ public class NapCatService {
     /**
      * 从 OneBot 11 message 数组拼接成 raw_message 风格字符串（简单兜底）。
      */
-    private String buildRawMessageFromArray(JSONArray messageArray) {
+    private String buildRawMessageFromArray(ArrayNode messageArray) {
         if (messageArray == null || messageArray.isEmpty()) {
             return "";
         }
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < messageArray.size(); i++) {
-            JSONObject segment = messageArray.getJSONObject(i);
+            ObjectNode segment = (ObjectNode) messageArray.get(i);
             if (segment == null) continue;
-            String type = segment.getString("type");
-            JSONObject data = segment.getJSONObject("data");
+            String type = segment.has("type") ? segment.get("type").asText() : "";
+            ObjectNode data = (ObjectNode) segment.get("data");
             if (data == null) continue;
             switch (type) {
                 case "text":
-                    sb.append(data.getString("text"));
+                    sb.append(data.has("text") ? data.get("text").asText() : "");
                     break;
                 case "at":
-                    sb.append("[CQ:at,qq=").append(data.getString("qq")).append("]");
+                    sb.append("[CQ:at,qq=").append(data.has("qq") ? data.get("qq").asText() : "").append("]");
                     break;
                 case "image":
-                    sb.append("[CQ:image,file=").append(data.getString("file")).append(",url=").append(data.getString("url")).append("]");
+                    sb.append("[CQ:image,file=").append(data.has("file") ? data.get("file").asText() : "").append(",url=").append(data.has("url") ? data.get("url").asText() : "").append("]");
                     break;
                 case "video":
-                    sb.append("[CQ:video,file=").append(data.getString("file")).append(",url=").append(data.getString("url")).append("]");
+                    sb.append("[CQ:video,file=").append(data.has("file") ? data.get("file").asText() : "").append(",url=").append(data.has("url") ? data.get("url").asText() : "").append("]");
                     break;
                 case "record":
                 case "voice":
-                    sb.append("[CQ:record,file=").append(data.getString("file")).append("]");
+                    sb.append("[CQ:record,file=").append(data.has("file") ? data.get("file").asText() : "").append("]");
                     break;
                 case "face":
-                    sb.append("[CQ:face,id=").append(data.getString("id")).append("]");
+                    sb.append("[CQ:face,id=").append(data.has("id") ? data.get("id").asText() : "").append("]");
                     break;
                 case "forward":
-                    sb.append("[CQ:forward,id=").append(data.getString("id")).append("]");
+                    sb.append("[CQ:forward,id=").append(data.has("id") ? data.get("id").asText() : "").append("]");
                     break;
                 case "reply":
-                    sb.append("[CQ:reply,id=").append(data.getString("id")).append("]");
+                    sb.append("[CQ:reply,id=").append(data.has("id") ? data.get("id").asText() : "").append("]");
                     break;
                 default:
                     sb.append("[").append(type).append("]");
@@ -804,17 +832,17 @@ public class NapCatService {
     /**
      * 获取群历史消息
      */
-    public JSONArray getGroupMessageHistory(long groupId, int count) throws Exception {
+    public ArrayNode getGroupMessageHistory(long groupId, int count) throws Exception {
         String baseUrl = onebotApiUrl != null && !onebotApiUrl.isBlank() ? onebotApiUrl : napcatApiUrl;
         CloseableHttpClient httpClient = this.httpClient;
         HttpPost httpPost = new HttpPost(baseUrl + "/get_group_msg_history");
         httpPost.setHeader("Content-Type", "application/json");
         httpPost.setHeader("Authorization", "Bearer " + napcatToken);
 
-        JSONObject body = new JSONObject();
+        ObjectNode body = objectMapper.createObjectNode();
         body.put("group_id", groupId);
         body.put("count", count);
-        httpPost.setEntity(new StringEntity(body.toJSONString()));
+        httpPost.setEntity(new StringEntity(body.toString()));
 
         try (CloseableHttpResponse response = httpClient.execute(httpPost)) {
             BufferedReader reader = new BufferedReader(
@@ -826,16 +854,72 @@ public class NapCatService {
                 responseContent.append(line);
             }
             String responseStr = responseContent.toString();
-            System.out.println("获取群" + groupId + "历史消息响应: " + (responseStr.length() > 200 ? responseStr.substring(0, 200) + "..." : responseStr));
+            log.debug("获取群{}历史消息响应: {}", groupId, responseStr.length() > 200 ? responseStr.substring(0, 200) + "..." : responseStr);
 
-            JSONObject json = JSON.parseObject(responseStr);
-            if ("ok".equals(json.getString("status")) && json.containsKey("data")) {
-                JSONObject data = json.getJSONObject("data");
-                if (data.containsKey("messages")) {
-                    return data.getJSONArray("messages");
+            JsonNode json = objectMapper.readTree(responseStr);
+            if ("ok".equals(json.get("status").asText()) && json.has("data")) {
+                ObjectNode data = (ObjectNode) json.get("data");
+                if (data.has("messages")) {
+                    return (ArrayNode) data.get("messages");
                 }
             }
-            return new JSONArray();
+            return objectMapper.createArrayNode();
+        }
+    }
+
+    /**
+     * 发送私聊消息到指定QQ号
+     * @param qqNumber 目标QQ号
+     * @param message 消息内容
+     * @return 是否发送成功
+     */
+    public boolean sendPrivateMessage(String qqNumber, String message) {
+        if (qqNumber == null || qqNumber.isBlank() || message == null || message.isBlank()) {
+            log.warn("发送私信参数为空: qqNumber={}, message={}", qqNumber, message);
+            return false;
+        }
+
+        CloseableHttpClient httpClient = this.httpClient;
+        HttpPost httpPost = new HttpPost(napcatApiUrl + "/send_private_msg?token=" + napcatToken);
+        httpPost.setHeader("Content-Type", "application/json");
+        httpPost.setHeader("Authorization", "Bearer " + napcatToken);
+        httpPost.setHeader("token", napcatToken);
+
+        ObjectNode body = objectMapper.createObjectNode();
+        try {
+            body.put("user_id", Long.parseLong(qqNumber));
+        } catch (NumberFormatException e) {
+            body.put("user_id", qqNumber);
+        }
+
+        body.put("message", message);
+
+        try {
+            httpPost.setEntity(new StringEntity(body.toString(), java.nio.charset.StandardCharsets.UTF_8));
+            try (CloseableHttpResponse response = httpClient.execute(httpPost)) {
+                BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(response.getEntity().getContent())
+                );
+                StringBuilder responseContent = new StringBuilder();
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    responseContent.append(line);
+                }
+                String responseStr = responseContent.toString();
+                log.info("发送私信到QQ{}响应: {}", qqNumber, responseStr);
+
+                JsonNode json = objectMapper.readTree(responseStr);
+                boolean success = "ok".equals(json.get("status").asText());
+                if (success) {
+                    log.info("私信发送成功到QQ {}", qqNumber);
+                } else {
+                    log.warn("私信发送失败到QQ {}: {}", qqNumber, responseStr);
+                }
+                return success;
+            }
+        } catch (Exception e) {
+            log.error("发送私信到QQ {} 异常: {}", qqNumber, e.getMessage());
+            return false;
         }
     }
 }
