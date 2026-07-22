@@ -1,4 +1,5 @@
 # 后端
+backend/uploads/
 backend/target/
 backend/.classpath
 backend/.project
@@ -3623,3 +3624,30 @@ backend/uploads/images/voice/674405515/2026-06-29/bb2cc38b-b15d-4b60-a20e-d08f22
 backend/uploads/images/voice/821263640/2026-06-29/c1094b9f-c995-4e20-b0e3-a4e8b538178d.mp3
 backend/uploads/images/voice/821263640/2026-06-29/d91e3e38-275d-41bf-ab89-d8a25a88bf42.amr
 backend/uploads/images/voice/821263640/2026-06-29/d91e3e38-275d-41bf-ab89-d8a25a88bf42.mp3
+backend/uploads/images/images/1093124675/2026-06-29/9b207e50-5b8e-4133-a8fe-0082bb35522e.jpg
+backend/uploads/images/images/1101195515/2026-06-29/f1d29d29-c074-430f-9f1c-32385b5011c6.jpg
+backend/uploads/images/images/182146212/2026-06-29/ac56f0aa-ce85-47e3-9e38-af000fa2d5ad.jpg
+backend/uploads/images/images/511639194/2026-06-29/a2e53a9c-b7ec-4eb4-82ba-8cec0ed44ecf.jpg
+backend/uploads/images/images/511639194/2026-06-29/a05e8e1d-4408-4625-b99d-5bbb7edebb33.jpg
+backend/uploads/images/images/511639194/2026-06-29/e84eeedd-14da-4885-bc5c-fe8ecf951688.jpg
+backend/uploads/images/images/511639194/2026-06-29/ed57eca4-8dc3-4eaa-96d6-e533846f95a9.jpg
+backend/uploads/images/images/612728482/2026-06-29/0eba976a-215a-4309-8149-e7c15abd84c5.jpg
+backend/uploads/images/images/612728482/2026-06-29/8a8d572c-342d-443b-8f87-371464908cca.jpg
+backend/uploads/images/images/612728482/2026-06-29/9bd64df8-7b15-41fd-a651-3a589856ef2b.jpg
+backend/uploads/images/images/612728482/2026-06-29/66cdad5d-647b-457e-9423-305ecc9a5c0b.jpg
+backend/uploads/images/images/612728482/2026-06-29/90bcaac8-d9d0-42c1-b660-44cfd20c3c9c.jpg
+backend/uploads/images/images/612728482/2026-06-29/32745a96-a25f-40fd-aa46-ae671e33b4fa.jpg
+backend/uploads/images/images/612728482/2026-06-29/bd19995b-82ea-4ba7-96ad-7fbe64db97c3.jpg
+backend/uploads/images/images/612728482/2026-06-29/ddf2b9b9-ccb9-4f4e-9de7-2d86e4b0f9ba.jpg
+backend/uploads/images/images/612728482/2026-06-29/e13ce611-e264-4869-b271-2e91f44b1048.jpg
+backend/uploads/images/images/674405515/2026-06-29/0d50990b-8503-4f55-9a3d-649f793cb3ac.jpg
+backend/uploads/images/images/674405515/2026-06-29/8a5f053b-58d8-4f19-abf0-7886554eec84.jpg
+backend/uploads/images/images/674405515/2026-06-29/11fa4407-73dd-4737-a8a7-06e20a7e9330.jpg
+backend/uploads/images/images/674405515/2026-06-29/34a4dcef-b02c-4954-bc0c-47510fd3a680.jpg
+backend/uploads/images/images/674405515/2026-06-29/159145a0-64c9-4227-8aa4-e9e88d78b057.jpg
+backend/uploads/images/images/674405515/2026-06-29/b7cb0969-60d8-4385-b2fb-d8a2e6ea3d33.jpg
+backend/uploads/images/images/674405515/2026-06-29/e84aa845-5fa4-4e55-b64e-74247d85e849.jpg
+backend/uploads/images/images/674405515/2026-06-29/e889195f-cdd5-4167-bd53-d8f026168c37.jpg
+backend/uploads/images/images/701197364/2026-06-29/b05fddc9-d352-43fe-8672-3617beb500a9.jpg
+backend/uploads/images/images/728360972/2026-06-29/6a990f90-e687-4aec-8a14-e88cba0f6953.jpg
+backend/uploads/images/images/812968834/2026-06-29/bf3774d2-ea91-4c78-8664-31ced862fbe2.jpg
