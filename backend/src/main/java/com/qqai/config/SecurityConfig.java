@@ -67,7 +67,7 @@ public class SecurityConfig implements WebSocketConfigurer {
                 .requestMatchers("/api/admin/**").hasRole("ADMIN")
                 .requestMatchers("/api/system/start-astrbot", "/api/system/stop-astrbot", "/api/system/restart-astrbot").hasRole("ADMIN")
                 .requestMatchers("/api/system/start-gptsovits", "/api/system/stop-gptsovits", "/api/system/restart-gptsovits").hasRole("ADMIN")
-                .requestMatchers("/api/system/tts").hasRole("ADMIN")
+                .requestMatchers("/api/system/tts", "/api/system/convert-voice").authenticated()
                 .requestMatchers("/api/system/napcat/qrcode-image").permitAll()
                 .requestMatchers("/api/system/napcat/login-status").permitAll()
                 .requestMatchers("/api/system/component-status").permitAll()

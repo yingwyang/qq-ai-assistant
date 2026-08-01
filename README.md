@@ -38,6 +38,8 @@
 | 头像自定义 | 上传自定义头像，跨浏览器同步 |
 | 管理员后台 | 用户管理、角色切换（ADMIN/USER）、禁用启用、数据统计 |
 | **QQ 绑定验证** | 通过向目标 QQ 发送验证码私信，验证用户身份，确保只有 QQ 账号主人才能绑定 |
+| **AI 多提供商配置** | 支持配置多个大模型提供商（SiliconFlow/OpenAI 等），可切换、增删，分账号持久化 |
+| **智能体管理** | 内置人格管理面板，支持自定义系统提示词、开场白、工具调用配置 |
 
 ---
 
@@ -77,31 +79,52 @@
 qq-ai-assistant/
 ├── backend/                            # Spring Boot 后端
 │   ├── src/main/java/com/qqai/
-│   │   ├── config/                    # 配置类（Security / WebSocket / JWT ...）
-│   │   ├── controller/                # API 控制器
-│   │   ├── entity/                    # 实体类
+│   │   ├── common/                    # 通用工具（头像解析、限流、安全助手）
+│   │   ├── config/                    # 配置类（Security / WebSocket / JWT / CORS ...）
+│   │   ├── controller/                # API 控制器（15+ 个）
+│   │   ├── dto/                       # 数据传输对象（auth / message / user / webhook）
+│   │   ├── entity/                    # JPA 实体类（10 张表）
+│   │   ├── event/                     # 事件监听（消息保存事件）
+│   │   ├── exception/                 # 自定义异常（业务/权限/未找到/未授权）
 │   │   ├── plugin/                    # Groovy 插件接口与插件管理器
-│   │   ├── repository/                # 数据访问层
-│   │   ├── service/                   # 业务逻辑层
-│   │   ├── websocket/                 # WebSocket 处理器
-│   │   └── DataInitializer.java       # 启动时自动创建默认管理员
+│   │   ├── repository/                # 数据访问层（10 个 Repository）
+│   │   ├── security/                  # 安全模块（JWT 过滤器 / AuthPrincipal）
+│   │   ├── service/                   # 业务逻辑层（18+ 个 Service）
+│   │   ├── util/                      # 工具类（CQ 码解析）
+│   │   ├── websocket/                 # WebSocket 处理器（前端/NapCat）
+│   │   └── Application.java           # 启动入口
 │   ├── src/main/resources/
-│   │   ├── application.yml            # 应用配置（数据库 / 组件路径 / JWT）
-│   │   └── init-mysql.sql             # 完整数据库初始化脚本
+│   │   ├── application.yml.example    # 应用配置模板（数据库 / 组件路径 / JWT）
+│   │   ├── application-dev.yml.example # 开发环境配置模板
+│   │   ├── init-mysql.sql             # 完整数据库初始化脚本
+│   │   └── db/migration/              # Flyway 迁移脚本
 │   ├── plugins/                       # Groovy 插件脚本目录（热加载）
+│   ├── scripts/                       # Python 脚本（SILK 语音转码）
 │   ├── uploads/                       # 本地文件存储目录
 │   │   ├── images/                    # 图片 / 语音 / 视频
+│   │   ├── avatars/                   # 用户/群头像
+│   │   ├── tts/                       # TTS 语音合成产物
 │   │   ├── temp/                      # 临时文件
 │   │   └── archive/                   # 归档文件
 │   └── pom.xml                        # Maven 配置
 ├── frontend/                          # Vue 3 前端
 │   ├── src/
-│   │   ├── components/                # 组件
+│   │   ├── components/                # 组件（AstrBotChat / ChatInterface / Sidebar ...）
+│   │   ├── composables/               # 组合式函数（9 个 use* 钩子）
+│   │   ├── views/                     # 页面视图（Home / Admin / Login / UserCenter）
+│   │   ├── router/                    # 路由配置
+│   │   ├── services/                  # API 服务层（统一 fetch 封装）
+│   │   ├── utils/                     # 工具函数（消息过滤）
 │   │   ├── App.vue                    # 根组件（三栏布局）
-│   │   └── main.js                    # 入口文件
+│   │   ├── main.js                    # 入口文件
+│   │   └── style.css                  # 全局样式
+│   ├── public/                        # 静态资源（图标 / SVG）
 │   ├── index.html
 │   ├── package.json                   # NPM 配置
 │   └── vite.config.js                 # Vite 配置
+├── .env.example                       # 环境变量模板
+├── .gitignore
+├── AGENTS.md                          # Codex 协作手册
 └── README.md
 ```
 
@@ -109,7 +132,7 @@ qq-ai-assistant/
 
 ## 数据库设计
 
-共 **9 张核心表**，完整 DDL 见 [`backend/src/main/resources/init-mysql.sql`](backend/src/main/resources/init-mysql.sql)。
+共 **10 张核心表**，完整 DDL 见 [`backend/src/main/resources/init-mysql.sql`](backend/src/main/resources/init-mysql.sql)。
 
 ### 表结构总览
 
@@ -122,8 +145,9 @@ qq-ai-assistant/
 | `file_records` | 文件元数据（图片 / 视频 / 语音 / 文件） |
 | `astrbot_conversations` | AstrBot 对话会话表 |
 | `astrbot_messages` | AstrBot 对话消息表（按会话聚合） |
-| `user_settings` | 用户个性化设置（Bot 头像 / 名称 / 用户头像） |
+| `user_settings` | 用户个性化设置（Bot 名称 / AstrBot Key / **AI 多提供商配置**） |
 | `group_read_state` | **群聊阅读进度表**（每个用户/每个群聊的 last_read_time，用于高效计算未读消息数） |
+| `audit_logs` | 审计日志表（记录关键操作） |
 
 ### 表字段详情
 
@@ -238,8 +262,18 @@ qq-ai-assistant/
 |------|------|------|
 | id | BIGINT PK | 主键ID |
 | user_id | VARCHAR(50) UNIQUE NOT NULL | 用户ID |
-| bot_name / bot_avatar / user_avatar | VARCHAR | Bot 名称与头像 / 用户头像 |
+| bot_name | VARCHAR(100) | Bot 显示名称 |
+| astrbot_api_key | VARCHAR(1000) | AstrBot API Key |
+| llm_api_key | VARCHAR(1000) | 当前激活大模型 API Key |
+| llm_base_url | VARCHAR(500) | 当前激活大模型 Base URL |
+| llm_model | VARCHAR(200) | 当前选中的模型名称 |
+| llm_models | TEXT | 模型列表 JSON（字符串数组） |
+| providers | TEXT | **多提供商配置 JSON**：`[{name, apiKey, baseUrl}]` |
 | updated_at | TIMESTAMP | 更新时间（自动更新） |
+
+- `providers` 字段存储完整的多提供商列表，支持用户切换不同 AI 服务商
+- `llm_api_key` / `llm_base_url` 为当前激活提供商的冗余快照，保持向后兼容
+- 旧数据自动迁移：若 `providers` 为空但 `llm_api_key` 有值，读取时自动构造单提供商配置
 
 #### 9. group_read_state — 群聊阅读进度表（未读计数基础）
 
@@ -303,7 +337,7 @@ spring:
   datasource:
     url:      ${DB_URL:jdbc:mysql://localhost:3306/qq_chat?useSSL=false&serverTimezone=Asia/Shanghai&characterEncoding=UTF-8&allowPublicKeyRetrieval=true}
     username: ${DB_USERNAME:root}
-    password: ${DB_PASSWORD:***REMOVED***}
+    password: ${DB_PASSWORD:your_password_here}
     driver-class-name: com.mysql.cj.jdbc.Driver
   jpa:
     hibernate:
@@ -316,7 +350,7 @@ server:
 astrbot:
   api-url:  ${ASTRBOT_API_URL:http://localhost:6185}
   token:    ${ASTRBOT_TOKEN:xxx}
-  data-path: ${ASTRBOT_DATA_PATH:D:/ai/Documents/qq-web/Astrbot/data}
+  data-path: ${ASTRBOT_DATA_PATH:./Astrbot/data}
 
 # NapCat
 napcat:
@@ -339,7 +373,7 @@ minio:
 
 # FFmpeg 路径
 ffmpeg:
-  path: ${FFMPEG_PATH:D:/ai/Documents/qq-web/ffmpeg-8.1-essentials_build/bin/ffmpeg.exe}
+  path: ${FFMPEG_PATH:ffmpeg}
 
 # 文件上传 / 消息归档
 file.upload.max-size: 100MB
@@ -503,8 +537,22 @@ runtime\python.exe api_v2.py -a 127.0.0.1 -p 7860
 ### 头像自定义
 
 - 点击 ⚙️ 设置按钮，上传本地图片或输入图片 URL
-- 可自定义 Bot 名称、Bot 头像、用户头像
+- 可自定义 Bot 名称、用户头像
 - 设置自动保存到后端 `user_settings` 表，跨浏览器同步
+
+### AI 多提供商配置
+
+- 在设置面板左侧管理多个 AI 提供商（增删、切换）
+- 每个提供商独立配置 ID、API Key、Base URL
+- 支持从提供商 API 动态获取模型列表
+- 支持自定义模型、启用/禁用、设为当前模型
+- 配置按账号持久化到 `user_settings.providers` 字段
+
+### 智能体管理
+
+- 设置面板中的"智能体"标签页
+- 支持自定义系统提示词、开场白、工具调用配置
+- 支持设置默认人格、排序、分类管理
 
 ### QQ 账号绑定与验证
 

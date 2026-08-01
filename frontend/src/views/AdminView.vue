@@ -416,6 +416,9 @@
                   {{ isStoppingGptSovits ? '停止中...' : '停止' }}
                 </button>
               </div>
+              <a href="http://localhost:9874" target="_blank" class="webui-link">
+                <Icon name="globe" :size="14" /> 打开 GPT-SoVITS WebUI
+              </a>
             </div>
           </div>
 
@@ -1199,6 +1202,7 @@ export default {
       isStartingNapCat: componentCtrl.isStartingNapCat, isStoppingNapCat: componentCtrl.isStoppingNapCat,
       isStartingGptSovits: componentCtrl.isStartingGptSovits, isStoppingGptSovits: componentCtrl.isStoppingGptSovits,
       refreshQrCode: componentCtrl.refreshQrCode, openNapCatWebUI: componentCtrl.openNapCatWebUI,
+      openGptSovitsWebUI: componentCtrl.openGptSovitsWebUI,
       onAutoLoginChange: componentCtrl.onAutoLoginChange,
       startAstrBot: componentCtrl.startAstrBot, stopAstrBot: componentCtrl.stopAstrBot,
       startNapCat: componentCtrl.startNapCat, stopNapCat: componentCtrl.stopNapCat,

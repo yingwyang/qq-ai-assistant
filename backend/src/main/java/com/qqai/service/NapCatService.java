@@ -21,6 +21,8 @@ import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.io.File;
 import java.io.IOException;
+import java.util.List;
+import java.util.ArrayList;
 
 @Service
 public class NapCatService {
@@ -38,6 +40,12 @@ public class NapCatService {
 
     @Value("${napcat.webui-url:http://127.0.0.1:6099}")
     private String napcatWebuiUrl;
+
+    @Value("${napcat.webhook-token:}")
+    private String napcatWebhookToken;
+
+    @Value("${server.port:8081}")
+    private int serverPort;
 
     @Autowired
     private CloseableHttpClient httpClient;
@@ -318,12 +326,7 @@ public class NapCatService {
     private Process napcatProcess;
 
     public void startNapCat() throws Exception {
-        startNapCat(false);
-    }
-
-    public void startNapCat(boolean autoLogin) throws Exception {
         try {
-            // NapCat 启动脚本路径 - 使用相对路径
             String projectRoot = System.getProperty("user.dir");
             String napcatPath = projectRoot + File.separator + ".." + File.separator + ".." + File.separator + "napcat" + File.separator + "NapCat.Shell";
             File napcatDir = new File(napcatPath).getCanonicalFile();
@@ -334,22 +337,11 @@ public class NapCatService {
                 throw new IOException("NapCat launcher.bat not found at: " + launcherPath);
             }
             
-            // 构建进程命令 - 使用后台启动，不显示弹窗
-            String qq = autoLogin ? getLastQqNumber() : null;
-            ProcessBuilder processBuilder;
-            if (qq != null && !qq.isEmpty()) {
-                processBuilder = new ProcessBuilder("cmd.exe", "/c", "start", "/b", launcherPath, qq);
-                log.info("Starting NapCat with QQ: {}", qq);
-            } else {
-                processBuilder = new ProcessBuilder("cmd.exe", "/c", "start", "/b", launcherPath);
-                log.info("Starting NapCat without QQ number (QR code login)");
-            }
+            ProcessBuilder processBuilder = new ProcessBuilder("cmd.exe", "/c", "start", "/b", launcherPath);
             processBuilder.directory(napcatDir);
             
-            // 启动进程
             napcatProcess = processBuilder.start();
             
-            // 等待几秒让 NapCat 启动
             Thread.sleep(5000);
             
             log.info("NapCat started successfully from: {}", napcatDir.getAbsolutePath());
@@ -382,10 +374,170 @@ public class NapCatService {
     }
 
     public String getQrCodePath() throws Exception {
-        // 返回本地二维码图片的路径 - 使用相对路径
         String projectRoot = System.getProperty("user.dir");
         String qrCodePath = projectRoot + File.separator + ".." + File.separator + ".." + File.separator + "napcat" + File.separator + "NapCat.Shell" + File.separator + "cache" + File.separator + "qrcode.png";
         return new File(qrCodePath).getCanonicalFile().getAbsolutePath();
+    }
+
+    public List<String> getConfiguredQqNumbers() throws Exception {
+        List<String> qqNumbers = new ArrayList<>();
+        String configPath = getNapCatConfigPath();
+        File configDir = new File(configPath);
+        if (!configDir.exists() || !configDir.isDirectory()) {
+            return qqNumbers;
+        }
+        File[] files = configDir.listFiles((dir, name) ->
+                name.startsWith("napcat_") && name.endsWith(".json")
+                        && !name.startsWith("napcat_protocol_")
+                        && !name.startsWith("napcat.json"));
+        if (files == null || files.length == 0) {
+            return qqNumbers;
+        }
+        for (File file : files) {
+            String qq = file.getName().replace("napcat_", "").replace(".json", "");
+            if (qq.matches("\\d+")) {
+                qqNumbers.add(qq);
+            }
+        }
+        return qqNumbers;
+    }
+
+    public boolean isOneBotConfigured(String qqNumber) throws Exception {
+        String configPath = getNapCatConfigPath();
+        File onebotConfig = new File(configPath, "onebot11_" + qqNumber + ".json");
+        return onebotConfig.exists();
+    }
+
+    public boolean autoConfigureOneBot(String qqNumber) throws Exception {
+        String configPath = getNapCatConfigPath();
+        File onebotConfig = new File(configPath, "onebot11_" + qqNumber + ".json");
+        
+        String webhookUrl = "http://localhost:" + serverPort + "/?access_token=" + napcatWebhookToken;
+        String token = napcatToken != null && !napcatToken.isBlank() ? napcatToken : "";
+
+        ObjectNode root;
+        
+        if (onebotConfig.exists()) {
+            log.info("QQ {} 的 onebot11 配置已存在，检查是否需要更新", qqNumber);
+            root = (ObjectNode) objectMapper.readTree(onebotConfig);
+        } else {
+            root = objectMapper.createObjectNode();
+        }
+
+        ObjectNode network;
+        if (root.has("network")) {
+            network = (ObjectNode) root.get("network");
+        } else {
+            network = objectMapper.createObjectNode();
+            root.set("network", network);
+        }
+        
+        if (!network.has("httpServers") || network.get("httpServers").isNull() || !network.get("httpServers").isArray()) {
+            ArrayNode httpServers = objectMapper.createArrayNode();
+            ObjectNode httpServer = objectMapper.createObjectNode();
+            httpServer.put("enable", true);
+            httpServer.put("name", "OneBotHTTP");
+            httpServer.put("host", "0.0.0.0");
+            httpServer.put("port", 6100);
+            httpServer.put("enableCors", true);
+            httpServer.put("enableWebsocket", true);
+            httpServer.put("messagePostFormat", "array");
+            httpServer.put("token", token);
+            httpServer.put("debug", false);
+            httpServers.add(httpServer);
+            network.set("httpServers", httpServers);
+        }
+
+        if (!network.has("httpSseServers") || network.get("httpSseServers").isNull() || !network.get("httpSseServers").isArray()) {
+            network.set("httpSseServers", objectMapper.createArrayNode());
+        }
+
+        ArrayNode httpClients;
+        if (network.has("httpClients") && network.get("httpClients").isArray()) {
+            httpClients = (ArrayNode) network.get("httpClients");
+        } else {
+            httpClients = objectMapper.createArrayNode();
+            network.set("httpClients", httpClients);
+        }
+
+        boolean hasBackendClient = false;
+        for (int i = 0; i < httpClients.size(); i++) {
+            ObjectNode client = (ObjectNode) httpClients.get(i);
+            if ("铃音QQ对话后端".equals(client.get("name").asText())) {
+                hasBackendClient = true;
+                client.put("enable", true);
+                client.put("url", webhookUrl);
+                client.put("reportSelfMessage", true);
+                client.put("messagePostFormat", "array");
+                client.put("token", napcatWebhookToken != null ? napcatWebhookToken : "");
+                client.put("debug", false);
+                break;
+            }
+        }
+
+        if (!hasBackendClient) {
+            ObjectNode httpClient = objectMapper.createObjectNode();
+            httpClient.put("enable", true);
+            httpClient.put("name", "铃音QQ对话后端");
+            httpClient.put("url", webhookUrl);
+            httpClient.put("reportSelfMessage", true);
+            httpClient.put("messagePostFormat", "array");
+            httpClient.put("token", napcatWebhookToken != null ? napcatWebhookToken : "");
+            httpClient.put("debug", false);
+            httpClients.add(httpClient);
+        }
+
+        if (!network.has("websocketServers") || network.get("websocketServers").isNull() || !network.get("websocketServers").isArray()) {
+            network.set("websocketServers", objectMapper.createArrayNode());
+        }
+        if (!network.has("websocketClients") || network.get("websocketClients").isNull() || !network.get("websocketClients").isArray()) {
+            network.set("websocketClients", objectMapper.createArrayNode());
+        }
+        if (!network.has("plugins") || network.get("plugins").isNull() || !network.get("plugins").isArray()) {
+            network.set("plugins", objectMapper.createArrayNode());
+        }
+
+        if (!root.has("musicSignUrl")) {
+            root.put("musicSignUrl", "");
+        }
+        if (!root.has("enableLocalFile2Url")) {
+            root.put("enableLocalFile2Url", false);
+        }
+        if (!root.has("parseMultMsg")) {
+            root.put("parseMultMsg", true);
+        }
+        if (!root.has("imageDownloadProxy")) {
+            root.put("imageDownloadProxy", "");
+        }
+
+        if (!root.has("timeout")) {
+            ObjectNode timeout = objectMapper.createObjectNode();
+            timeout.put("baseTimeout", 10000);
+            timeout.put("uploadSpeedKBps", 256);
+            timeout.put("downloadSpeedKBps", 256);
+            timeout.put("maxTimeout", 1800000);
+            root.set("timeout", timeout);
+        }
+
+        File parentDir = onebotConfig.getParentFile();
+        if (!parentDir.exists()) {
+            parentDir.mkdirs();
+        }
+
+        objectMapper.writerWithDefaultPrettyPrinter().writeValue(onebotConfig, root);
+        log.info("已为 QQ {} 配置/更新 onebot11，webhook: {}", qqNumber, webhookUrl);
+        return true;
+    }
+
+    public void checkAndAutoConfigureNewQq() throws Exception {
+        List<String> configuredQqs = getConfiguredQqNumbers();
+        log.info("检测到已配置的 QQ 数量: {}", configuredQqs.size());
+        for (String qq : configuredQqs) {
+            if (!isOneBotConfigured(qq)) {
+                log.info("发现新登录的 QQ: {}，正在自动配置 onebot11...", qq);
+                autoConfigureOneBot(qq);
+            }
+        }
     }
 
     /**

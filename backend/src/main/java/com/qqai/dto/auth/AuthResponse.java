@@ -1,6 +1,7 @@
 package com.qqai.dto.auth;
 
 public record AuthResponse(
+        Long id,
         String token,
         String username,
         String nickname,

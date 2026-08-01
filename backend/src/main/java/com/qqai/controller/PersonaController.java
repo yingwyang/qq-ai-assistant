@@ -20,8 +20,14 @@ public class PersonaController {
 
     private static final Logger log = LoggerFactory.getLogger(PersonaController.class);
 
-    @Value("${astrbot.data-path:D:/ai/Documents/qq-web/Astrbot/data}")
+    @Value("${astrbot.data-path:./Astrbot/data}")
     private String astrbotDataPath;
+
+    @Value("${astrbot.api-url:http://localhost:6185}")
+    private String astrBotApiUrl;
+
+    @Value("${astrbot.token:}")
+    private String astrBotToken;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -242,8 +248,6 @@ public class PersonaController {
 
     private void notifyAstrBotConfigChanged() {
         try {
-            String astrBotApiUrl = "http://localhost:6185";
-            String astrBotToken = "abk_6CJKaVnl8233_QVKJr_3ID1ns8cd5EIeCtSv31YjV84";
 
             // 调用 AstrBot 的配置保存 API，传递完整的配置数据
             String url = astrBotApiUrl + "/api/config/save";

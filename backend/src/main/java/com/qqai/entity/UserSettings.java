@@ -21,13 +21,25 @@ public class UserSettings {
     
     @Column(length = 100)
     private String botName = "AstrBot 助手";  // Bot名称
-    
+
+    @Column(length = 1000)
+    private String astrbotApiKey;  // AstrBot API Key
+
+    @Column(length = 1000)
+    private String llmApiKey;  // 大模型 API Key
+
     @Column(length = 500)
-    private String botAvatar = "https://q.qlogo.cn/headimg_dl?dst_uin=0&spec=100";  // Bot头像
-    
-    @Column(length = 500)
-    private String userAvatar = "https://q.qlogo.cn/headimg_dl?dst_uin=0&spec=100";  // 用户头像
-    
+    private String llmBaseUrl;  // 大模型 API Base URL
+
+    @Column(length = 200)
+    private String llmModel;  // 当前选中的大模型
+
+    @Column(columnDefinition = "TEXT")
+    private String llmModels;  // 模型列表JSON格式: ["model1", "model2"]
+
+    @Column(columnDefinition = "TEXT")
+    private String providers;  // 提供商列表JSON格式: [{"name":"siliconflow","apiKey":"xxx","baseUrl":"xxx"}]
+
     private LocalDateTime updatedAt;
     
     @PrePersist
@@ -45,13 +57,25 @@ public class UserSettings {
     
     public String getBotName() { return botName; }
     public void setBotName(String botName) { this.botName = botName; }
-    
-    public String getBotAvatar() { return botAvatar; }
-    public void setBotAvatar(String botAvatar) { this.botAvatar = botAvatar; }
-    
-    public String getUserAvatar() { return userAvatar; }
-    public void setUserAvatar(String userAvatar) { this.userAvatar = userAvatar; }
-    
+
+    public String getAstrbotApiKey() { return astrbotApiKey; }
+    public void setAstrbotApiKey(String astrbotApiKey) { this.astrbotApiKey = astrbotApiKey; }
+
+    public String getLlmApiKey() { return llmApiKey; }
+    public void setLlmApiKey(String llmApiKey) { this.llmApiKey = llmApiKey; }
+
+    public String getLlmBaseUrl() { return llmBaseUrl; }
+    public void setLlmBaseUrl(String llmBaseUrl) { this.llmBaseUrl = llmBaseUrl; }
+
+    public String getLlmModel() { return llmModel; }
+    public void setLlmModel(String llmModel) { this.llmModel = llmModel; }
+
+    public String getLlmModels() { return llmModels; }
+    public void setLlmModels(String llmModels) { this.llmModels = llmModels; }
+
+    public String getProviders() { return providers; }
+    public void setProviders(String providers) { this.providers = providers; }
+
     public LocalDateTime getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
 }

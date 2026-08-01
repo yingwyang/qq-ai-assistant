@@ -31,7 +31,9 @@
         <button class="action-btn" @click="createNewConversation" title="新对话">
           <Icon name="add" :size="16" />
         </button>
-
+        <button class="action-btn" @click="showSettings = true" title="设置">
+          <Icon name="settings" :size="16" />
+        </button>
       </div>
     </div>
 
@@ -87,7 +89,184 @@
       </div>
     </div>
 
+    <!-- 设置弹窗 -->
+    <div v-if="showSettings" class="settings-dialog-overlay" @click="closeSettings">
+      <div class="settings-dialog" @click.stop>
+        <div class="settings-dialog-header">
+          <span class="settings-icon"><Icon name="settings" :size="22" /></span>
+          <h3>AstrBot 设置</h3>
+          <button class="close-btn" @click="closeSettings"><Icon name="close" :size="16" /></button>
+        </div>
+        <!-- 设置面板内容区域 -->
+        <div class="settings-panel-body">
+          <!-- 左侧提供商列表 -->
+          <div class="settings-sidebar">
+            <div class="sidebar-header">
+              <span class="sidebar-title">提供商</span>
+              <button class="btn-add-provider" @click="showAddProvider = !showAddProvider" title="新增提供商">
+                <Icon name="add" :size="14" />
+              </button>
+            </div>
+            <div v-if="showAddProvider" class="provider-add-form">
+              <input v-model="newProviderName" type="text" placeholder="输入提供商名称" @keyup.enter="addProvider">
+              <button class="btn-provider-confirm" @click="addProvider">确定</button>
+              <button class="btn-provider-cancel" @click="showAddProvider = false; newProviderName = ''">取消</button>
+            </div>
+            <div class="provider-list">
+              <div 
+                v-for="(provider, index) in providers" 
+                :key="index" 
+                class="provider-item"
+                :class="{ active: currentProviderIndex === index }"
+                @click="currentProviderIndex = index"
+              >
+                <div class="provider-icon">
+                  <Icon name="bot" :size="14" />
+                </div>
+                <div class="provider-info">
+                  <span class="provider-name">{{ provider.name }}</span>
+                  <span class="provider-url">{{ provider.baseUrl || '未配置' }}</span>
+                </div>
+                <button class="provider-delete" @click.stop="removeProvider(index)" title="删除">
+                  <Icon name="close" :size="12" />
+                </button>
+              </div>
+            </div>
+          </div>
 
+          <!-- 右侧配置详情 -->
+          <div class="settings-content">
+            <div v-if="currentProvider" class="provider-config">
+              <!-- 提供商头部 -->
+              <div class="provider-header">
+                <div class="provider-title-row">
+                  <div class="provider-icon-large">
+                    <Icon name="bot" :size="20" />
+                  </div>
+                  <div>
+                    <h3 class="provider-display-name">{{ currentProvider.name }}</h3>
+                    <span class="provider-url-text">{{ currentProvider.baseUrl }}</span>
+                  </div>
+                </div>
+                <button class="btn-save-config" @click="saveSettings">
+                  <Icon name="check" :size="14" /> 保存配置
+                </button>
+              </div>
+
+              <!-- 配置表单 -->
+              <div class="config-form">
+                <div class="form-section">
+                  <div class="form-item">
+                    <label class="form-label">ID</label>
+                    <span class="form-hint">提供商唯一 ID</span>
+                    <input v-model="currentProvider.name" type="text" class="form-input" placeholder="输入提供商 ID">
+                  </div>
+
+                  <div class="form-item">
+                    <label class="form-label">API Key</label>
+                    <span class="form-hint">API 密钥</span>
+                    <div class="password-field">
+                      <input v-model="currentProvider.apiKey" :type="currentProvider.showApiKey ? 'text' : 'password'" class="form-input" placeholder="输入 API Key">
+                      <button class="toggle-key-btn" @click="currentProvider.showApiKey = !currentProvider.showApiKey">
+                        {{ currentProvider.showApiKey ? '隐藏' : '显示' }}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div class="form-item">
+                    <label class="form-label">API Base URL</label>
+                    <span class="form-hint">自定义 API 端点 URL</span>
+                    <input v-model="currentProvider.baseUrl" type="text" class="form-input" placeholder="输入 API 地址，例如 https://api.openai.com/v1">
+                  </div>
+
+                  <!-- 助手名称 -->
+                  <div class="form-item">
+                    <label class="form-label">助手名称</label>
+                    <span class="form-hint">对话中显示的助手名称</span>
+                    <input v-model="botName" type="text" class="form-input" placeholder="输入助手显示名称">
+                  </div>
+
+                  <!-- AstrBot API Key -->
+                  <div class="form-item">
+                    <label class="form-label">AstrBot API Key</label>
+                    <span class="form-hint">AstrBot 服务 API 密钥</span>
+                    <div class="password-field">
+                      <input v-model="astrbotApiKey" :type="showAstrbotKey ? 'text' : 'password'" class="form-input" placeholder="输入 AstrBot API Key">
+                      <button class="toggle-key-btn" @click="showAstrbotKey = !showAstrbotKey">
+                        {{ showAstrbotKey ? '隐藏' : '显示' }}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- 模型配置 -->
+                <div class="model-section">
+                  <div class="section-header">
+                    <h4 class="section-title">已配置的模型</h4>
+                    <div class="section-actions">
+                      <input v-model="modelSearch" type="text" class="search-input" placeholder="搜索模型或ID">
+                      <button class="btn-get-models" @click="fetchModels">
+                        <Icon name="download" :size="14" /> 获取模型列表
+                      </button>
+                      <button class="btn-custom-model" @click="showCustomModel = !showCustomModel">
+                        <Icon name="plus" :size="14" /> 自定义模型
+                      </button>
+                    </div>
+                  </div>
+
+                  <div v-if="showCustomModel" class="custom-model-form">
+                    <input v-model="newModelName" type="text" class="form-input" placeholder="输入模型名称，如 gpt-4o" @keyup.enter="addModel">
+                    <button class="btn-model-confirm" @click="addModel">确定</button>
+                    <button class="btn-model-cancel" @click="showCustomModel = false; newModelName = ''">取消</button>
+                  </div>
+
+                  <div class="model-config-list">
+                    <div 
+                      v-for="(model, idx) in filteredModels" 
+                      :key="idx" 
+                      class="model-config-item"
+                    >
+                      <div class="model-info">
+                        <span class="model-name" :title="model.name">{{ model.name }}</span>
+                        <span class="model-id">{{ model.id || model.name }}</span>
+                      </div>
+                      <div class="model-actions">
+                        <label class="model-switch">
+                          <input type="checkbox" v-model="model.enabled" class="switch-input">
+                          <span class="switch-track"></span>
+                        </label>
+                        <button class="model-action-btn" @click="copyModelName(model.name)" title="复制">
+                          <Icon name="copy" :size="12" />
+                        </button>
+                        <button class="model-action-btn" @click="setAsCurrentModel(model.name)" title="设为当前模型">
+                          <Icon name="check-circle" :size="12" />
+                        </button>
+                        <button class="model-action-btn delete-btn" @click="removeModel(model.name)" title="删除">
+                          <Icon name="trash" :size="12" />
+                        </button>
+                      </div>
+                    </div>
+                    <div v-if="filteredModels.length === 0" class="empty-models">
+                      <Icon name="inbox" :size="32" />
+                      <p>暂无模型，请添加或获取模型列表</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 智能体/人格管理 -->
+            <div v-else class="persona-config">
+              <PersonaManager :embedded="true" />
+            </div>
+          </div>
+        </div>
+        <div class="settings-dialog-footer">
+          <button class="btn-cancel" @click="closeSettings">取消</button>
+          <button class="btn-confirm" style="background: #3498db;" @click="saveSettings">保存设置</button>
+        </div>
+      </div>
+    </div>
 
     <div class="chat-messages" ref="messagesContainer">
       <div v-if="messages.length === 0" class="empty-chat">
@@ -196,16 +375,16 @@
 </template>
 
 <script>
-import { ref, onMounted, nextTick, watch } from 'vue';
+import { ref, computed, onMounted, nextTick, watch } from 'vue';
 import Icon from './Icon.vue';
 import RichTextRenderer from './RichTextRenderer.vue';
 import { astrBotApi, userApi, systemApi } from '../services/api';
 import { filterToolJson, processAstrBotResponse } from '../utils/messageFilter';
 import { showToast } from './Toast.vue';
-
+import PersonaManager from './PersonaManager.vue';
 export default {
   name: 'AstrBotChat',
-  components: { Icon, RichTextRenderer },
+  components: { Icon, RichTextRenderer, PersonaManager },
   props: {
     groupId: { type: String, default: null },
     userId: { type: String, default: null },
@@ -238,33 +417,169 @@ export default {
     
     // 名称设置
     const botName = ref('AstrBot 助手');
-    
+
+    // API Key 配置
+    const astrbotApiKey = ref('');
+    const llmModel = ref('');
+    const llmModels = ref([]);
+    const showAstrbotKey = ref(false);
+    const newModelName = ref('');
+    const showCustomModel = ref(false);
+    const modelSearch = ref('');
+
     // 设置弹窗
     const showSettings = ref(false);
     
+    // 提供商配置
+    const providers = ref([{
+      name: 'siliconflow',
+      apiKey: '',
+      baseUrl: 'https://api.siliconflow.cn/v1',
+      showApiKey: false
+    }]);
+    const currentProviderIndex = ref(0);
+    const showAddProvider = ref(false);
+    const newProviderName = ref('');
+    
+    // 当前选中的提供商
+    const currentProvider = computed(() => {
+      return providers.value[currentProviderIndex.value] || null;
+    });
+
+    // 过滤后的模型列表
+    const filteredModels = computed(() => {
+      if (!modelSearch.value) {
+        return llmModels.value.map(name => ({ name, id: name, enabled: llmModel.value === name }));
+      }
+      const search = modelSearch.value.toLowerCase();
+      return llmModels.value
+        .filter(name => name.toLowerCase().includes(search))
+        .map(name => ({ name, id: name, enabled: llmModel.value === name }));
+    });
+
+    // 添加提供商
+    const addProvider = () => {
+      const name = newProviderName.value.trim();
+      if (!name) return;
+      providers.value.push({
+        name,
+        apiKey: '',
+        baseUrl: '',
+        showApiKey: false
+      });
+      currentProviderIndex.value = providers.value.length - 1;
+      newProviderName.value = '';
+      showAddProvider.value = false;
+    };
+
+    // 删除提供商
+    const removeProvider = (index) => {
+      if (providers.value.length <= 1) {
+        showToast('至少保留一个提供商', 'error');
+        return;
+      }
+      providers.value.splice(index, 1);
+      if (currentProviderIndex.value >= providers.value.length) {
+        currentProviderIndex.value = providers.value.length - 1;
+      }
+    };
+
+    // 获取模型列表（模拟从API获取）
+    const fetchModels = async () => {
+      const provider = currentProvider.value;
+      if (!provider || !provider.apiKey || !provider.baseUrl) {
+        showToast('请先配置 API Key 和 Base URL', 'error');
+        return;
+      }
+      showToast('正在获取模型列表...', 'info');
+      try {
+        const response = await fetch(`${provider.baseUrl}/models`, {
+          headers: { 'Authorization': `Bearer ${provider.apiKey}` }
+        });
+        if (response.ok) {
+          const data = await response.json();
+          const newModels = (data.data || []).map(m => m.id || m.name);
+          newModels.forEach(model => {
+            if (!llmModels.value.includes(model)) {
+              llmModels.value.push(model);
+            }
+          });
+          showToast(`成功获取 ${newModels.length} 个模型`, 'success');
+        } else {
+          showToast('获取模型列表失败', 'error');
+        }
+      } catch (error) {
+        console.error('获取模型列表失败:', error);
+        showToast('获取模型列表失败', 'error');
+      }
+    };
+
+    // 复制模型名称
+    const copyModelName = async (name) => {
+      try {
+        await navigator.clipboard.writeText(name);
+        showToast('已复制到剪贴板', 'success');
+      } catch (error) {
+        showToast('复制失败', 'error');
+      }
+    };
+
+    // 设置为当前模型
+    const setAsCurrentModel = (name) => {
+      llmModel.value = name;
+      showToast(`已设为当前模型: ${name}`, 'success');
+    };
+
     // 加载设置 - 优先从后端获取
     const loadSettings = async () => {
       // 先从 localStorage 加载默认值
       const savedBotName = localStorage.getItem('astrbot_bot_name');
-      const savedBotAvatar = localStorage.getItem('astrbot_bot_avatar');
-      const savedUserAvatar = localStorage.getItem('astrbot_user_avatar');
-      
+      const savedAstrbotApiKey = localStorage.getItem('astrbot_api_key');
+      const savedProviders = localStorage.getItem('providers');
+      const savedLlmModel = localStorage.getItem('llm_model');
+      const savedLlmModels = localStorage.getItem('llm_models');
+
       if (savedBotName) botName.value = savedBotName;
-      if (savedBotAvatar) botAvatar.value = savedBotAvatar;
-      if (savedUserAvatar) userAvatar.value = savedUserAvatar;
-      
+      if (savedAstrbotApiKey) astrbotApiKey.value = savedAstrbotApiKey;
+      if (savedProviders) {
+        try { providers.value = JSON.parse(savedProviders); } catch (e) {}
+      }
+      if (savedLlmModel) llmModel.value = savedLlmModel;
+      if (savedLlmModels) {
+        try { llmModels.value = JSON.parse(savedLlmModels); } catch (e) { llmModels.value = []; }
+      }
+
+      // 确保至少有一个提供商
+      if (providers.value.length === 0) {
+        providers.value = [{ name: 'default', apiKey: '', baseUrl: '', showApiKey: false }];
+      }
+
       // 优先从后端获取最新设置
       try {
         const response = await userApi.getSettings(props.userId);
         if (response) {
           botName.value = response.botName || botName.value;
-          botAvatar.value = response.botAvatar || botAvatar.value;
-          userAvatar.value = response.userAvatar || userAvatar.value;
-          
+          astrbotApiKey.value = response.astrbotApiKey || astrbotApiKey.value;
+          llmModel.value = response.llmModel || llmModel.value;
+          if (response.llmModels && Array.isArray(response.llmModels) && response.llmModels.length > 0) {
+            llmModels.value = response.llmModels;
+          }
+          // 从后端恢复 providers
+          if (response.providers && Array.isArray(response.providers) && response.providers.length > 0) {
+            providers.value = response.providers.map(p => ({
+              name: p.name || 'default',
+              apiKey: p.apiKey || '',
+              baseUrl: p.baseUrl || '',
+              showApiKey: false
+            }));
+          }
+
           // 同步到 localStorage
           localStorage.setItem('astrbot_bot_name', botName.value);
-          localStorage.setItem('astrbot_bot_avatar', botAvatar.value);
-          localStorage.setItem('astrbot_user_avatar', userAvatar.value);
+          localStorage.setItem('astrbot_api_key', astrbotApiKey.value);
+          localStorage.setItem('providers', JSON.stringify(providers.value));
+          localStorage.setItem('llm_model', llmModel.value);
+          localStorage.setItem('llm_models', JSON.stringify(llmModels.value));
         }
       } catch (error) {
         console.error('加载用户设置失败:', error);
@@ -273,24 +588,61 @@ export default {
     
     // 保存设置 - 保存到后端
     const saveSettings = async () => {
+      const provider = currentProvider.value;
       // 保存到 localStorage
       localStorage.setItem('astrbot_bot_name', botName.value);
-      localStorage.setItem('astrbot_bot_avatar', botAvatar.value);
-      localStorage.setItem('astrbot_user_avatar', userAvatar.value);
-      
+      localStorage.setItem('astrbot_api_key', astrbotApiKey.value);
+      localStorage.setItem('providers', JSON.stringify(providers.value));
+      localStorage.setItem('llm_model', llmModel.value);
+      localStorage.setItem('llm_models', JSON.stringify(llmModels.value));
+
       // 保存到后端（无论是否有 userId）
       try {
         await userApi.saveSettings({
           userId: props.userId,
           botName: botName.value,
-          botAvatar: botAvatar.value,
-          userAvatar: userAvatar.value
+          astrbotApiKey: astrbotApiKey.value,
+          llmApiKey: provider?.apiKey || '',
+          llmBaseUrl: provider?.baseUrl || '',
+          llmModel: llmModel.value,
+          llmModels: llmModels.value,
+          providers: providers.value.map(p => ({
+            name: p.name,
+            apiKey: p.apiKey,
+            baseUrl: p.baseUrl
+          }))
         });
+        showToast('设置已保存', 'success');
       } catch (error) {
         console.error('保存用户设置到后端失败:', error);
+        showToast('设置保存失败', 'error');
       }
-      
+
       showSettings.value = false;
+    };
+
+    // 添加模型
+    const addModel = () => {
+      const name = newModelName.value.trim();
+      if (!name) return;
+      if (llmModels.value.includes(name)) {
+        showToast('该模型已存在', 'error');
+        return;
+      }
+      llmModels.value.push(name);
+      newModelName.value = '';
+      showCustomModel.value = false;
+    };
+
+    // 删除模型
+    const removeModel = (model) => {
+      const index = llmModels.value.indexOf(model);
+      if (index > -1) {
+        llmModels.value.splice(index, 1);
+        if (llmModel.value === model) {
+          llmModel.value = llmModels.value[0] || '';
+        }
+      }
     };
     
     // 关闭设置
@@ -805,7 +1157,20 @@ export default {
       userAvatar,
       botAvatar,
       botName,
+      astrbotApiKey,
+      llmModel,
+      llmModels,
+      showAstrbotKey,
       showSettings,
+      newModelName,
+      showCustomModel,
+      modelSearch,
+      providers,
+      currentProviderIndex,
+      showAddProvider,
+      newProviderName,
+      currentProvider,
+      filteredModels,
       sendMessage,
       formatTime,
       formatDate,
@@ -820,7 +1185,14 @@ export default {
       handleBotAvatarError,
       handleBotAvatarUpload,
       copyMessageText,
-      handleVoiceAction
+      handleVoiceAction,
+      addModel,
+      removeModel,
+      addProvider,
+      removeProvider,
+      fetchModels,
+      copyModelName,
+      setAsCurrentModel
     };
   }
 };
@@ -1097,7 +1469,7 @@ export default {
   background: #c0392b;
 }
 
-/* 设置弹窗样式 */
+/* 设置弹窗样式 - 新版配置面板 */
 .settings-dialog-overlay {
   position: fixed;
   top: 0;
@@ -1114,154 +1486,616 @@ export default {
 .settings-dialog {
   background: white;
   border-radius: 12px;
-  width: 90%;
-  max-width: 450px;
-  max-height: 80vh;
-  overflow-y: auto;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  width: 95%;
+  max-width: 1000px;
+  max-height: 85vh;
+  overflow: hidden;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
   animation: dialogSlideIn 0.2s ease-out;
+  display: flex;
+  flex-direction: column;
 }
 
 .settings-dialog-header {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 20px;
+  padding: 16px 20px;
   border-bottom: 1px solid #f0f0f0;
-  position: sticky;
-  top: 0;
   background: white;
+  flex-shrink: 0;
 }
 
 .settings-icon {
-  font-size: 24px;
+  font-size: 20px;
 }
 
 .settings-dialog-header h3 {
   margin: 0;
   flex: 1;
+  font-size: 16px;
+  color: #2c3e50;
+}
+
+/* 设置面板主体 - 左右布局 */
+.settings-panel-body {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* 左侧提供商列表 */
+.settings-sidebar {
+  width: 260px;
+  background: #f8f9fa;
+  border-right: 1px solid #e0e0e0;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.sidebar-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #2c3e50;
+}
+
+.btn-add-provider {
+  width: 28px;
+  height: 28px;
+  border: 1px dashed #ccc;
+  border-radius: 6px;
+  background: white;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #666;
+  transition: all 0.2s;
+}
+
+.btn-add-provider:hover {
+  border-color: #3498db;
+  color: #3498db;
+  background: #f0f7ff;
+}
+
+.provider-add-form {
+  padding: 12px;
+  border-bottom: 1px solid #e0e0e0;
+  display: flex;
+  gap: 6px;
+}
+
+.provider-add-form input {
+  flex: 1;
+  padding: 6px 10px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+.btn-provider-confirm {
+  padding: 6px 12px;
+  background: #3498db;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.btn-provider-cancel {
+  padding: 6px 12px;
+  background: #f5f5f5;
+  color: #666;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.provider-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px;
+}
+
+.provider-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+  margin-bottom: 2px;
+}
+
+.provider-item:hover {
+  background: #e8f4fc;
+}
+
+.provider-item.active {
+  background: #3498db;
+  color: white;
+}
+
+.provider-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: #e0e0e0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.provider-item.active .provider-icon {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.provider-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.provider-name {
+  display: block;
+  font-size: 14px;
+  font-weight: 500;
+  color: #2c3e50;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.provider-item.active .provider-name {
+  color: white;
+}
+
+.provider-url {
+  display: block;
+  font-size: 11px;
+  color: #95a5a6;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.provider-item.active .provider-url {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.provider-delete {
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  color: #95a5a6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: all 0.2s;
+}
+
+.provider-item:hover .provider-delete {
+  opacity: 1;
+}
+
+.provider-item.active .provider-delete {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.provider-delete:hover {
+  background: rgba(0, 0, 0, 0.1);
+}
+
+/* 右侧配置详情 */
+.settings-content {
+  flex: 1;
+  overflow-y: auto;
+}
+
+/* 提供商配置 */
+.provider-config {
+  padding: 0;
+}
+
+.provider-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px;
+  border-bottom: 1px solid #f0f0f0;
+  background: #fafafa;
+}
+
+.provider-title-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.provider-icon-large {
+  width: 48px;
+  height: 48px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+}
+
+.provider-display-name {
+  margin: 0;
   font-size: 18px;
   color: #2c3e50;
 }
 
-.settings-dialog-body {
+.provider-url-text {
+  display: block;
+  font-size: 13px;
+  color: #7f8c8d;
+  margin-top: 2px;
+}
+
+.btn-save-config {
+  padding: 8px 16px;
+  background: #27ae60;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: background 0.2s;
+}
+
+.btn-save-config:hover {
+  background: #2ecc71;
+}
+
+/* 配置表单 */
+.config-form {
   padding: 20px;
 }
 
-.settings-section {
-  margin-bottom: 24px;
+.form-section {
+  background: white;
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 16px;
+  border: 1px solid #e0e0e0;
 }
 
-.settings-section:last-child {
-  margin-bottom: 0;
-}
-
-.settings-section h4 {
-  margin: 0 0 16px 0;
-  font-size: 14px;
-  color: #7f8c8d;
-  text-transform: uppercase;
-  letter-spacing: 1px;
-}
-
-.setting-item {
+.form-item {
   margin-bottom: 16px;
 }
 
-.setting-item label {
-  display: block;
-  margin-bottom: 8px;
-  font-size: 14px;
-  color: #2c3e50;
-  font-weight: 500;
+.form-item:last-child {
+  margin-bottom: 0;
 }
 
-.setting-item input {
+.form-label {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+  color: #2c3e50;
+  margin-bottom: 4px;
+}
+
+.form-hint {
+  display: block;
+  font-size: 12px;
+  color: #95a5a6;
+  margin-bottom: 8px;
+}
+
+.form-input {
   width: 100%;
-  padding: 10px 12px;
+  padding: 10px 14px;
   border: 1px solid #ddd;
   border-radius: 6px;
   font-size: 14px;
-  transition: border-color 0.2s;
+  transition: all 0.2s;
+  box-sizing: border-box;
 }
 
-.setting-item input:focus {
+.form-input:focus {
   outline: none;
   border-color: #3498db;
+  box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
 }
 
-.avatar-preview {
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  margin-top: 8px;
-  object-fit: cover;
-  border: 2px solid #e0e0e0;
-}
-
-.avatar-upload {
+.password-field {
   display: flex;
-  align-items: center;
-  gap: 16px;
-}
-
-.avatar-preview-large {
-  width: 64px;
-  height: 64px;
-  border-radius: 50%;
-  object-fit: cover;
-  border: 2px solid #e0e0e0;
-  flex-shrink: 0;
-}
-
-.upload-actions {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
   gap: 8px;
 }
 
-.btn-upload {
-  padding: 8px 16px;
-  background: #f0f7ff;
-  border: 1px solid #d0e3ff;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 14px;
-  color: #3498db;
-  transition: all 0.2s;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  width: fit-content;
+.password-field .form-input {
+  flex: 1;
 }
 
-.btn-upload:hover {
-  background: #e0f0ff;
-  border-color: #3498db;
-}
-
-.upload-hint {
-  font-size: 12px;
-  color: #95a5a6;
-}
-
-.url-input {
-  width: 100%;
-  padding: 8px 12px;
+.toggle-key-btn {
+  padding: 10px 14px;
+  background: #f5f5f5;
   border: 1px solid #ddd;
   border-radius: 6px;
   font-size: 13px;
+  color: #666;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s;
 }
 
+.toggle-key-btn:hover {
+  background: #e8e8e8;
+  border-color: #3498db;
+  color: #3498db;
+}
+
+/* 模型配置区域 */
+.model-section {
+  background: white;
+  border-radius: 8px;
+  padding: 16px;
+  border: 1px solid #e0e0e0;
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.section-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: #2c3e50;
+}
+
+.section-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.search-input {
+  padding: 6px 12px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 13px;
+  width: 160px;
+}
+
+.btn-get-models, .btn-custom-model {
+  padding: 6px 12px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 13px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.2s;
+}
+
+.btn-get-models {
+  background: #f0f7ff;
+  color: #3498db;
+  border-color: #d0e3ff;
+}
+
+.btn-get-models:hover {
+  background: #e0f0ff;
+}
+
+.btn-custom-model {
+  background: #f0fff4;
+  color: #27ae60;
+  border-color: #d0f0dc;
+}
+
+.btn-custom-model:hover {
+  background: #e0ffe8;
+}
+
+.custom-model-form {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+  padding: 12px;
+  background: #f8f9fa;
+  border-radius: 6px;
+}
+
+.custom-model-form .form-input {
+  flex: 1;
+  padding: 8px 12px;
+}
+
+.btn-model-confirm {
+  padding: 8px 14px;
+  background: #3498db;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.btn-model-cancel {
+  padding: 8px 14px;
+  background: #f5f5f5;
+  color: #666;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+/* 模型配置列表 */
+.model-config-list {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.model-config-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-radius: 6px;
+  border: 1px solid #e9ecef;
+  margin-bottom: 6px;
+  transition: all 0.2s;
+}
+
+.model-config-item:hover {
+  background: #f8f9fa;
+}
+
+.model-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.model-name {
+  display: block;
+  font-size: 14px;
+  font-weight: 500;
+  color: #2c3e50;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-id {
+  display: block;
+  font-size: 12px;
+  color: #95a5a6;
+  margin-top: 2px;
+}
+
+.model-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.model-switch {
+  position: relative;
+  display: inline-block;
+  width: 40px;
+  height: 22px;
+  margin-right: 4px;
+}
+
+.switch-input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.switch-track {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: #ccc;
+  border-radius: 22px;
+  transition: 0.3s;
+}
+
+.switch-track:before {
+  position: absolute;
+  content: "";
+  height: 18px;
+  width: 18px;
+  left: 2px;
+  bottom: 2px;
+  background-color: white;
+  border-radius: 50%;
+  transition: 0.3s;
+}
+
+.switch-input:checked + .switch-track {
+  background-color: #3498db;
+}
+
+.switch-input:checked + .switch-track:before {
+  transform: translateX(18px);
+}
+
+.model-action-btn {
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  color: #7f8c8d;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.model-action-btn:hover {
+  background: #f0f0f0;
+  color: #3498db;
+}
+
+.model-action-btn.delete-btn:hover {
+  background: #ffebee;
+  color: #e74c3c;
+}
+
+.empty-models {
+  text-align: center;
+  padding: 40px;
+  color: #95a5a6;
+}
+
+.empty-models p {
+  margin-top: 8px;
+  font-size: 14px;
+}
+
+/* 智能体配置区域 */
+.persona-config {
+  padding: 20px;
+}
+
+/* 设置弹窗底部 */
 .settings-dialog-footer {
   display: flex;
   justify-content: flex-end;
   gap: 10px;
-  padding: 0 20px 20px;
-  position: sticky;
-  bottom: 0;
+  padding: 16px 20px;
+  border-top: 1px solid #f0f0f0;
   background: white;
+  flex-shrink: 0;
 }
 
 .conv-title {
@@ -1317,7 +2151,7 @@ export default {
 
 .message-wrapper {
   display: flex;
-  margin-bottom: 15px;
+  margin-bottom: 10px;
 }
 
 .message-wrapper.message-self {
@@ -1326,7 +2160,7 @@ export default {
 
 .message-bubble {
   max-width: 70%;
-  padding: 12px 16px;
+  padding: 10px 14px;
   border-radius: 18px;
   display: flex;
   gap: 10px;
@@ -1383,15 +2217,38 @@ export default {
 
 .message-text {
   word-break: break-word;
-  line-height: 1.5;
+  line-height: 1.35;
+  font-size: 14px;
   white-space: pre-wrap;
+}
+
+.message-text p {
+  margin: 4px 0;
+}
+
+.message-text ul,
+.message-text ol {
+  margin: 4px 0;
+  padding-left: 20px;
+}
+
+.message-text li {
+  margin: 2px 0;
+}
+
+.message-text h1,
+.message-text h2,
+.message-text h3,
+.message-text h4 {
+  margin: 6px 0 4px;
+  font-size: 1.1em;
 }
 
 .message-actions {
   display: flex;
   gap: 8px;
-  margin-top: 8px;
-  padding-top: 8px;
+  margin-top: 6px;
+  padding-top: 6px;
   border-top: 1px solid rgba(0, 0, 0, 0.06);
 }
 

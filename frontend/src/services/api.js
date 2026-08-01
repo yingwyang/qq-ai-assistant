@@ -7,6 +7,8 @@ function handleUnauthorized() {
   localStorage.removeItem('auth_token');
   localStorage.removeItem('isLoggedIn');
   localStorage.removeItem('user_role');
+  localStorage.removeItem('user_info');
+  window.dispatchEvent(new CustomEvent('auth:logout'));
 }
 
 async function parseResponse(response) {
@@ -23,10 +25,16 @@ async function parseResponse(response) {
     }
   }
 
-  // 401/403 统一处理为未授权
-  if (response.status === 401 || response.status === 403) {
+  // 401 = 未认证/登录过期 → 清除登录状态
+  if (response.status === 401) {
     handleUnauthorized();
     const msg = parsed?.error || parsed?.message || '登录已过期，请重新登录';
+    throw new Error(msg);
+  }
+
+  // 403 = 已登录但权限不足 → 不清除登录状态
+  if (response.status === 403) {
+    const msg = parsed?.error || parsed?.message || '权限不足，无法执行此操作';
     throw new Error(msg);
   }
 
@@ -103,13 +111,27 @@ export const messageApi = {
     body: JSON.stringify(message),
   }),
 
-  getMessagesByGroupId: (groupId) => request(`/messages/group/${groupId}`),
+  getMessagesByGroupId: (groupId, selfQq) => {
+    const params = new URLSearchParams();
+    if (selfQq) params.append('selfQq', selfQq);
+    const qs = params.toString();
+    return request(`/messages/group/${groupId}${qs ? '?' + qs : ''}`);
+  },
 
-  getMessagesByGroupIdPaged: (groupId, page = 0, size = 50) =>
-    request(`/messages/group/${groupId}/paged?page=${page}&size=${size}`),
+  getMessagesByGroupIdPaged: (groupId, page = 0, size = 50, selfQq) => {
+    const params = new URLSearchParams();
+    params.append('page', page);
+    params.append('size', size);
+    if (selfQq) params.append('selfQq', selfQq);
+    return request(`/messages/group/${groupId}/paged?${params.toString()}`);
+  },
 
-  getMessagesSince: (groupId, afterId) =>
-    request(`/messages/group/${groupId}/since?afterId=${afterId}`),
+  getMessagesSince: (groupId, afterId, selfQq) => {
+    const params = new URLSearchParams();
+    params.append('afterId', afterId);
+    if (selfQq) params.append('selfQq', selfQq);
+    return request(`/messages/group/${groupId}/since?${params.toString()}`);
+  },
 
   getGroupMembers: (groupId) =>
     request(`/messages/group/${groupId}/members`),
@@ -174,11 +196,9 @@ export const systemApi = {
   stopAllComponents: () => request('/system/stop-all', { method: 'POST' }),
   startAstrBot: () => request('/system/start-astrbot', { method: 'POST' }),
   stopAstrBot: () => request('/system/stop-astrbot', { method: 'POST' }),
-  startNapCat: (autoLogin = false) => request('/system/start-napcat', {
-    method: 'POST',
-    body: JSON.stringify({ autoLogin }),
-  }),
+  startNapCat: () => request('/system/start-napcat', { method: 'POST' }),
   stopNapCat: () => request('/system/stop-napcat', { method: 'POST' }),
+  autoConfigureNapCat: () => request('/system/napcat/auto-configure', { method: 'POST' }),
   startGptSovits: () => request('/system/start-gptsovits', { method: 'POST' }),
   stopGptSovits: () => request('/system/stop-gptsovits', { method: 'POST' }),
   generateVoice: (text) => request('/system/tts', {

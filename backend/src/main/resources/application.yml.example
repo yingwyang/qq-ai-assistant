@@ -34,7 +34,7 @@ server:
 astrbot:
   api-url: ${ASTRBOT_API_URL:http://localhost:6185}
   token: ${ASTRBOT_TOKEN:}
-  data-path: ${ASTRBOT_DATA_PATH:D:/ai/Documents/qq-web/Astrbot/data}
+  data-path: ${ASTRBOT_DATA_PATH:./Astrbot/data}
 
 # NapCat配置
 napcat:

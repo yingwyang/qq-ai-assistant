@@ -21,7 +21,9 @@ public class UserSettingsService {
         return userSettingsRepository.save(settings);
     }
 
-    public UserSettings saveSettings(String userId, String botName, String botAvatar, String userAvatar) {
+    public UserSettings saveSettings(String userId, String botName,
+                                     String astrbotApiKey, String llmApiKey, String llmBaseUrl,
+                                     String llmModel, String llmModels, String providers) {
         if (userId == null || userId.isEmpty()) {
             userId = "default";
         }
@@ -29,8 +31,12 @@ public class UserSettingsService {
                 .orElse(new UserSettings());
         settings.setUserId(userId);
         if (botName != null) settings.setBotName(botName);
-        if (botAvatar != null) settings.setBotAvatar(botAvatar);
-        if (userAvatar != null) settings.setUserAvatar(userAvatar);
+        if (astrbotApiKey != null) settings.setAstrbotApiKey(astrbotApiKey);
+        if (llmApiKey != null) settings.setLlmApiKey(llmApiKey);
+        if (llmBaseUrl != null) settings.setLlmBaseUrl(llmBaseUrl);
+        if (llmModel != null) settings.setLlmModel(llmModel);
+        if (llmModels != null) settings.setLlmModels(llmModels);
+        if (providers != null) settings.setProviders(providers);
         return userSettingsRepository.save(settings);
     }
 }

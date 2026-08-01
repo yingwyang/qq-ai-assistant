@@ -11,16 +11,18 @@ import java.time.LocalDateTime;
     @Index(name = "idx_group_id", columnList = "groupId"),
     @Index(name = "idx_group_name", columnList = "groupName"),
     @Index(name = "idx_owner_qq", columnList = "ownerQq")
+}, uniqueConstraints = {
+    @UniqueConstraint(name = "uk_group_owner", columnNames = {"groupId", "ownerQq"})
 })
 public class Group {
-    
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
-    
+
     @Column(nullable = false, length = 50)
     private String groupId;  // 群号
-    
+
     @Column(nullable = false, length = 20)
     private String ownerQq;  // 登录者QQ号（哪个账号加入的群）
     

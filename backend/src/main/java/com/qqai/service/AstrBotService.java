@@ -37,20 +37,25 @@ public class AstrBotService {
     private Process astrbotProcess;
 
     public String summarizeMessage(String content) throws Exception {
+        return summarizeMessage(content, null);
+    }
+
+    public String summarizeMessage(String content, String apiKey) throws Exception {
+        String token = (apiKey != null && !apiKey.isEmpty()) ? apiKey : astrBotToken;
         HttpPost httpPost = new HttpPost(astrBotApiUrl + "/api/v1/chat");
         httpPost.setHeader("Content-Type", "application/json");
-        httpPost.setHeader("Authorization", "Bearer " + astrBotToken);
+        httpPost.setHeader("X-API-Key", token);
 
         ObjectNode requestBody = objectMapper.createObjectNode();
         requestBody.put("message", "请总结以下内容：" + content);
         requestBody.put("model", "gpt-3.5-turbo");
         requestBody.put("temperature", 0.7);
 
-        httpPost.setEntity(new StringEntity(requestBody.toString()));
+        httpPost.setEntity(new StringEntity(requestBody.toString(), java.nio.charset.StandardCharsets.UTF_8));
 
         try (CloseableHttpResponse response = httpClient.execute(httpPost)) {
             BufferedReader reader = new BufferedReader(
-                new InputStreamReader(response.getEntity().getContent())
+                new InputStreamReader(response.getEntity().getContent(), java.nio.charset.StandardCharsets.UTF_8)
             );
             StringBuilder responseContent = new StringBuilder();
             String line;
@@ -62,6 +67,10 @@ public class AstrBotService {
             JsonNode responseNode = responseJson.get("response");
             return responseNode != null ? responseNode.asText() : null;
         }
+    }
+
+    public String getApiUrl() {
+        return astrBotApiUrl;
     }
 
     public void startAstrBot() throws Exception {

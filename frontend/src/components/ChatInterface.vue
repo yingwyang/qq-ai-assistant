@@ -171,15 +171,16 @@ export default {
     MessageContent
   },
   props: {
-    groupId: {
-      type: String,
-      default: ''
+    group: {
+      type: Object,
+      default: null
     }
   },
   emits: ['analysis-result', 'new-message-arrived'],
 
   setup(props, { emit }) {
-    const groupId = ref(props.groupId);
+    const groupId = computed(() => props.group?.groupId || '');
+    const selfQq = computed(() => props.group?.ownerQq || '');
     const messages = ref([]);
     const isLoading = ref(false);
     const currentGroupName = ref('');
@@ -263,28 +264,27 @@ export default {
       return Math.max(...messages.value.map(m => m.id || 0));
     };
 
-    const resolveGroupId = async () => {
-      if (groupId.value) return groupId.value;
-      const recentGroups = await messageApi.getRecentGroups();
-      if (recentGroups?.length > 0) {
-        groupId.value = String(recentGroups[0].groupId || recentGroups[0].id || '');
-      }
-      return groupId.value;
+    const resolveGroup = () => {
+      if (props.group?.groupId) return props.group;
+      return null;
     };
 
     const loadMessages = async (showLoading = true, scrollToBottomFlag = true) => {
       try {
-        const gid = await resolveGroupId();
-        if (!gid) {
-          showToast('暂无最近群聊，请选择群聊', 'warning');
+        const g = resolveGroup();
+        if (!g) {
+          messages.value = [];
+          currentGroupName.value = '';
           return;
         }
+        const gid = g.groupId;
+        const sq = g.ownerQq;
 
         if (showLoading) isLoading.value = true;
         currentPage.value = 0;
         hasMore.value = true;
 
-        const response = await messageApi.getMessagesByGroupIdPaged(gid, 0, PAGE_SIZE);
+        const response = await messageApi.getMessagesByGroupIdPaged(gid, 0, PAGE_SIZE, sq);
         const list = sortMessagesAsc(response.messages || []);
         messages.value = list;
 
@@ -311,7 +311,7 @@ export default {
     };
 
     const loadMoreMessages = async () => {
-      if (!hasMore.value || isLoadingMore.value || !groupId.value) return;
+      if (!hasMore.value || isLoadingMore.value || !groupId.value || !selfQq.value) return;
       isLoadingMore.value = true;
       const container = messagesContainer.value;
       const prevScrollHeight = container?.scrollHeight || 0;
@@ -319,7 +319,7 @@ export default {
       try {
         currentPage.value += 1;
         const response = await messageApi.getMessagesByGroupIdPaged(
-          groupId.value, currentPage.value, PAGE_SIZE
+          groupId.value, currentPage.value, PAGE_SIZE, selfQq.value
         );
         const older = sortMessagesAsc(response.messages || []);
         if (older.length === 0) {
@@ -345,10 +345,10 @@ export default {
     };
 
     const fetchIncremental = async () => {
-      if (!groupId.value || messages.value.length === 0) return;
+      if (!groupId.value || !selfQq.value || messages.value.length === 0) return;
       try {
         const afterId = getLastMessageId();
-        const newMessages = await messageApi.getMessagesSince(groupId.value, afterId);
+        const newMessages = await messageApi.getMessagesSince(groupId.value, afterId, selfQq.value);
         if (!newMessages?.length) return;
         const wasAtBottom = isAtBottom();
         newMessages.forEach(mergeMessage);
@@ -362,6 +362,8 @@ export default {
 
     const handleWebSocketMessage = (data) => {
       if (!data?.message || data.groupId !== groupId.value) return;
+      // 如果当前选中了特定 QQ，只接收该 QQ 的消息
+      if (selfQq.value && data.message?.selfQq !== selfQq.value) return;
       const wasAtBottom = isAtBottom();
       if (data.type === 'new_message') {
         mergeMessage(data.message);
@@ -508,21 +510,23 @@ export default {
       }
     };
 
-    watch(() => props.groupId, (newGroupId, oldGroupId) => {
-      if (oldGroupId) wsUnsubscribe(oldGroupId);
-      if (newGroupId) {
-        groupId.value = newGroupId;
+    watch(() => props.group, (newGroup, oldGroup) => {
+      const oldGid = oldGroup?.groupId;
+      const newGid = newGroup?.groupId;
+      if (oldGid) wsUnsubscribe(oldGid);
+      if (newGid) {
         groupMemberMap.value = new Map();
         loadMessages();
         startFallbackPoll();
       } else {
         stopFallbackPoll();
         messages.value = [];
+        currentGroupName.value = '';
       }
-    }, { immediate: true });
-    
+    }, { immediate: true, deep: true });
+
     onMounted(() => {
-      if (props.groupId) {
+      if (props.group?.groupId) {
         loadMessages();
       }
       startFallbackPoll();

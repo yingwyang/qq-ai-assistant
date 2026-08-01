@@ -159,6 +159,7 @@ export default {
         // 保存token和用户信息
         localStorage.setItem('auth_token', response.token);
         localStorage.setItem('user_info', JSON.stringify({
+          id: response.id,
           username: response.username,
           nickname: response.nickname,
           role: response.role,

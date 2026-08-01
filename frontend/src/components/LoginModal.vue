@@ -83,10 +83,6 @@
               <img :src="qrCode" alt="NapCat登录二维码" class="qrcode" />
               <p>请使用QQ扫码登录</p>
               <button @click="refreshQrCode" class="btn-refresh">刷新二维码</button>
-              <label class="auto-login-label">
-                <input type="checkbox" v-model="autoLogin" @change="onAutoLoginChange" />
-                下次自动登录
-              </label>
             </div>
             <div v-else class="loading">
               <p>获取登录二维码中...</p>
@@ -120,7 +116,6 @@ export default {
     const systemMessage = ref('');
     const systemMessageType = ref('');
     const qrCodeError = ref(false);
-    const autoLogin = ref(localStorage.getItem('napcat_auto_login') === 'true');
     
     // 组件状态
     const componentStatus = ref({
@@ -155,10 +150,6 @@ export default {
       qrCodeError.value = true;
     };
 
-    const onAutoLoginChange = () => {
-      localStorage.setItem('napcat_auto_login', autoLogin.value);
-    };
-
     const checkServiceHealth = async () => {
       try {
         const response = await systemApi.healthCheck();
@@ -182,6 +173,15 @@ export default {
         if (response.loggedIn !== isLoggedIn.value) {
           isLoggedIn.value = response.loggedIn;
           emit('login-status-changed', isLoggedIn.value);
+          if (response.loggedIn) {
+            try {
+              await systemApi.autoConfigureNapCat();
+              systemMessage.value = '登录成功，已自动配置 NapCat';
+              systemMessageType.value = 'success';
+            } catch (e) {
+              console.error('自动配置 NapCat 失败:', e);
+            }
+          }
         }
       } catch (error) {
         console.error('检查登录状态失败:', error);
@@ -282,7 +282,6 @@ export default {
         systemMessage.value = response.message || 'NapCat 启动成功';
         systemMessageType.value = 'success';
         await getComponentStatus();
-        // 等待服务启动后刷新二维码
         setTimeout(() => {
           checkServiceHealth();
           getQrCode();
@@ -353,11 +352,6 @@ export default {
       if (props.visible) {
         await getComponentStatus();
         await checkServiceHealth();
-        // 如果勾选了自动登录且 NapCat 未运行，自动启动
-        if (autoLogin.value && !componentStatus.value.napcat.running) {
-          await startNapCat();
-        }
-        // 无论服务是否可用，都尝试获取二维码
         getQrCode();
         if (serviceAvailable.value) {
           await checkLoginStatus();
@@ -398,7 +392,6 @@ export default {
       systemMessage,
       systemMessageType,
       qrCodeError,
-      autoLogin,
       componentStatus,
       isStartingAstrBot,
       isStoppingAstrBot,
@@ -408,7 +401,6 @@ export default {
       isStoppingGptSovits,
       refreshQrCode,
       onQrCodeError,
-      onAutoLoginChange,
       startAllComponents,
       stopAllComponents,
       startAstrBot,
@@ -613,22 +605,6 @@ export default {
 
 .btn-refresh:hover {
   background-color: #e9ecef;
-}
-
-.auto-login-label {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 12px;
-  font-size: 13px;
-  color: #666;
-  cursor: pointer;
-}
-
-.auto-login-label input[type="checkbox"] {
-  width: 14px;
-  height: 14px;
-  cursor: pointer;
 }
 
 .logged-in {

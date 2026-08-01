@@ -37,7 +37,14 @@ public class SystemController {
                     .body(ApiResponse.error(400, "合成文本不能为空"));
         }
         String text = textObj.toString();
-        String audioUrl = gptSovitsService.generateVoice(text);
+        
+        Long userId = null;
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth != null && auth.getPrincipal() instanceof AuthPrincipal) {
+            userId = ((AuthPrincipal) auth.getPrincipal()).userId();
+        }
+        
+        String audioUrl = gptSovitsService.generateVoice(text, userId);
         Map<String, Object> data = new HashMap<>();
         data.put("audioUrl", audioUrl);
         return ResponseEntity.ok(ApiResponse.success(data));
@@ -252,18 +259,32 @@ public class SystemController {
     }
 
     @PostMapping("/start-napcat")
-    public ResponseEntity<ApiResponse<Map<String, String>>> startNapCat(@RequestBody(required = false) Map<String, Object> params) throws Exception {
+    public ResponseEntity<ApiResponse<Map<String, String>>> startNapCat() throws Exception {
         Map<String, String> result = new HashMap<>();
         String operator = currentUsername();
-        boolean autoLogin = params != null && Boolean.TRUE.equals(params.get("autoLogin"));
         try {
-            napCatService.startNapCat(autoLogin);
+            napCatService.startNapCat();
             result.put("status", "started");
             result.put("message", "NapCat 启动成功");
-            auditLogService.log(operator, "COMPONENT_START", "napcat", "SUCCESS",
-                    autoLogin ? "autoLogin=true" : null);
+            auditLogService.log(operator, "COMPONENT_START", "napcat", "SUCCESS", null);
         } catch (Exception e) {
             auditLogService.log(operator, "COMPONENT_START", "napcat", "FAILURE", e.getMessage());
+            throw e;
+        }
+        return ResponseEntity.ok(ApiResponse.success(result));
+    }
+
+    @PostMapping("/napcat/auto-configure")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> autoConfigureNapCat() throws Exception {
+        Map<String, Object> result = new HashMap<>();
+        String operator = currentUsername();
+        try {
+            napCatService.checkAndAutoConfigureNewQq();
+            result.put("configured", true);
+            result.put("message", "NapCat 自动配置完成");
+            auditLogService.log(operator, "NAPCAT_AUTO_CONFIG", "napcat", "SUCCESS", null);
+        } catch (Exception e) {
+            auditLogService.log(operator, "NAPCAT_AUTO_CONFIG", "napcat", "FAILURE", e.getMessage());
             throw e;
         }
         return ResponseEntity.ok(ApiResponse.success(result));

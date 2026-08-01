@@ -62,27 +62,34 @@ public class MessageController {
     }
 
     @GetMapping("/group/{groupId}")
-    public ResponseEntity<ApiResponse<List<Message>>> getMessagesByGroupId(@PathVariable String groupId) {
+    public ResponseEntity<ApiResponse<List<Message>>> getMessagesByGroupId(
+            @PathVariable String groupId,
+            @RequestParam(required = false) String selfQq) {
         Long userId = securityHelper.getCurrentUserId();
         if (userId == null) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(ApiResponse.error(401, "未登录"));
         }
-        
+
         // 获取用户绑定的所有QQ账号
         List<String> userQqList = securityHelper.getCurrentUserQqBindings();
         if (userQqList.isEmpty()) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN)
                     .body(ApiResponse.error(403, "请先绑定QQ账号"));
         }
-        
+
         boolean hasAccess = securityHelper.hasGroupAccess(groupId, userQqList);
         if (!hasAccess) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN)
                     .body(ApiResponse.error(403, "无权访问该群聊"));
         }
-        
-        List<Message> messages = messageService.getMessagesByGroupIdAndUserQqList(groupId, userQqList);
+
+        List<Message> messages;
+        if (selfQq != null && !selfQq.isBlank() && userQqList.contains(selfQq)) {
+            messages = messageService.getMessagesByGroupIdAndUser(groupId, selfQq);
+        } else {
+            messages = messageService.getMessagesByGroupIdAndUserQqList(groupId, userQqList);
+        }
         return ResponseEntity.ok(ApiResponse.success(messages));
     }
 
@@ -90,43 +97,52 @@ public class MessageController {
     public ResponseEntity<ApiResponse<Map<String, Object>>> getMessagesByGroupIdPaged(
             @PathVariable String groupId,
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "50") int size) {
+            @RequestParam(defaultValue = "50") int size,
+            @RequestParam(required = false) String selfQq) {
         Long userId = securityHelper.getCurrentUserId();
         if (userId == null) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(ApiResponse.error(401, "未登录"));
         }
-        
+
         // 获取用户绑定的所有QQ账号
         List<String> userQqList = securityHelper.getCurrentUserQqBindings();
         if (userQqList.isEmpty()) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN)
                     .body(ApiResponse.error(403, "请先绑定QQ账号"));
         }
-        
+
         boolean hasAccess = securityHelper.hasGroupAccess(groupId, userQqList);
         if (!hasAccess) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN)
                     .body(ApiResponse.error(403, "无权访问该群聊"));
         }
-        
+
         Pageable pageable = PageRequest.of(page, size);
-        List<Message> messages = messageService.getMessagesByGroupIdPagedAndUserQqList(groupId, userQqList, pageable);
-        Long total = messageService.countMessagesByGroupIdAndUserQqList(groupId, userQqList);
-        
+        List<Message> messages;
+        Long total;
+        if (selfQq != null && !selfQq.isBlank() && userQqList.contains(selfQq)) {
+            messages = messageService.getMessagesByGroupIdPagedAndUser(groupId, selfQq, pageable);
+            total = messageService.countMessagesByGroupIdAndUser(groupId, selfQq);
+        } else {
+            messages = messageService.getMessagesByGroupIdPagedAndUserQqList(groupId, userQqList, pageable);
+            total = messageService.countMessagesByGroupIdAndUserQqList(groupId, userQqList);
+        }
+
         Map<String, Object> response = new HashMap<>();
         response.put("messages", messages);
         response.put("total", total);
         response.put("page", page);
         response.put("size", size);
-        
+
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 
     @GetMapping("/group/{groupId}/since")
     public ResponseEntity<ApiResponse<List<Message>>> getMessagesSince(
             @PathVariable String groupId,
-            @RequestParam Long afterId) {
+            @RequestParam Long afterId,
+            @RequestParam(required = false) String selfQq) {
         Long userId = securityHelper.getCurrentUserId();
         if (userId == null) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
@@ -145,7 +161,12 @@ public class MessageController {
                     .body(ApiResponse.error(403, "无权访问该群聊"));
         }
 
-        List<Message> messages = messageService.getMessagesSinceId(groupId, userQqList, afterId);
+        List<Message> messages;
+        if (selfQq != null && !selfQq.isBlank() && userQqList.contains(selfQq)) {
+            messages = messageService.getMessagesSinceId(groupId, selfQq, afterId);
+        } else {
+            messages = messageService.getMessagesSinceId(groupId, userQqList, afterId);
+        }
         return ResponseEntity.ok(ApiResponse.success(messages));
     }
 

@@ -167,6 +167,11 @@ public class MessageService {
         return messageRepository.findNewMessagesAfterId(groupId, selfQqList, afterId);
     }
 
+    public List<Message> getMessagesSinceId(String groupId, String selfQq, Long afterId) {
+        List<String> list = java.util.Collections.singletonList(selfQq);
+        return messageRepository.findNewMessagesAfterId(groupId, list, afterId);
+    }
+
     /**
      * 获取群聊成员 QQ 号与昵称映射（优先从 NapCat 获取完整群成员，再叠加本地消息发送者）。
      * 用于 @消息 解析：即使某个成员还没发过消息，也能通过群成员列表拿到昵称。
@@ -228,32 +233,8 @@ public class MessageService {
             log.error("从 NapCat 加载群成员失败，回退到本地消息发送者: {}", e.getMessage());
         }
 
-        // 4. 兜底：对本地消息中出现但列表里仍缺失的 QQ 单独调用 get_group_member_info
-        // 这通常用于机器人自己或被 @ 但还没发过消息的成员
-        for (String qq : localQqs) {
-            if (nicknameMap.containsKey(qq) && nicknameMap.get(qq) != null && !nicknameMap.get(qq).isBlank()) {
-                continue;
-            }
-            try {
-                ObjectNode member = napCatService.getGroupMemberInfo(groupId, qq);
-                if (member != null) {
-                    JsonNode userIdObj = member.get("user_id");
-                    if (userIdObj == null) userIdObj = member.get("userId");
-                    if (userIdObj == null) continue;
-                    String returnedQq = userIdObj.asText();
-                    String nickname = member.has("card") ? member.get("card").asText() : "";
-                    if (nickname.isBlank()) {
-                        nickname = member.has("nickname") ? member.get("nickname").asText() : "";
-                    }
-                    if (!nickname.isBlank()) {
-                        nicknameMap.put(returnedQq, nickname);
-                    }
-                }
-            } catch (Exception e) {
-                log.error("兜底查询群成员信息失败 (qq={}): {}", qq, e.getMessage());
-            }
-        }
-
+        // 4. 兜底：对本地消息中出现但 NapCat 列表里仍缺失昵称的 QQ，保留本地已有昵称
+        // 不再调用 get_group_member_info 单独查询，避免对已退群/不存在的用户产生 Uin2Uid 错误
         log.info("群{}昵称映射数量: {}", groupId, nicknameMap.size());
         List<Map<String, Object>> result = new ArrayList<>();
         for (Map.Entry<String, String> entry : nicknameMap.entrySet()) {

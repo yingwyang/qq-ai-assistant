@@ -11,9 +11,9 @@ import java.util.Optional;
 public interface GroupRepository extends JpaRepository<Group, Long> {
     
     /**
-     * 根据群号查找群聊（所有登录账号）
+     * 根据群号查找群聊（所有登录账号，可能有多条记录对应不同 ownerQq）
      */
-    Optional<Group> findByGroupId(String groupId);
+    List<Group> findByGroupId(String groupId);
     
     /**
      * 根据群号和登录者QQ查找群聊

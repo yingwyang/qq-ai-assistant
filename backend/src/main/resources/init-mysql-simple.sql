@@ -1,5 +1,5 @@
 -- 铃音QQ对话 - MySQL 数据库初始化脚本 (简化版)
--- 用户名: root, 密码: ***REMOVED***
+-- 请使用你自己的 MySQL 用户名和密码
 
 -- 创建数据库
 CREATE DATABASE IF NOT EXISTS qq_chat;

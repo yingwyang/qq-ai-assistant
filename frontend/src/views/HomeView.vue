@@ -60,15 +60,17 @@
             <div class="mobile-content">
               <div v-show="activeMobileTab === 'chat'" class="mobile-panel">
                 <ChatInterface 
-                  :groupId="selectedGroupId" 
+                  :group="selectedGroup" 
                   @analysis-result="handleAnalysisResult"
                   @new-message-arrived="handleNewMessageArrived"
                 />
               </div>
               <div v-show="activeMobileTab === 'ai'" class="mobile-panel">
-                <AstrBotChat 
+                <AstrBotChat
                   ref="astrBotChatRef"
-                  :groupId="selectedGroupId"
+                  :groupId="selectedGroup?.groupId"
+                  :userId="userInfo?.id ? String(userInfo.id) : ''"
+                  :userNickname="userInfo?.nickname || userInfo?.username || ''"
                 />
               </div>
             </div>
@@ -79,15 +81,17 @@
             <div class="tablet-layout">
               <div class="tablet-chat" :class="{ 'hidden': showAIPanel }">
                 <ChatInterface 
-                  :groupId="selectedGroupId" 
+                  :group="selectedGroup" 
                   @analysis-result="handleAnalysisResult"
                   @new-message-arrived="handleNewMessageArrived"
                 />
               </div>
               <div class="tablet-ai" :class="{ 'hidden': !showAIPanel }">
-                <AstrBotChat 
+                <AstrBotChat
                   ref="astrBotChatRef"
-                  :groupId="selectedGroupId"
+                  :groupId="selectedGroup?.groupId"
+                  :userId="userInfo?.id ? String(userInfo.id) : ''"
+                  :userNickname="userInfo?.nickname || userInfo?.username || ''"
                 />
               </div>
               <button class="tablet-toggle" @click="showAIPanel = !showAIPanel">
@@ -106,7 +110,7 @@
               :style="{ flex: `0 0 ${centerWidth > 0 ? centerWidth : 0}%` }"
             >
               <ChatInterface
-                :groupId="selectedGroupId"
+                :group="selectedGroup"
                 @analysis-result="handleAnalysisResult"
                 @new-message-arrived="handleNewMessageArrived"
               />
@@ -140,7 +144,9 @@
             >
               <AstrBotChat
                 ref="astrBotChatRef"
-                :groupId="selectedGroupId"
+                :groupId="selectedGroup?.groupId"
+                :userId="userInfo?.id ? String(userInfo.id) : ''"
+                :userNickname="userInfo?.nickname || userInfo?.username || ''"
               />
             </div>
           </template>
@@ -221,7 +227,7 @@ export default {
     const showSystemModal = ref(false);
     const showUserProfile = ref(false);
     const showPersonaManager = ref(false);
-    const selectedGroupId = ref('');
+    const selectedGroup = ref(null); // { groupId, ownerQq }
     const astrBotChatRef = ref(null);
     const sidebarRef = ref(null); // Sidebar 组件引用，暴露了 refreshGroups 方法
     const userInfo = ref(null);
@@ -297,7 +303,7 @@ export default {
 
     // 从 localStorage 恢复登录状态和群号
     onMounted(async () => {
-      const savedGroupId = localStorage.getItem('selectedGroupId');
+      const savedGroupRaw = localStorage.getItem('selectedGroup');
       const savedUserInfo = localStorage.getItem('user_info');
       const token = localStorage.getItem('auth_token');
       const savedCenterWidth = localStorage.getItem('home_center_width');
@@ -309,17 +315,46 @@ export default {
         }
       }
 
-      if (savedGroupId) {
-        selectedGroupId.value = savedGroupId;
+      if (savedGroupRaw) {
+        try {
+          selectedGroup.value = JSON.parse(savedGroupRaw);
+        } catch (e) {
+          selectedGroup.value = null;
+        }
       }
-      
+
+      // 先从localStorage恢复userInfo（包含id），避免刷新时AstrBotChat props瞬间为空
+      if (savedUserInfo) {
+        try {
+          const parsed = JSON.parse(savedUserInfo);
+          userInfo.value = parsed;
+        } catch (e) {
+          userInfo.value = null;
+        }
+      }
+
+      // 监听 token 失效事件
+      const handleAuthLogout = () => {
+        isLoggedIn.value = false;
+        userInfo.value = null;
+        selectedGroup.value = null;
+        router.push('/login');
+      };
+      window.addEventListener('auth:logout', handleAuthLogout);
+
       // 检查用户登录状态
       if (token) {
         try {
           // 验证token有效性
           const userData = await authApi.getCurrentUser();
           if (userData) {
-            userInfo.value = userData;
+            userInfo.value = {
+              id: userData.id,
+              username: userData.username,
+              nickname: userData.nickname,
+              role: userData.role,
+              avatar: userData.avatar
+            };
             isLoggedIn.value = true;
             localStorage.setItem('isLoggedIn', 'true');
             if (userData.role) {
@@ -342,6 +377,7 @@ export default {
 
     const handleLoginSuccess = (userData) => {
       userInfo.value = {
+        id: userData.id,
         username: userData.username,
         nickname: userData.nickname,
         role: userData.role,
@@ -366,21 +402,24 @@ export default {
     const handleLogout = () => {
       isLoggedIn.value = false;
       userInfo.value = null;
-      selectedGroupId.value = '';
+      selectedGroup.value = null;
       // 清除 localStorage
       localStorage.removeItem('auth_token');
       localStorage.removeItem('user_role');
       localStorage.removeItem('user_info');
       localStorage.removeItem('isLoggedIn');
-      localStorage.removeItem('selectedGroupId');
+      localStorage.removeItem('selectedGroup');
       // 跳转到登录页
       router.push('/login');
     };
 
-    const handleSelectGroup = (groupId) => {
-      selectedGroupId.value = groupId;
-      // 保存群号到 localStorage
-      localStorage.setItem('selectedGroupId', groupId);
+    const handleSelectGroup = (group) => {
+      selectedGroup.value = group;
+      if (group) {
+        localStorage.setItem('selectedGroup', JSON.stringify(group));
+      } else {
+        localStorage.removeItem('selectedGroup');
+      }
       // 切换到最近对话标签
       if (activeTab.value !== 'recent') {
         activeTab.value = 'recent';
@@ -412,6 +451,7 @@ export default {
       try {
         const userData = await authApi.getCurrentUser();
         userInfo.value = {
+          id: userData.id,
           username: userData.username,
           nickname: userData.nickname,
           role: userData.role,
@@ -431,7 +471,7 @@ export default {
       showSystemModal,
       showUserProfile,
       showPersonaManager,
-      selectedGroupId,
+      selectedGroup,
       astrBotChatRef,
       userInfo,
       sidebarRef,

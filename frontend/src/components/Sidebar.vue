@@ -34,7 +34,7 @@
             <template v-for="binding in qqBindings" :key="binding.id">
               <!-- 该QQ下有群才显示分组 -->
               <template v-if="getGroupsByQq(binding.qqNumber).length > 0">
-                <li class="nav-item qq-binding-header">
+                <li class="nav-item qq-binding-header" @click="toggleQqBindingGroups(binding.qqNumber)">
                   <div class="qq-binding-avatar">
                     <img 
                       :src="binding.avatar || 'https://q.qlogo.cn/headimg_dl?dst_uin=' + binding.qqNumber + '&spec=100'" 
@@ -47,14 +47,18 @@
                     <div class="qq-binding-number">{{ binding.qqNumber }}</div>
                     <span v-if="binding.isDefault" class="default-badge">默认</span>
                   </div>
+                  <span v-if="!isCollapsed" class="expand-icon">
+                    <Icon :name="isQqBindingExpanded(binding.qqNumber) ? 'expand' : 'collapse'" :size="12" />
+                  </span>
                 </li>
                 <li
+                  v-show="isQqBindingExpanded(binding.qqNumber)"
                   v-for="group in getGroupsByQq(binding.qqNumber)"
-                  :key="group.groupId"
+                  :key="`${group.groupId}_${group.ownerQq}`"
                   class="nav-item group-item"
-                  :class="{ active: selectedGroupId === group.groupId }"
-                  @click="selectGroup(group.groupId)"
-                  @contextmenu.prevent="showContextMenu($event, group.groupId)"
+                  :class="{ active: isGroupActive(group) }"
+                  @click="selectGroup(group)"
+                  @contextmenu.prevent="showContextMenu($event, group)"
                 >
                   <div class="group-avatar">
                     <img 
@@ -77,15 +81,6 @@
         </ul>
       </div>
       
-      <div class="nav-section">
-        <div v-if="!isCollapsed" class="nav-section-title"></div>
-        <ul class="nav-list">
-          <li class="nav-item" @click="openPersonaManager">
-            <span class="nav-icon"><Icon name="robot" :size="16" /></span>
-            <span v-if="!isCollapsed" class="nav-text">我的智能体</span>
-          </li>
-        </ul>
-      </div>
     </nav>
     
     <div class="sidebar-footer">
@@ -170,21 +165,54 @@ export default {
       default: false
     }
   },
-  emits: ['tab-change', 'logout', 'open-login-modal', 'open-system-modal', 'open-user-profile', 'select-group', 'open-persona-manager'],
+  emits: ['tab-change', 'logout', 'open-login-modal', 'open-system-modal', 'open-user-profile', 'select-group'],
   setup(props, { emit }) {
     const router = useRouter();
     const isCollapsedLocal = ref(false);
     const activeTab = ref('recent');
     const recentGroups = ref([]);
-    const isRecentExpanded = ref(true); // 默认展开群列表
+    const STORAGE_KEY_RECENT = 'sidebar_recent_expanded';
+    const STORAGE_KEY_QQ = 'sidebar_qq_expanded';
+
+    const isRecentExpanded = ref(true);
     const qqBindings = ref([]);
-    const selectedGroupId = ref('');
+    const expandedQqBindings = ref(new Set());
+    const selectedGroup = ref(null); // { groupId, ownerQq }
     let refreshInterval = null;
+
+    // 从 localStorage 读取展开状态
+    const loadExpandedState = () => {
+      try {
+        const recent = localStorage.getItem(STORAGE_KEY_RECENT);
+        if (recent !== null) isRecentExpanded.value = recent === 'true';
+
+        const qq = localStorage.getItem(STORAGE_KEY_QQ);
+        if (qq) expandedQqBindings.value = new Set(JSON.parse(qq));
+      } catch (e) {
+        console.error('读取侧边栏展开状态失败:', e);
+      }
+    };
+
+    const saveRecentExpanded = () => {
+      try {
+        localStorage.setItem(STORAGE_KEY_RECENT, String(isRecentExpanded.value));
+      } catch (e) {
+        console.error('保存最近对话展开状态失败:', e);
+      }
+    };
+
+    const saveQqExpanded = () => {
+      try {
+        localStorage.setItem(STORAGE_KEY_QQ, JSON.stringify([...expandedQqBindings.value]));
+      } catch (e) {
+        console.error('保存QQ分组展开状态失败:', e);
+      }
+    };
 
     // 右键菜单状态
     const contextMenuVisible = ref(false);
     const contextMenuPosition = ref({ top: 0, left: 0 });
-    const contextMenuGroupId = ref('');
+    const contextMenuGroup = ref(null); // { groupId, ownerQq }
 
     // 暴露给父组件的方法
     const refreshGroups = () => {
@@ -204,6 +232,7 @@ export default {
 
     const toggleRecentGroups = () => {
       isRecentExpanded.value = !isRecentExpanded.value;
+      saveRecentExpanded();
       // 同时触发 tab 切换
       activeTab.value = 'recent';
       emit('tab-change', 'recent');
@@ -240,10 +269,6 @@ export default {
       emit('open-user-profile');
     };
 
-    const openPersonaManager = () => {
-      emit('open-persona-manager');
-    };
-
     const openAdminDashboard = () => {
       if (props.userInfo?.role === 'ADMIN') {
         router.push('/admin');
@@ -252,25 +277,33 @@ export default {
       }
     };
 
-    const selectGroup = async (groupId) => {
-      selectedGroupId.value = groupId;
+    const selectGroup = async (group) => {
+      selectedGroup.value = {
+        groupId: group.groupId,
+        ownerQq: group.ownerQq
+      };
 
       // 标记该群聊为已读（服务端维护 lastReadTime，刷新后未读计数清零）
       try {
-        await messageApi.markGroupAsRead(groupId);
+        await messageApi.markGroupAsRead(group.groupId);
         // 本地乐观更新：直接把该群的未读数置 0，立即刷新 UI
-        const group = recentGroups.value.find(g => g.groupId === groupId);
-        if (group) group.unreadCount = 0;
+        const g = recentGroups.value.find(
+          r => r.groupId === group.groupId && r.ownerQq === group.ownerQq
+        );
+        if (g) g.unreadCount = 0;
       } catch (e) {
         // 失败时不阻塞，刷新列表由后台定时任务完成
-        console.warn('标记群聊 ' + groupId + ' 为已读失败:', e);
+        console.warn('标记群聊 ' + group.groupId + ' 为已读失败:', e);
       }
 
-      emit('select-group', groupId);
+      emit('select-group', { groupId: group.groupId, ownerQq: group.ownerQq });
     };
 
-    const showContextMenu = (event, groupId) => {
-      contextMenuGroupId.value = groupId;
+    const showContextMenu = (event, group) => {
+      contextMenuGroup.value = {
+        groupId: group.groupId,
+        ownerQq: group.ownerQq
+      };
       contextMenuPosition.value = {
         top: event.clientY,
         left: event.clientX
@@ -280,13 +313,13 @@ export default {
 
     const hideContextMenu = () => {
       contextMenuVisible.value = false;
-      contextMenuGroupId.value = '';
+      contextMenuGroup.value = null;
     };
 
     const deleteMessagesByType = async (type) => {
-      const groupId = contextMenuGroupId.value;
+      const group = contextMenuGroup.value;
       hideContextMenu();
-      if (!groupId) return;
+      if (!group) return;
 
       const typeMap = {
         IMAGE: { types: ['IMAGE'], label: '图片消息', hasMedia: true },
@@ -308,13 +341,13 @@ export default {
       if (!confirmed) return;
 
       try {
-        const result = await messageApi.deleteMessagesByTypes(groupId, config.types, config.hasMedia);
+        const result = await messageApi.deleteMessagesByTypes(group.groupId, config.types, config.hasMedia);
         if (result && typeof result.deletedCount === 'number') {
           showToast(`已删除 ${result.deletedCount} 条${config.label}`, 'success');
           // 立即刷新群聊列表（最后消息时间、未读数等）
           loadRecentGroups();
           // 通知父组件重新加载当前群聊消息
-          emit('select-group', groupId);
+          emit('select-group', { groupId: group.groupId, ownerQq: group.ownerQq });
         } else {
           showToast(result?.message || '删除失败', 'error');
         }
@@ -328,6 +361,20 @@ export default {
       return recentGroups.value.filter(g => String(g.ownerQq) === String(qqNumber));
     };
 
+    const isQqBindingExpanded = (qqNumber) => {
+      return expandedQqBindings.value.has(String(qqNumber));
+    };
+
+    const toggleQqBindingGroups = (qqNumber) => {
+      const qq = String(qqNumber);
+      if (expandedQqBindings.value.has(qq)) {
+        expandedQqBindings.value.delete(qq);
+      } else {
+        expandedQqBindings.value.add(qq);
+      }
+      saveQqExpanded();
+    };
+
     const loadQqBindings = async () => {
       if (!props.isLoggedIn) {
         qqBindings.value = [];
@@ -335,7 +382,15 @@ export default {
       }
       try {
         const bindings = await userApi.getQqBindings();
+        // 只清理已不存在的QQ号，保留用户手动的展开/折叠状态，不再自动展开所有新QQ号
+        const validQqs = new Set(bindings.map(b => String(b.qqNumber)));
+        [...expandedQqBindings.value].forEach(qq => {
+          if (!validQqs.has(qq)) {
+            expandedQqBindings.value.delete(qq);
+          }
+        });
         qqBindings.value = bindings;
+        saveQqExpanded();
       } catch (error) {
         console.error('加载QQ绑定失败:', error);
         qqBindings.value = [];
@@ -398,7 +453,20 @@ export default {
       }
     };
 
+    const syncExpandedState = (e) => {
+      if (e.key === STORAGE_KEY_RECENT) {
+        isRecentExpanded.value = e.newValue === 'true';
+      } else if (e.key === STORAGE_KEY_QQ) {
+        try {
+          expandedQqBindings.value = e.newValue ? new Set(JSON.parse(e.newValue)) : new Set();
+        } catch (err) {
+          console.error('同步QQ展开状态失败:', err);
+        }
+      }
+    };
+
     onMounted(() => {
+      loadExpandedState();
       loadRecentGroups();
       loadQqBindings();
 
@@ -410,6 +478,9 @@ export default {
         }
       }, 5000);
 
+      // 监听 localStorage 变化，实现同一浏览器多个标签页同步
+      window.addEventListener('storage', syncExpandedState);
+
       // 点击页面其他区域关闭右键菜单
       document.addEventListener('click', hideContextMenu);
       document.addEventListener('scroll', hideContextMenu, true);
@@ -420,6 +491,7 @@ export default {
       if (refreshInterval) {
         clearInterval(refreshInterval);
       }
+      window.removeEventListener('storage', syncExpandedState);
       document.removeEventListener('click', hideContextMenu);
       document.removeEventListener('scroll', hideContextMenu, true);
     });
@@ -436,13 +508,21 @@ export default {
       }
     });
 
+    const isGroupActive = (group) => {
+      if (!selectedGroup.value) return false;
+      return (
+        selectedGroup.value.groupId === group.groupId &&
+        selectedGroup.value.ownerQq === group.ownerQq
+      );
+    };
+
     return {
       isCollapsed,
       activeTab,
       recentGroups,
       isRecentExpanded,
       qqBindings,
-      selectedGroupId,
+      selectedGroup,
       isLoggedIn: isLoggedInComputed,
       toggleSidebar,
       toggleRecentGroups,
@@ -451,10 +531,12 @@ export default {
       openLoginModal,
       openSystemModal,
       openUserProfile,
-      openPersonaManager,
       openAdminDashboard,
       selectGroup,
       getGroupsByQq,
+      isQqBindingExpanded,
+      toggleQqBindingGroups,
+      isGroupActive,
       handleAvatarError,
       getGroupAvatar,
       refreshGroups,
@@ -766,11 +848,19 @@ export default {
   padding: 8px 20px;
   background-color: #263545;
   border-top: 1px solid #34495e;
-  cursor: default;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .qq-binding-header:hover {
-  background-color: #263545;
+  background-color: #2c3e50;
+}
+
+.qq-binding-header .expand-icon {
+  margin-left: auto;
+  flex-shrink: 0;
 }
 
 .qq-binding-avatar {

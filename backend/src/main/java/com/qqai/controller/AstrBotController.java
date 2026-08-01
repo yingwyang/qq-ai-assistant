@@ -7,10 +7,12 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.qqai.entity.AstrBotConversation;
 import com.qqai.entity.AstrBotMessage;
 import com.qqai.entity.Message;
+import com.qqai.entity.UserSettings;
 import com.qqai.common.SecurityHelper;
 import com.qqai.plugin.PluginManager;
 import com.qqai.service.AstrBotConversationService;
 import com.qqai.service.MessageService;
+import com.qqai.service.UserSettingsService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -53,6 +55,9 @@ public class AstrBotController {
     @Autowired
     private jakarta.persistence.EntityManager entityManager;
 
+    @Autowired
+    private UserSettingsService userSettingsService;
+
     @Value("${astrbot.api-url:http://localhost:6185}")
     private String astrBotApiUrl;
 
@@ -62,6 +67,34 @@ public class AstrBotController {
     private final RestTemplate restTemplate = new RestTemplate();
 
     private final ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
+
+    private String getCurrentUserAstrbotApiKey() {
+        UserSettings settings = getCurrentUserSettings();
+        if (settings != null && settings.getAstrbotApiKey() != null) {
+            return settings.getAstrbotApiKey();
+        }
+        return null;
+    }
+
+    private String getCurrentUserLlmModel() {
+        UserSettings settings = getCurrentUserSettings();
+        if (settings != null && settings.getLlmModel() != null && !settings.getLlmModel().isEmpty()) {
+            return settings.getLlmModel();
+        }
+        return null;
+    }
+
+    private UserSettings getCurrentUserSettings() {
+        try {
+            Long userId = securityHelper.getCurrentUserId();
+            if (userId != null) {
+                return userSettingsService.findByUserId(userId.toString()).orElse(null);
+            }
+        } catch (Exception e) {
+            log.warn("获取用户设置失败: {}", e.getMessage());
+        }
+        return null;
+    }
 
     /**
      * 接收 AstrBot 的消息推送
@@ -189,8 +222,11 @@ public class AstrBotController {
             // 3. 直接调用 AstrBot API 获取分析结果
             String url = astrBotApiUrl + "/api/v1/chat";
             
+            String userApiKey = getCurrentUserAstrbotApiKey();
+            String token = (userApiKey != null && !userApiKey.isEmpty()) ? userApiKey : astrBotToken;
+            
             HttpHeaders headers = new HttpHeaders();
-            headers.set("Authorization", "Bearer " + astrBotToken);
+            headers.set("X-API-Key", token);
             headers.setContentType(MediaType.APPLICATION_JSON);
             headers.set("Accept", "application/json");
             
@@ -284,14 +320,14 @@ public class AstrBotController {
             try {
                 ObjectNode error = objectMapper.createObjectNode();
                 error.put("status", "error");
-                error.put("message", e.getMessage());
+                error.put("message", "AstrBot 服务暂时不可用，请稍后重试");
                 return ResponseEntity.ok()
                     .header("Content-Type", "application/json; charset=UTF-8")
                     .body(objectMapper.writeValueAsString(error));
             } catch (Exception ex) {
                 return ResponseEntity.ok()
                     .header("Content-Type", "application/json; charset=UTF-8")
-                    .body("{\"status\":\"error\",\"message\":\"" + e.getMessage() + "\"}");
+                    .body("{\"status\":\"error\",\"message\":\"AstrBot 服务暂时不可用，请稍后重试\"}");
             }
         }
     }
@@ -353,8 +389,11 @@ public class AstrBotController {
             // 4. 调用 AstrBot HTTP API
             String url = astrBotApiUrl + "/api/v1/chat";
             
+            String userApiKey = getCurrentUserAstrbotApiKey();
+            String token = (userApiKey != null && !userApiKey.isEmpty()) ? userApiKey : astrBotToken;
+            
             HttpHeaders headers = new HttpHeaders();
-            headers.set("Authorization", "Bearer " + astrBotToken);
+            headers.set("X-API-Key", token);
             headers.setContentType(MediaType.APPLICATION_JSON);
             headers.set("Accept", "application/json");
             
@@ -362,6 +401,11 @@ public class AstrBotController {
             body.put("message", message);
             body.put("username", userQq != null ? userQq : "web_user");
             body.put("enable_streaming", false);
+            String selectedModel = getCurrentUserLlmModel();
+            if (selectedModel != null) {
+                body.put("model", selectedModel);
+                log.info("使用用户选择的模型: {}", selectedModel);
+            }
             if (groupId != null) {
                 body.put("session_id", groupId);
             }
@@ -487,7 +531,7 @@ public class AstrBotController {
             e.printStackTrace();
             
             String errorMsg = e.getMessage();
-            String fallbackMessage = errorMsg != null ? errorMsg : "调用 AstrBot 服务失败，请检查服务是否启动";
+            String fallbackMessage = "AstrBot 服务暂时不可用，请稍后重试";
             
             if (currentConversationId != null) {
                 try {

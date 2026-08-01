@@ -86,6 +86,7 @@ public class AuthController {
         DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
         AuthResponse response = new AuthResponse(
+                user.getId(),
                 token,
                 user.getUsername(),
                 user.getNickname(),
@@ -168,6 +169,7 @@ public class AuthController {
 
         User user = userOpt.get();
         Map<String, Object> response = new HashMap<>();
+        response.put("id", user.getId());
         response.put("username", user.getUsername());
         response.put("nickname", user.getNickname());
         response.put("role", user.getRole());
@@ -214,6 +216,7 @@ public class AuthController {
         userService.save(user);
 
         Map<String, Object> response = new HashMap<>();
+        response.put("id", user.getId());
         response.put("username", user.getUsername());
         response.put("nickname", user.getNickname());
         response.put("role", user.getRole());

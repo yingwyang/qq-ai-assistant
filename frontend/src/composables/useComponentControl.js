@@ -70,6 +70,11 @@ export function useComponentControl({ showSystemMsg } = {}) {
     window.open(url, '_blank');
   };
 
+  const openGptSovitsWebUI = () => {
+    const url = 'http://localhost:9874';
+    window.open(url, '_blank');
+  };
+
   const startAstrBot = async () => {
     isStartingAstrBot.value = true;
     try {
@@ -167,7 +172,7 @@ export function useComponentControl({ showSystemMsg } = {}) {
     isStartingNapCat, isStoppingNapCat,
     isStartingGptSovits, isStoppingGptSovits,
     getComponentStatus, refreshQrCode, onAutoLoginChange, checkNapCatLogin,
-    loadNapCatWebUiUrl, openNapCatWebUI,
+    loadNapCatWebUiUrl, openNapCatWebUI, openGptSovitsWebUI,
     startAstrBot, stopAstrBot, startNapCat, stopNapCat, startGptSovits, stopGptSovits,
     startPolling, stopPolling,
   };
