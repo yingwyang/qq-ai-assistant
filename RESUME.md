@@ -23,7 +23,19 @@
 
 ---
 
-## 三、竞赛荣誉
+## 三、证书与荣誉
+
+### 3.1 专业认证
+
+- 🏅 **HarmonyOS 应用开发者高级认证** — 华为开发者学堂 · 2026年6月
+  - 证书编码：TCNdxw7wzz
+  - 有效期至：2028年6月22日
+
+- 🏅 **HarmonyOS 应用开发者基础认证** — 华为开发者学堂 · 2026年6月
+  - 证书编码：TCNwz6s6o
+  - 有效期至：2028年6月14日
+
+### 3.2 竞赛荣誉
 
 - 🏆 **蓝桥杯全国软件和信息技术专业人才大赛** — 省级三等奖
   - 具备扎实算法基础与编程逻辑，能独立分析并实现复杂问题求解
@@ -70,8 +82,9 @@
 | 类别 | 技能 |
 |------|------|
 | **后端** | Java、SpringBoot 3.x、MyBatis、MySQL（分表/优化）、WebSocket、RESTful API 设计、Spring Security、JWT |
-| **前端** | Vue3、HTML/CSS、JavaScript、响应式布局、Vite |
-| **工具/中间件** | IDEA、Git、Maven、Postman、Navicat、MinIO、FFmpeg |
+| **前端** | Vue3、HTML/CSS、JavaScript、响应式布局、Vite、ArkTS、HarmonyOS |
+| **移动开发** | HarmonyOS（基础认证 + 高级认证）、ArkUI、Stage 模型、Ability 开发 |
+| **工具/中间件** | IDEA、Git、Maven、Postman、Navicat、MinIO、FFmpeg、DevEco Studio |
 | **其他** | 多组件集成、跨平台开发兼容、问题排查与性能优化、技术文档编写、Groovy 脚本插件开发 |
 
 ---
