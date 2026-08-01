@@ -1,5 +1,11 @@
 # 铃音QQ对话 - 跨端智能聊天辅助系统
 
+<p align="center">
+  <strong>作者：何彦珏 (He Yanjue)</strong> · 东华理工大学 · 软件学院 · 软件工程<br>
+  <a href="mailto:2488130337@qq.com">📧 2488130337@qq.com</a> · 
+  <a href="tel:19079444215">📱 19079444215</a>
+</p>
+
 基于 **Spring Boot 3 + Vue 3 + AstrBot + NapCat + GPT-SoVITS** 的跨端智能聊天辅助系统。
 
 ---
@@ -664,9 +670,23 @@ backend/uploads/images/
 
 ---
 
+## 作者信息
+
+| 项目 | 内容 |
+|------|------|
+| 姓名 | 何彦珏 (He Yanjue) |
+| 学校 | 东华理工大学 · 软件学院 · 软件工程 |
+| 求职意向 | Java 开发工程师 / 后端开发工程师 |
+| 邮箱 | 2488130337@qq.com |
+| 电话 | 19079444215 |
+
+详细简历请查看 [RESUME.md](RESUME.md)。
+
+---
+
 ## 许可证
 
-MIT License
+本项目基于 [MIT License](LICENSE) 开源。
 
 ---
 

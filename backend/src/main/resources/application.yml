@@ -36,7 +36,7 @@ server:
 # AstrBot配置
 astrbot:
   api-url: ${ASTRBOT_API_URL:http://localhost:6185}
-  token: ${ASTRBOT_TOKEN:***REMOVED***}
+  token: ${ASTRBOT_TOKEN:your-astrbot-api-key}
   data-path: ${ASTRBOT_DATA_PATH:D:/ai/Documents/qq-web/Astrbot/data}
 
 # NapCat配置
@@ -44,9 +44,9 @@ napcat:
   api-url: ${NAPCAT_API_URL:http://localhost:6100}
   onebot-api-url: ${NAPCAT_ONEBOT_API_URL:http://localhost:6100}
   webui-url: ${NAPCAT_WEBUI_URL:http://127.0.0.1:6099}
-  token: ${NAPCAT_TOKEN:***REMOVED***}
-  webhook-token: ${NAPCAT_WEBHOOK_TOKEN:***REMOVED***}
-  self-qq: ${NAPCAT_SELF_QQ:2488130337}
+  token: ${NAPCAT_TOKEN:your-napcat-token}
+  webhook-token: ${NAPCAT_WEBHOOK_TOKEN:your-webhook-token}
+  self-qq: ${NAPCAT_SELF_QQ:your-qq-number}
 
 # GPT-SoVITS配置
 gpt-sovits:
