@@ -8,17 +8,7 @@
       <h3 v-if="!isCollapsed" class="sidebar-title">铃音QQ对话</h3>
     </div>
     
-    <!-- 用户信息区域 -->
-    <div v-if="isLoggedIn && userInfo" class="user-info" @click="openUserProfile">
-        <div class="user-avatar">
-          <img :src="userAvatarUrl" alt="avatar" @error="handleAvatarError" />
-        </div>
-        <div v-if="!isCollapsed" class="user-details">
-        <div class="user-nickname">{{ userInfo.nickname || userInfo.username }}</div>
-        <div class="user-role">{{ userInfo.role === 'ADMIN' ? '管理员' : '用户' }}</div>
-      </div>
-      <div v-if="!isCollapsed" class="profile-arrow">›</div>
-    </div>
+    
     
     <nav v-if="isLoggedIn" class="sidebar-nav">
       <div class="nav-section">
@@ -66,9 +56,21 @@
                       :alt="group.groupName"
                       @error="handleAvatarError"
                     />
+                    <span
+                      v-if="!isCollapsed && group.groupType && group.groupType !== 'OTHER'"
+                      :class="['gt-badge', `gt-badge-${group.groupType}`]"
+                      :title="GT_MAP[group.groupType]?.label || group.groupType"
+                    >{{ GT_MAP[group.groupType]?.icon || '' }}</span>
                   </div>
                   <div v-if="!isCollapsed" class="group-info">
-                    <div class="group-name">{{ group.groupName || '群聊 ' + group.groupId }}</div>
+                    <div class="group-name">
+                      {{ group.groupName || '群聊 ' + group.groupId }}
+                      <span
+                        v-if="group.groupType && group.groupType !== 'OTHER' && GT_MAP[group.groupType]"
+                        :class="['gt-mini', `gt-mini-${group.groupType}`]"
+                        :title="GT_MAP[group.groupType].desc"
+                      >{{ GT_MAP[group.groupType].label }}</span>
+                    </div>
                     <div class="group-id">{{ group.groupId }}</div>
                   </div>
                   <span v-if="!isCollapsed && group.unreadCount && group.unreadCount > 0" class="unread-badge">
@@ -84,24 +86,55 @@
     </nav>
     
     <div class="sidebar-footer">
-      <!-- 系统管理按钮（仅已登录用户可见） -->
-      <button v-if="isLoggedIn" class="nav-item system-btn" @click="openAdminDashboard">
-        <span class="nav-icon"><Icon name="settings" :size="16" /></span>
-        <span v-if="!isCollapsed" class="nav-text">系统管理</span>
-      </button>
+      <div v-if="isLoggedIn && userInfo" class="user-info footer-user-info" @click="showMenu = true">
+        <div class="user-avatar">
+          <img :src="userAvatarUrl" alt="avatar" @error="handleAvatarError" />
+        </div>
+        <div v-if="!isCollapsed" class="user-name-footer">{{ userInfo.nickname || userInfo.username }}</div>
+        <div v-if="!isCollapsed" class="profile-arrow">›</div>
+      </div>
 
-      <!-- 登录按钮（仅未登录用户可见） -->
+      <!-- 积分徽章：点击跳转用量管理 -->
+      <div
+        v-if="isLoggedIn && userInfo && !isCollapsed"
+        class="credits-badge"
+        @click="goToCreditsCenter"
+        title="查看用量管理"
+      >
+        <span class="credits-badge-gem">💎</span>
+        <span class="credits-badge-num">{{ formatCreditsNumber(balance) }}</span>
+        <span class="credits-badge-label">积分</span>
+      </div>
+
       <button v-if="!isLoggedIn" class="nav-item login-btn" @click="openLoginModal">
         <span class="nav-icon"><Icon name="lock" :size="16" /></span>
         <span v-if="!isCollapsed" class="nav-text">登录</span>
       </button>
-
-      <!-- 退出登录按钮 -->
-      <button v-if="isLoggedIn" class="nav-item logout-btn" @click="logout">
-        <span class="nav-icon"><Icon name="logout" :size="16" /></span>
-        <span v-if="!isCollapsed" class="nav-text">退出登录</span>
-      </button>
     </div>
+
+    <UserMenuPopover
+      :visible="showMenu"
+      :user-info="userInfo"
+      :user-avatar-url="userAvatarUrl"
+      :theme="theme"
+      @close="showMenu = false"
+      @open-user-center="handleOpenUserCenter"
+      @open-admin="handleOpenAdmin"
+      @open-docs="handleOpenDocs"
+      @toggle-theme="handleToggleTheme"
+      @logout="handleLogout"
+    />
+
+    <!-- 群类型设置弹窗 -->
+    <GroupTypeSelector
+      v-model:visible="groupTypeSelectorVisible"
+      :group-id="groupTypeTarget?.groupId ?? null"
+      :owner-qq="groupTypeTarget?.ownerQq ?? null"
+      :group-name="groupTypeTarget?.groupName ?? null"
+      :initial-group-type="computedTargetGroupType"
+      @save="handleGroupTypeSaved"
+      @close="closeGroupTypeSelector"
+    />
 
     <!-- 右键删除菜单 -->
     <div
@@ -110,7 +143,13 @@
       :style="{ top: contextMenuPosition.top + 'px', left: contextMenuPosition.left + 'px' }"
       @click.stop
     >
-      <div class="context-menu-header">删除群消息</div>
+      <div class="context-menu-header">{{ contextMenuGroup?.groupName ? (contextMenuGroup.groupName.length > 14 ? contextMenuGroup.groupName.slice(0,14)+'…' : contextMenuGroup.groupName) : '群聊操作' }}</div>
+      <div class="context-menu-item" @click="openGroupTypeSelector">
+        <span class="context-menu-icon"><Icon name="tag" :size="14" /></span>
+        设置群类型（AI 融入）
+      </div>
+      <div class="context-menu-divider"></div>
+      <div class="context-menu-header">一键删除群消息</div>
       <div class="context-menu-item" @click="deleteMessagesByType('IMAGE')">
         <span class="context-menu-icon"><Icon name="image" :size="14" /></span>
         删除图片消息
@@ -147,10 +186,25 @@ import { messageApi, userApi } from '../services/api';
 import Icon from './Icon.vue';
 import { showToast } from './Toast.vue';
 import { showConfirm } from './ConfirmDialog.vue';
+import { useTheme } from '../composables/useTheme';
+import { useUserCreditsStore } from '../composables/useUserCreditsStore';
+import UserMenuPopover from './UserMenuPopover.vue';
+import GroupTypeSelector from './GroupTypeSelector.vue';
+
+// 群类型元数据（与后端/其他组件保持一致）
+const GT_MAP = {
+  GAME:   { label: '游戏群', icon: '🎮', color: '#6366f1' },
+  STUDY:  { label: '学习群', icon: '📚', color: '#10b981' },
+  WORK:   { label: '工作群', icon: '💼', color: '#f59e0b' },
+  HOBBY:  { label: '兴趣群', icon: '🎨', color: '#ec4899' },
+  LIFE:   { label: '生活群', icon: '☕', color: '#14b8a6' },
+  SOCIAL: { label: '社交群', icon: '💬', color: '#3b82f6' },
+  OTHER:  { label: '其他群', icon: '🏷️', color: '#6b7280' }
+};
 
 export default {
     name: 'Sidebar',
-    components: { Icon },
+    components: { Icon, UserMenuPopover, GroupTypeSelector },
   props: {
     isLoggedIn: {
       type: Boolean,
@@ -165,10 +219,29 @@ export default {
       default: false
     }
   },
-  emits: ['tab-change', 'logout', 'open-login-modal', 'open-system-modal', 'open-user-profile', 'select-group'],
+  emits: ['tab-change', 'logout', 'open-login-modal', 'open-system-modal', 'open-user-profile', 'select-group', 'toggle-sidebar', 'show-context-menu', 'navigate-admin', 'navigate-docs', 'group-type-change'],
   setup(props, { emit }) {
     const router = useRouter();
+    const { theme, toggleTheme: toggleThemeAction } = useTheme();
+
+    // 全局共享积分余额（与 UserMenuPopover / UserCenter 同步）
+    const { balance } = useUserCreditsStore();
+
+    const formatCreditsNumber = (n) => {
+      if (n === null || n === undefined) return '0';
+      return Number(n).toLocaleString('zh-CN');
+    };
+
+    const goToCreditsCenter = () => {
+      router.push('/user-center?tab=credits');
+    };
+
+    const toggleTheme = () => {
+      toggleThemeAction();
+    };
+
     const isCollapsedLocal = ref(false);
+    const showMenu = ref(false);
     const activeTab = ref('recent');
     const recentGroups = ref([]);
     const STORAGE_KEY_RECENT = 'sidebar_recent_expanded';
@@ -212,7 +285,48 @@ export default {
     // 右键菜单状态
     const contextMenuVisible = ref(false);
     const contextMenuPosition = ref({ top: 0, left: 0 });
-    const contextMenuGroup = ref(null); // { groupId, ownerQq }
+    const contextMenuGroup = ref(null); // { groupId, ownerQq, groupName, groupType }
+
+    // 群类型选择器状态
+    const groupTypeSelectorVisible = ref(false);
+    const groupTypeTarget = ref(null); // { groupId, ownerQq, groupName }
+    // 取目标群的当前类型（优先从 recentGroups 中取，保证是最新的）
+    const computedTargetGroupType = computed(() => {
+      const t = groupTypeTarget.value;
+      if (!t) return null;
+      const g = recentGroups.value.find(
+        r => r.groupId === t.groupId && r.ownerQq === t.ownerQq
+      );
+      return (g && g.groupType) ? g.groupType : null;
+    });
+
+    const openGroupTypeSelector = () => {
+      const g = contextMenuGroup.value;
+      hideContextMenu();
+      if (!g) return;
+      groupTypeTarget.value = {
+        groupId: g.groupId,
+        ownerQq: g.ownerQq,
+        groupName: g.groupName || null
+      };
+      groupTypeSelectorVisible.value = true;
+    };
+
+    const closeGroupTypeSelector = () => {
+      groupTypeSelectorVisible.value = false;
+      groupTypeTarget.value = null;
+    };
+
+    // 保存群类型后：更新 recentGroups 中的对应群，并且如果当前选中的是这个群，通知父组件（父组件通知 ChatInterface 更新展示）
+    const handleGroupTypeSaved = ({ groupType, groupId, ownerQq }) => {
+      const g = recentGroups.value.find(r => r.groupId === groupId && r.ownerQq === ownerQq);
+      if (g) g.groupType = groupType;
+      // 如果当前选中群就是这个群，emit 通知父组件
+      if (selectedGroup.value && selectedGroup.value.groupId === groupId && selectedGroup.value.ownerQq === ownerQq) {
+        emit('group-type-change', { groupId, ownerQq, groupType, groupName: g?.groupName });
+      }
+      closeGroupTypeSelector();
+    };
 
     // 暴露给父组件的方法
     const refreshGroups = () => {
@@ -270,11 +384,56 @@ export default {
     };
 
     const openAdminDashboard = () => {
-      if (props.userInfo?.role === 'ADMIN') {
-        router.push('/admin');
+      const targetPath = props.userInfo?.role === 'ADMIN' ? '/admin' : '/user-center';
+      if (router.currentRoute.value.path === targetPath) {
+        window.dispatchEvent(new CustomEvent('app:refresh'));
       } else {
-        router.push('/user-center');
+        router.push(targetPath);
       }
+    };
+
+    const openHelpPage = () => {
+      window.open('https://www.touchgal.ink/doc/notice/feedback', '_blank');
+    };
+
+    const handleOpenUserCenter = () => {
+      showMenu.value = false;
+      const targetPath = '/user-center';
+      if (router.currentRoute.value.path === targetPath) {
+        window.dispatchEvent(new CustomEvent('app:refresh'));
+      } else {
+        router.push(targetPath);
+      }
+    };
+
+    const handleOpenAdmin = () => {
+      showMenu.value = false;
+      openAdminDashboard();
+    };
+
+    const handleOpenDocs = () => {
+      showMenu.value = false;
+      emit('navigate-docs');
+    };
+
+    const handleGoHome = () => {
+      showMenu.value = false;
+      if (router.currentRoute.value.path === '/') {
+        window.dispatchEvent(new CustomEvent('app:refresh'));
+      } else {
+        router.push('/');
+      }
+    };
+
+    const handleToggleTheme = (mode) => {
+      const { setTheme } = useTheme();
+      setTheme(mode);
+      showMenu.value = false;
+    };
+
+    const handleLogout = () => {
+      showMenu.value = false;
+      logout();
     };
 
     const selectGroup = async (group) => {
@@ -296,13 +455,15 @@ export default {
         console.warn('标记群聊 ' + group.groupId + ' 为已读失败:', e);
       }
 
-      emit('select-group', { groupId: group.groupId, ownerQq: group.ownerQq });
+      emit('select-group', { groupId: group.groupId, ownerQq: group.ownerQq, groupName: group.groupName });
     };
 
     const showContextMenu = (event, group) => {
       contextMenuGroup.value = {
         groupId: group.groupId,
-        ownerQq: group.ownerQq
+        ownerQq: group.ownerQq,
+        groupName: group.groupName || null,
+        groupType: group.groupType || null
       };
       contextMenuPosition.value = {
         top: event.clientY,
@@ -347,7 +508,7 @@ export default {
           // 立即刷新群聊列表（最后消息时间、未读数等）
           loadRecentGroups();
           // 通知父组件重新加载当前群聊消息
-          emit('select-group', { groupId: group.groupId, ownerQq: group.ownerQq });
+          emit('select-group', { groupId: group.groupId, ownerQq: group.ownerQq, groupName: group.groupName });
         } else {
           showToast(result?.message || '删除失败', 'error');
         }
@@ -532,6 +693,16 @@ export default {
       openSystemModal,
       openUserProfile,
       openAdminDashboard,
+      openHelpPage,
+      theme,
+      toggleTheme,
+      showMenu,
+      handleOpenUserCenter,
+      handleOpenAdmin,
+      handleOpenDocs,
+      handleGoHome,
+      handleToggleTheme,
+      handleLogout,
       selectGroup,
       getGroupsByQq,
       isQqBindingExpanded,
@@ -543,9 +714,21 @@ export default {
       userAvatarUrl,
       contextMenuVisible,
       contextMenuPosition,
+      contextMenuGroup,
       showContextMenu,
       hideContextMenu,
-      deleteMessagesByType
+      deleteMessagesByType,
+      balance,
+      formatCreditsNumber,
+      goToCreditsCenter,
+      // 群类型设置相关
+      GT_MAP,
+      groupTypeSelectorVisible,
+      groupTypeTarget,
+      computedTargetGroupType,
+      openGroupTypeSelector,
+      closeGroupTypeSelector,
+      handleGroupTypeSaved
     };
   }
 };
@@ -615,18 +798,18 @@ export default {
 
 /* 用户信息区域 */
 .user-info {
-  padding: 15px 20px;
+  padding: 12px 16px;
   display: flex;
   align-items: center;
   gap: 12px;
-  border-bottom: 1px solid #34495e;
-  background-color: #34495e;
+  background-color: transparent;
   cursor: pointer;
   transition: background-color 0.2s;
+  border-bottom: none;
 }
 
 .user-info:hover {
-  background-color: #3d566e;
+  background-color: var(--sidebar-hover, #34495e);
 }
 
 .profile-arrow {
@@ -924,6 +1107,58 @@ export default {
   border-top: 1px solid #34495e;
 }
 
+.footer-user-info {
+  border-bottom: 1px solid var(--border-color, #34495e);
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 积分徽章 */
+.credits-badge {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin: 0 16px 10px;
+  padding: 6px 12px;
+  background: linear-gradient(135deg, rgba(52, 152, 219, 0.18), rgba(155, 89, 182, 0.18));
+  border: 1px solid rgba(52, 152, 219, 0.35);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+  user-select: none;
+}
+.credits-badge:hover {
+  background: linear-gradient(135deg, rgba(52, 152, 219, 0.32), rgba(155, 89, 182, 0.32));
+  border-color: rgba(52, 152, 219, 0.6);
+  transform: translateY(-1px);
+}
+.credits-badge-gem {
+  font-size: 13px;
+  line-height: 1;
+}
+.credits-badge-num {
+  font-size: 13px;
+  font-weight: 700;
+  color: #ecf0f1;
+}
+.credits-badge-label {
+  font-size: 11px;
+  color: #95a5a6;
+  margin-left: 1px;
+}
+
+.user-name-footer {
+  flex: 1;
+  color: #ecf0f1;
+  font-size: 13px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .login-btn {
   width: 100%;
   background: none;
@@ -1035,4 +1270,49 @@ export default {
   background-color: #eee;
   margin: 4px 0;
 }
+
+/* 群类型展示：头像右下角徽章 + 群名旁迷你标签 */
+.gt-badge {
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  color: white;
+  border: 2px solid #2c3e50;
+  box-shadow: 0 0 0 1px rgba(0,0,0,0.1);
+  line-height: 1;
+}
+.gt-badge-GAME   { background: #6366f1; }
+.gt-badge-STUDY  { background: #10b981; }
+.gt-badge-WORK   { background: #f59e0b; }
+.gt-badge-HOBBY  { background: #ec4899; }
+.gt-badge-LIFE   { background: #14b8a6; }
+.gt-badge-SOCIAL { background: #3b82f6; }
+.gt-badge-OTHER  { background: #6b7280; }
+
+.gt-mini {
+  display: inline-block;
+  margin-left: 5px;
+  padding: 0 5px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+  border-radius: 4px;
+  color: white;
+  vertical-align: middle;
+  transform: translateY(-1px);
+}
+.gt-mini-GAME   { background: #6366f1; }
+.gt-mini-STUDY  { background: #10b981; }
+.gt-mini-WORK   { background: #f59e0b; }
+.gt-mini-HOBBY  { background: #ec4899; }
+.gt-mini-LIFE   { background: #14b8a6; }
+.gt-mini-SOCIAL { background: #3b82f6; }
+.gt-mini-OTHER  { background: #6b7280; }
 </style>

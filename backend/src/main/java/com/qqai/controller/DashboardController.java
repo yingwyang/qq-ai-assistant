@@ -43,4 +43,14 @@ public class DashboardController {
     public ResponseEntity<?> getMessageTypeDistribution() {
         return ResponseEntity.ok(dashboardService.getMessageTypeDistribution());
     }
+
+    @GetMapping("/hourly-distribution")
+    public ResponseEntity<?> getHourlyDistribution() {
+        return ResponseEntity.ok(dashboardService.getHourlyDistribution());
+    }
+
+    @GetMapping("/ai-trend")
+    public ResponseEntity<?> getAiTrend() {
+        return ResponseEntity.ok(dashboardService.getAiTrend());
+    }
 }

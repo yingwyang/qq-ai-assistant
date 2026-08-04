@@ -6,6 +6,18 @@
         <h1>用户中心</h1>
       </div>
       <div class="header-actions">
+        <div
+          v-if="activeTab === 'credits' || activeTab === 'subscription'"
+          class="header-credits-summary"
+        >
+          <span class="hcs-tier" :class="{ paid: tier !== 'FREE' }">{{ tierLabel }}</span>
+          <span v-if="expiresAt" class="hcs-expire">{{ formatShortDate(expiresAt) }}到期</span>
+          <span class="hcs-divider">·</span>
+          <span class="hcs-balance">
+            <span class="hcs-gem">💎</span>
+            <span class="hcs-num">{{ formatCreditsNumber(balance) }}</span>
+          </span>
+        </div>
         <button class="btn-home" @click="goHome">
           <Icon name="home" :size="16" /> 返回首页
         </button>
@@ -30,71 +42,152 @@
       </aside>
 
       <main class="user-center-main">
-        <div v-if="activeTab === 'napcat'" class="tab-panel">
+        <div v-if="activeTab === 'dashboard'" class="tab-panel">
           <div class="panel-title">
-            <Icon name="settings" :size="20" />
-            <h2>NapCat 管理</h2>
+            <Icon name="dashboard" :size="20" />
+            <h2>数据概览</h2>
           </div>
 
-          <div class="napcat-layout">
-            <div class="napcat-intro-card">
-              <h4>本系统 NapCat 功能</h4>
-              <div class="intro-content">
-                <p>本系统通过 NapCat 与 QQ 打通，实现以下能力：</p>
-                <ul>
-                  <li><strong>消息接入</strong> - 接收群聊和私聊消息，存入消息库供查看与管理</li>
-                  <li><strong>AI 回复</strong> - 对接 AstrBot，对消息进行智能分析与自动回复</li>
-                  <li><strong>多媒体管理</strong> - 接收的图片、语音、视频等文件自动归档，支持在线预览</li>
-                  <li><strong>Webhook 推送</strong> - 支持将消息实时推送到外部系统</li>
-                </ul>
-                <p class="intro-tip">请先启动 NapCat，再使用 QQ 扫码登录，即可开始接收消息。</p>
-              </div>
-            </div>
-
-            <div class="napcat-right">
-              <div class="section-card napcat-login-card">
-                <h4>NapCat 登录</h4>
-                <div class="login-area">
-                  <div v-if="qrCode" class="qrcode-box">
-                    <img :src="qrCode" alt="NapCat登录二维码" />
-                    <p>请使用QQ扫码登录</p>
-                    <button class="btn-refresh" @click="refreshQrCode">刷新二维码</button>
-                    <label class="auto-login-label">
-                      <input type="checkbox" v-model="autoLogin" @change="onAutoLoginChange" />
-                      下次自动登录
-                    </label>
-                  </div>
-                  <div v-else class="loading-box">
-                    <p>获取登录二维码中...</p>
-                  </div>
-                </div>
-              </div>
-
-              <div class="component-card napcat-control-card">
-                <div class="component-header">
-                  <div class="component-status-dot" :class="{ active: componentStatus.napcat?.running }"></div>
-                  <span class="component-title">NapCat</span>
-                  <span class="component-status-text">{{ componentStatus.napcat?.running ? '运行中' : '已停止' }}</span>
-                </div>
-                <div class="component-actions">
-                  <button class="btn-start" :disabled="isStartingNapCat || componentStatus.napcat?.running" @click="startNapCat">
-                    {{ isStartingNapCat ? '启动中...' : '启动' }}
-                  </button>
-                  <button class="btn-stop" :disabled="isStoppingNapCat || !componentStatus.napcat?.running" @click="stopNapCat">
-                    {{ isStoppingNapCat ? '停止中...' : '停止' }}
-                  </button>
-                </div>
-                <a
-                  :href="napCatWebUiUrl || 'http://127.0.0.1:6099/webui'"
-                  target="_blank"
-                  class="webui-link"
-                  @click.prevent="openNapCatWebUI"
-                >
-                  <Icon name="globe" :size="14" /> 打开 NapCat WebUI
-                </a>
-              </div>
-            </div>
+          <!-- 加载中 -->
+          <div v-if="dashboardLoading" class="dashboard-loading">
+            <div class="loading-spinner"></div>
+            <span>加载中...</span>
           </div>
+
+          <template v-else>
+            <!-- 空状态：未绑定QQ（根据实际QQ绑定列表判断） -->
+            <div v-if="!qqBindingsLoading && qqBindings.length === 0" class="dashboard-empty">
+              <Icon name="message-circle" :size="40" />
+              <p>请先绑定QQ账号以查看数据概览</p>
+            </div>
+
+            <template v-else>
+              <!-- 统计卡片 -->
+              <div class="stats-cards">
+                <div class="stat-card">
+                  <div class="stat-icon blue"><Icon name="chat" :size="28" /></div>
+                  <div class="stat-info">
+                    <div class="stat-value">{{ dashboardStats.totalMessages || 0 }}</div>
+                    <div class="stat-label">我的消息数</div>
+                    <div class="stat-sub">今日 {{ dashboardStats.todayMessages || 0 }}</div>
+                  </div>
+                </div>
+                <div class="stat-card">
+                  <div class="stat-icon purple"><Icon name="group" :size="28" /></div>
+                  <div class="stat-info">
+                    <div class="stat-value">{{ dashboardStats.totalGroups || 0 }}</div>
+                    <div class="stat-label">我的群聊数</div>
+                    <div class="stat-sub">活跃 {{ dashboardStats.activeGroups || 0 }}</div>
+                  </div>
+                </div>
+                <div class="stat-card">
+                  <div class="stat-icon orange"><Icon name="robot" :size="28" /></div>
+                  <div class="stat-info">
+                    <div class="stat-value">{{ dashboardStats.totalConversations || 0 }}</div>
+                    <div class="stat-label">AI 对话数</div>
+                  </div>
+                </div>
+                <div class="stat-card">
+                  <div class="stat-icon teal"><Icon name="file" :size="28" /></div>
+                  <div class="stat-info">
+                    <div class="stat-value">{{ dashboardStats.totalFiles || 0 }}</div>
+                    <div class="stat-label">我的文件数</div>
+                  </div>
+                </div>
+                <div class="stat-card">
+                  <div class="stat-icon red"><Icon name="disk" :size="28" /></div>
+                  <div class="stat-info">
+                    <div class="stat-value">{{ dashboardStats.filesSizeFormatted || '0 B' }}</div>
+                    <div class="stat-label">文件占用</div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 图表区域 -->
+              <div class="charts-grid">
+                <div class="chart-card chart-large">
+                  <div class="chart-header">
+                    <h4>我的消息趋势</h4>
+                    <div class="chart-controls">
+                      <button
+                        class="chart-btn"
+                        :class="{ active: trendInterval === 'hour' }"
+                        @click="setTrendDays(1, 'hour')"
+                      >
+                        24小时
+                      </button>
+                      <button
+                        v-for="d in [7, 30, 90]"
+                        :key="d"
+                        class="chart-btn"
+                        :class="{ active: trendDays === d && trendInterval === 'day' }"
+                        @click="setTrendDays(d, 'day')"
+                      >
+                        {{ d }}天
+                      </button>
+                    </div>
+                  </div>
+                  <v-chart
+                    class="line-chart-echarts"
+                    :option="trendChartOption"
+                    autoresize
+                  />
+                </div>
+
+                <div class="chart-card">
+                  <h4>我的活跃群聊排行 TOP5</h4>
+                  <v-chart
+                    class="ranking-chart"
+                    :option="groupRankingOption"
+                    autoresize
+                  />
+                </div>
+
+                <div class="chart-card">
+                  <h4>我的消息类型分布</h4>
+                  <v-chart
+                    class="pie-chart-echarts"
+                    :option="distributionChartOption"
+                    autoresize
+                  />
+                </div>
+
+                <div class="chart-card">
+                  <h4>我的 AI 对话趋势</h4>
+                  <v-chart
+                    class="line-chart-echarts"
+                    :option="aiTrendChartOption"
+                    autoresize
+                  />
+                </div>
+              </div>
+            </template>
+          </template>
+        </div>
+
+        <div v-if="activeTab === 'credits'" class="tab-panel">
+          <div class="panel-title">
+            <Icon name="star" :size="20" />
+            <h2>用量管理</h2>
+          </div>
+          <CreditsDashboard
+            :auto-focus-sign-in="autoFocusSignIn"
+            :auto-related-id="autoRelatedId"
+            @open-upgrade="handleCreditsOpenUpgrade"
+            @switch-tab="handleCreditsSwitchTab"
+          />
+        </div>
+
+        <div v-if="activeTab === 'subscription'" class="tab-panel">
+          <div class="panel-title">
+            <Icon name="layers" :size="20" />
+            <h2>订阅管理</h2>
+          </div>
+          <SubscriptionDashboard
+            :auto-open-upgrade="autoOpenUpgrade"
+            @switch-tab="handleCreditsSwitchTab"
+            @refresh-credits="handleRefreshCredits"
+          />
         </div>
 
         <div v-if="activeTab === 'media'" class="tab-panel">
@@ -204,7 +297,7 @@
                     :disabled="mediaFilesLoading || isPurging || mediaFiles.length === 0"
                     @click="previewAllFiles"
                   >
-                    {{ mediaFilesLoading ? '加载中...' : '预览全部' }}
+                    预览全部
                   </button>
                   <button
                     class="btn-delete"
@@ -223,37 +316,105 @@
           <div class="panel-title">
             <Icon name="user" :size="20" />
             <h2>个人信息</h2>
-            <button class="btn-edit-profile" @click="openEditModal">
-              <Icon name="edit" :size="14" />
-              编辑资料
-            </button>
           </div>
-          <div class="section-card profile-card">
-            <div class="profile-avatar-section">
-              <div class="profile-avatar">
-                <img :src="userAvatarUrl" alt="avatar" @error="handleAvatarError" />
-              </div>
-              <div class="profile-info">
-                <h3>{{ userInfo?.nickname || userInfo?.username }}</h3>
-                <p class="profile-role">{{ userInfo?.role === 'ADMIN' ? '管理员' : '普通用户' }}</p>
+
+          <div class="profile-cards-grid">
+            <div class="section-card profile-card-new">
+              <div class="profile-avatar-card">
+                <div class="profile-avatar-large" @click="triggerAvatarUpload">
+                  <img :src="userAvatarUrl" alt="avatar" @error="handleAvatarError" />
+                  <div class="avatar-upload-overlay">
+                    <Icon name="upload" :size="18" />
+                    <span>更换头像</span>
+                  </div>
+                </div>
+                <input
+                  ref="avatarInput"
+                  type="file"
+                  accept="image/jpeg,image/png,image/gif"
+                  style="display: none"
+                  @change="onAvatarChange"
+                />
+                <div class="profile-info">
+                  <h3>{{ userInfo?.nickname || userInfo?.username }}</h3>
+                  <span class="role-badge" :class="{ admin: userInfo?.role === 'ADMIN' }">
+                    {{ userInfo?.role === 'ADMIN' ? '管理员' : '普通用户' }}
+                  </span>
+                </div>
+                <button class="btn-edit-profile" @click="openEditModal">
+                  <Icon name="edit" :size="14" />
+                  编辑资料
+                </button>
               </div>
             </div>
-            <div class="profile-details">
-              <div class="detail-row">
-                <label>用户名</label>
-                <span>{{ userInfo?.username }}</span>
+
+            <div class="section-card profile-card-new">
+              <h4>基本信息</h4>
+              <div class="profile-details">
+                <div class="detail-row">
+                  <label>用户名</label>
+                  <span>{{ userInfo?.username }}</span>
+                </div>
+                <div class="detail-row">
+                  <label>邮箱</label>
+                  <span>{{ userInfo?.email || '-' }}</span>
+                </div>
+                <div class="detail-row">
+                  <label>注册时间</label>
+                  <span>{{ formatDate(userInfo?.createdAt) }}</span>
+                </div>
+                <div class="detail-row">
+                  <label>最后登录</label>
+                  <span>{{ formatDate(userInfo?.lastLoginTime) }}</span>
+                </div>
               </div>
-              <div class="detail-row">
-                <label>邮箱</label>
-                <span>{{ userInfo?.email || '-' }}</span>
+            </div>
+
+            <div class="section-card profile-card-new">
+              <div class="qq-bindings-header">
+                <h4>QQ绑定</h4>
+                <button class="qq-add-btn" @click="openBindModal">
+                  <Icon name="add" :size="14" />
+                  添加绑定
+                </button>
               </div>
-              <div class="detail-row">
-                <label>注册时间</label>
-                <span>{{ formatDate(userInfo?.createdAt) }}</span>
+              <div v-if="qqBindingsLoading" class="qq-loading">
+                <div class="loading-spinner"></div>
+                <span>加载中...</span>
               </div>
-              <div class="detail-row">
-                <label>最后登录</label>
-                <span>{{ formatDate(userInfo?.lastLoginTime) }}</span>
+              <div v-else-if="qqBindings.length === 0" class="qq-empty">
+                <Icon name="message-circle" :size="32" />
+                <div>暂无QQ绑定</div>
+                <div class="qq-empty-hint">点击上方按钮绑定QQ账号</div>
+              </div>
+              <div v-else class="qq-bindings-list">
+                <div v-for="binding in qqBindings" :key="binding.id" class="qq-binding-item">
+                  <img :src="binding.avatar || '/default-avatar.svg'" :alt="binding.nickname" class="qq-binding-avatar" />
+                  <div class="qq-binding-info">
+                    <span class="qq-binding-nickname">{{ binding.nickname }}</span>
+                    <span class="qq-binding-number">QQ: {{ binding.qqNumber }}</span>
+                  </div>
+                  <div class="qq-binding-actions">
+                    <span v-if="binding.isDefault" class="qq-default-badge">默认</span>
+                    <button v-else class="qq-action-btn" @click="handleSetDefault(binding)" title="设为默认">
+                      <Icon name="star" :size="14" />
+                    </button>
+                    <button class="qq-action-btn danger" @click="handleUnbind(binding)" title="解绑">
+                      <Icon name="delete" :size="14" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="section-card profile-card-new">
+              <h4>账号安全</h4>
+              <div class="password-section">
+                <p class="password-desc">为了您的账号安全，建议定期更换密码</p>
+                <button class="btn-change-password" @click="openPasswordModal">
+                  <Icon name="lock" :size="14" />
+                  修改密码
+                </button>
               </div>
             </div>
           </div>
@@ -285,749 +446,75 @@
               </div>
             </div>
           </div>
-        </div>
 
-        <div v-if="activeTab === 'manual'" class="tab-panel manual-panel">
-          <div class="panel-title">
-            <Icon name="book" :size="20" />
-            <h2>用户手册</h2>
+          <div v-if="showPasswordModal" class="modal-overlay" @click.self="showPasswordModal = false">
+            <div class="modal-content">
+              <div class="modal-header">
+                <h3>修改密码</h3>
+                <button class="btn-close" @click="showPasswordModal = false">
+                  <Icon name="x" :size="16" />
+                </button>
+              </div>
+              <div class="modal-body">
+                <div class="form-group">
+                  <label>当前密码</label>
+                  <input v-model="passwordForm.oldPassword" type="password" placeholder="请输入当前密码" />
+                </div>
+                <div class="form-group">
+                  <label>新密码</label>
+                  <input v-model="passwordForm.newPassword" type="password" placeholder="请输入新密码（至少6位）" />
+                </div>
+                <div class="form-group">
+                  <label>确认新密码</label>
+                  <input v-model="passwordForm.confirmPassword" type="password" placeholder="请再次输入新密码" />
+                  <span v-if="passwordForm.confirmPassword && passwordForm.confirmPassword !== passwordForm.newPassword" class="error-message">两次输入的密码不一致</span>
+                </div>
+              </div>
+              <div class="modal-footer">
+                <button class="btn-cancel" @click="showPasswordModal = false">取消</button>
+                <button class="btn-save" @click="changePassword" :disabled="!isPasswordFormValid || isPasswordSaving">
+                  {{ isPasswordSaving ? '提交中...' : '确认修改' }}
+                </button>
+              </div>
+            </div>
           </div>
-          <div class="manual-layout">
-            <aside class="manual-sidebar">
-              <div class="manual-sidebar-header">
-                <Icon name="list" :size="16" />
-                <span>目录</span>
+
+          <div v-if="showBindModal" class="modal-overlay" @click.self="showBindModal = false">
+            <div class="modal-content">
+              <div class="modal-header">
+                <h3>绑定QQ账号</h3>
+                <button class="btn-close" @click="showBindModal = false">
+                  <Icon name="x" :size="16" />
+                </button>
               </div>
-              <nav class="manual-nav">
-                <div
-                  v-for="(section, index) in manualSections"
-                  :key="section.id"
-                  class="manual-nav-item"
-                  :class="{ active: activeSection === section.id }"
-                  @click="scrollToSection(section.id)"
-                >
-                  <span class="manual-nav-num">{{ index + 1 }}</span>
-                  <span class="manual-nav-label">{{ section.title }}</span>
+              <div class="modal-body">
+                <div v-if="!bindCodeSent" class="form-group">
+                  <label>QQ号</label>
+                  <input v-model="bindForm.qqNumber" type="text" placeholder="请输入要绑定的QQ号" />
+                  <span v-if="bindForm.qqNumber && !/^\d{5,11}$/.test(bindForm.qqNumber)" class="error-message">请输入正确的QQ号</span>
                 </div>
-              </nav>
-            </aside>
-            <main class="manual-main">
-              <div class="manual-content">
-                <div id="section-overview" class="manual-section" :class="{ active: activeSection === 'overview' }">
-                  <div class="manual-section-header">
-                    <div class="manual-section-icon">
-                      <Icon name="app" :size="24" />
-                    </div>
-                    <div class="manual-section-title">
-                      <h3>系统概述</h3>
-                      <p>了解本系统的核心功能与架构</p>
-                    </div>
+                <div v-else>
+                  <div class="bind-qr-section">
+                    <p class="bind-tip">请使用手机QQ发送验证码到以下号码：</p>
+                    <div class="bind-qq-number">{{ bindForm.qqNumber }}</div>
+                    <p class="bind-tip-small">验证码有效期 5 分钟</p>
                   </div>
-                  <div class="manual-body">
-                    <p>本系统是一个基于 QQ 的 AI 助手管理平台，通过 <strong>NapCat</strong> 接入 QQ 消息，结合 <strong>AstrBot</strong> 实现智能回复，同时提供消息管理、媒体文件管理等完整功能。</p>
-                    <div class="feature-grid">
-                      <div class="feature-card">
-                        <Icon name="message-circle" :size="24" />
-                        <h5>消息接入</h5>
-                        <p>通过 NapCat 接收群聊和私聊消息，实时同步到系统</p>
-                      </div>
-                      <div class="feature-card">
-                        <Icon name="robot" :size="24" />
-                        <h5>AI 助手</h5>
-                        <p>AstrBot 提供智能对话和群聊分析能力，支持多轮对话</p>
-                      </div>
-                      <div class="feature-card">
-                        <Icon name="image" :size="24" />
-                        <h5>媒体管理</h5>
-                        <p>自动归档接收的图片、语音、视频等文件，支持在线预览</p>
-                      </div>
-                      <div class="feature-card">
-                        <Icon name="database" :size="24" />
-                        <h5>消息存储</h5>
-                        <p>所有消息和对话历史自动保存到数据库，支持检索和导出</p>
-                      </div>
-                    </div>
-                    <p>系统架构采用前后端分离设计，前端基于 Vue.js 构建，后端采用 Spring Boot，数据库使用 SQLite，确保系统轻量高效。</p>
-                  </div>
-                </div>
-
-                <div id="section-login" class="manual-section" :class="{ active: activeSection === 'login' }">
-                  <div class="manual-section-header">
-                    <div class="manual-section-icon">
-                      <Icon name="lock" :size="24" />
-                    </div>
-                    <div class="manual-section-title">
-                      <h3>登录与权限</h3>
-                      <p>系统账号登录与角色权限说明</p>
-                    </div>
-                  </div>
-                  <div class="manual-body">
-                    <h5>账号登录</h5>
-                    <p>点击页面右上角「登录」按钮进入登录页面，输入用户名和密码进行登录。首次使用可点击「立即注册」创建新账号。</p>
-                    <div class="step-list">
-                      <div class="step-item">
-                        <span class="step-num">1</span>
-                        <span>点击页面右上角「登录」按钮</span>
-                      </div>
-                      <div class="step-item">
-                        <span class="step-num">2</span>
-                        <span>在登录弹窗中输入用户名和密码</span>
-                      </div>
-                      <div class="step-item">
-                        <span class="step-num">3</span>
-                        <span>点击「登录」按钮完成登录</span>
-                      </div>
-                    </div>
-                    <h5>角色权限</h5>
-                    <div class="permission-grid">
-                      <div class="permission-card">
-                        <Icon name="user" :size="20" />
-                        <h6>普通用户</h6>
-                        <ul>
-                          <li>查看个人消息和群聊记录</li>
-                          <li>使用 AstrBot AI 助手</li>
-                          <li>管理个人媒体文件</li>
-                          <li>查看个人信息和资料</li>
-                        </ul>
-                      </div>
-                      <div class="permission-card admin">
-                        <Icon name="admin" :size="20" />
-                        <h6>管理员</h6>
-                        <ul>
-                          <li>普通用户所有权限</li>
-                          <li>管理系统用户</li>
-                          <li>查看数据统计</li>
-                          <li>控制服务启停</li>
-                          <li>查看系统日志</li>
-                        </ul>
-                      </div>
-                    </div>
-                    <h5>退出登录</h5>
-                    <p>点击侧边栏头像旁的「退出」按钮即可安全退出系统。退出后需要重新登录才能访问系统功能。</p>
-                  </div>
-                </div>
-
-                <div id="section-layout" class="manual-section" :class="{ active: activeSection === 'layout' }">
-                  <div class="manual-section-header">
-                    <div class="manual-section-icon">
-                      <Icon name="layout" :size="24" />
-                    </div>
-                    <div class="manual-section-title">
-                      <h3>首页布局</h3>
-                      <p>页面布局与各区域功能介绍</p>
-                    </div>
-                  </div>
-                  <div class="manual-body">
-                    <h5>三栏布局（桌面端）</h5>
-                    <div class="layout-grid">
-                      <div class="layout-card">
-                        <h6>左侧导航栏</h6>
-                        <p>群聊列表、好友列表、系统按钮、头像菜单</p>
-                        <ul>
-                          <li>群聊列表：显示已接入的所有群聊</li>
-                          <li>好友列表：显示私聊好友</li>
-                          <li>系统按钮：管理员进入管理中心，普通用户进入用户中心</li>
-                          <li>头像菜单：个人资料、用户手册、退出登录</li>
-                        </ul>
-                      </div>
-                      <div class="layout-card">
-                        <h6>中间消息区</h6>
-                        <p>当前选中群聊的消息列表，支持搜索和筛选</p>
-                        <ul>
-                          <li>消息列表：按时间顺序显示群聊消息</li>
-                          <li>搜索框：支持关键词搜索</li>
-                          <li>时间筛选：按时间范围过滤消息</li>
-                          <li>AI 分析：对群聊消息进行智能分析</li>
-                        </ul>
-                      </div>
-                      <div class="layout-card">
-                        <h6>右侧 AI 区</h6>
-                        <p>AstrBot 助手对话界面，可拖动调整宽度</p>
-                        <ul>
-                          <li>对话窗口：与 AI 助手实时对话</li>
-                          <li>对话历史：切换查看历史对话</li>
-                          <li>模型选择：切换 AI 模型</li>
-                          <li>人格管理：自定义 AI 角色</li>
-                        </ul>
-                      </div>
-                    </div>
-                    <h5>响应式适配</h5>
-                    <div class="responsive-info">
-                      <div class="responsive-item">
-                        <Icon name="tablet" :size="20" />
-                        <span><strong>平板端</strong>：双栏布局，可切换查看群聊或 AI 助手</span>
-                      </div>
-                      <div class="responsive-item">
-                        <Icon name="smartphone" :size="20" />
-                        <span><strong>移动端</strong>：底部标签页切换群聊和 AI 助手</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div id="section-napcat" class="manual-section" :class="{ active: activeSection === 'napcat' }">
-                  <div class="manual-section-header">
-                    <div class="manual-section-icon">
-                      <Icon name="settings" :size="24" />
-                    </div>
-                    <div class="manual-section-title">
-                      <h3>NapCat 管理</h3>
-                      <p>NapCat 服务启动、登录与功能说明</p>
-                    </div>
-                  </div>
-                  <div class="manual-body">
-                    <h5>启动 NapCat</h5>
-                    <div class="step-list">
-                      <div class="step-item">
-                        <span class="step-num">1</span>
-                        <span>进入用户中心，选择「NapCat 管理」标签</span>
-                      </div>
-                      <div class="step-item">
-                        <span class="step-num">2</span>
-                        <span>点击「启动」按钮启动 NapCat 服务</span>
-                      </div>
-                      <div class="step-item">
-                        <span class="step-num">3</span>
-                        <span>等待状态显示为「运行中」</span>
-                      </div>
-                      <div class="step-item">
-                        <span class="step-num">4</span>
-                        <span>使用手机 QQ 扫描二维码完成登录</span>
-                      </div>
-                      <div class="step-item">
-                        <span class="step-num">5</span>
-                        <span>勾选「下次自动登录」可避免重复扫码</span>
-                      </div>
-                    </div>
-                    <h5>停止 NapCat</h5>
-                    <p>点击「停止」按钮即可停止服务。停止后不再接收新消息，但已接收的消息仍可查看。如需重新接收消息，需再次启动并登录。</p>
-                    <h5>WebUI 访问</h5>
-                    <p>点击「打开 NapCat WebUI」可进入 NapCat 自带的管理界面，在 WebUI 中可查看更多 NapCat 详细信息和配置。</p>
-                    <h5>功能说明</h5>
-                    <div class="function-list">
-                      <div class="function-item">
-                        <Icon name="message-circle" :size="18" />
-                        <span><strong>消息接入</strong>：接收群聊和私聊消息，存入消息库供查看与管理</span>
-                      </div>
-                      <div class="function-item">
-                        <Icon name="robot" :size="18" />
-                        <span><strong>AI 回复</strong>：对接 AstrBot，对消息进行智能分析与自动回复</span>
-                      </div>
-                      <div class="function-item">
-                        <Icon name="image" :size="18" />
-                        <span><strong>多媒体管理</strong>：接收的图片、语音、视频等文件自动归档，支持在线预览</span>
-                      </div>
-                      <div class="function-item">
-                        <Icon name="send" :size="18" />
-                        <span><strong>Webhook 推送</strong>：支持将消息实时推送到外部系统</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div id="section-astrbot" class="manual-section" :class="{ active: activeSection === 'astrbot' }">
-                  <div class="manual-section-header">
-                    <div class="manual-section-icon">
-                      <Icon name="robot" :size="24" />
-                    </div>
-                    <div class="manual-section-title">
-                      <h3>AstrBot 助手</h3>
-                      <p>AI 助手对话与群聊分析功能</p>
-                    </div>
-                  </div>
-                  <div class="manual-body">
-                    <h5>打开对话</h5>
-                    <p>首页右侧面板即为 AstrBot 助手对话界面。若右侧面板收起，点击「AI」按钮展开。输入消息后按回车或点击发送按钮即可与 AI 对话。</p>
-                    <h5>对话功能</h5>
-                    <div class="feature-list">
-                      <div class="feature-item">
-                        <span class="feature-tag">多轮对话</span>
-                        <span>支持连续多轮对话，上下文自动关联，AI 能够理解对话历史</span>
-                      </div>
-                      <div class="feature-item">
-                        <span class="feature-tag">对话历史</span>
-                        <span>对话历史会自动保存，可随时切换查看，支持跨会话继续</span>
-                      </div>
-                      <div class="feature-item">
-                        <span class="feature-tag">快捷指令</span>
-                        <span>支持通过快捷指令快速调用特定功能，提升使用效率</span>
-                      </div>
-                      <div class="feature-item">
-                        <span class="feature-tag">人格管理</span>
-                        <span>可在侧边栏打开人格管理，自定义 AI 角色和说话风格</span>
-                      </div>
-                    </div>
-                    <h5>群聊分析</h5>
-                    <div class="step-list">
-                      <div class="step-item">
-                        <span class="step-num">1</span>
-                        <span>在首页中间消息区选择群聊后，点击「AI 分析」按钮</span>
-                      </div>
-                      <div class="step-item">
-                        <span class="step-num">2</span>
-                        <span>可指定分析的消息数量（默认最近 100 条）</span>
-                      </div>
-                      <div class="step-item">
-                        <span class="step-num">3</span>
-                        <span>选择分析类型（总结、情感分析等）</span>
-                      </div>
-                      <div class="step-item">
-                        <span class="step-num">4</span>
-                        <span>分析结果会展示在消息列表中</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div id="section-messages" class="manual-section" :class="{ active: activeSection === 'messages' }">
-                  <div class="manual-section-header">
-                    <div class="manual-section-icon">
-                      <Icon name="message-square" :size="24" />
-                    </div>
-                    <div class="manual-section-title">
-                      <h3>消息管理</h3>
-                      <p>消息查看、搜索与操作</p>
-                    </div>
-                  </div>
-                  <div class="manual-body">
-                    <h5>查看消息</h5>
-                    <p>在左侧导航栏选择群聊或好友，中间区域显示消息列表。消息按时间顺序排列，最新消息在底部。支持图片、语音、视频、文件等多种消息类型。</p>
-                    <h5>搜索消息</h5>
-                    <div class="step-list">
-                      <div class="step-item">
-                        <span class="step-num">1</span>
-                        <span>在消息区顶部搜索框输入关键词</span>
-                      </div>
-                      <div class="step-item">
-                        <span class="step-num">2</span>
-                        <span>按回车或点击搜索按钮进行搜索</span>
-                      </div>
-                      <div class="step-item">
-                        <span class="step-num">3</span>
-                        <span>搜索结果会高亮显示匹配内容</span>
-                      </div>
-                    </div>
-                    <h5>时间筛选</h5>
-                    <p>点击时间筛选按钮选择时间范围，支持按今天、本周、本月、自定义时间筛选。筛选后只显示指定时间范围内的消息。</p>
-                    <h5>消息操作</h5>
-                    <div class="action-list">
-                      <div class="action-item">
-                        <Icon name="copy" :size="16" />
-                        <span><strong>复制</strong>：右键点击消息选择「复制」</span>
-                      </div>
-                      <div class="action-item">
-                        <Icon name="download" :size="16" />
-                        <span><strong>导出</strong>：点击导出按钮可导出消息记录</span>
-                      </div>
-                      <div class="action-item">
-                        <Icon name="trash" :size="16" />
-                        <span><strong>删除</strong>：管理员可删除消息</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div id="section-media" class="manual-section" :class="{ active: activeSection === 'media' }">
-                  <div class="manual-section-header">
-                    <div class="manual-section-icon">
-                      <Icon name="image" :size="24" />
-                    </div>
-                    <div class="manual-section-title">
-                      <h3>媒体文件管理</h3>
-                      <p>文件查看、筛选与删除操作</p>
-                    </div>
-                  </div>
-                  <div class="manual-body">
-                    <h5>查看文件</h5>
-                    <p>进入用户中心，选择「媒体管理」标签。支持按类型筛选：全部、图片、视频、音频。点击文件名或「预览」按钮可查看单个文件。点击「预览全部」可进入相册模式浏览所有图片。</p>
-                    <h5>文件筛选</h5>
-                    <div class="filter-info">
-                      <div class="filter-item">
-                        <span class="filter-tag">类型筛选</span>
-                        <span>使用顶部筛选按钮按文件类型过滤</span>
-                      </div>
-                      <div class="filter-item">
-                        <span class="filter-tag">分页浏览</span>
-                        <span>支持分页浏览，每页显示固定数量文件</span>
-                      </div>
-                      <div class="filter-item">
-                        <span class="filter-tag">文件信息</span>
-                        <span>显示文件大小、类型、上传时间等信息</span>
-                      </div>
-                    </div>
-                    <h5>选择与删除</h5>
-                    <div class="step-list">
-                      <div class="step-item">
-                        <span class="step-num">1</span>
-                        <span>点击文件列表左侧的复选框进行多选</span>
-                      </div>
-                      <div class="step-item">
-                        <span class="step-num">2</span>
-                        <span>点击表头复选框可全选/取消全选当前页文件</span>
-                      </div>
-                      <div class="step-item">
-                        <span class="step-num">3</span>
-                        <span>选中文件后点击「删除选中」按钮删除</span>
-                      </div>
-                      <div class="step-item">
-                        <span class="step-num">4</span>
-                        <span>删除前会有二次确认提示，防止误删</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div id="section-profile" class="manual-section" :class="{ active: activeSection === 'profile' }">
-                  <div class="manual-section-header">
-                    <div class="manual-section-icon">
-                      <Icon name="user" :size="24" />
-                    </div>
-                    <div class="manual-section-title">
-                      <h3>个人信息</h3>
-                      <p>查看与修改个人资料</p>
-                    </div>
-                  </div>
-                  <div class="manual-body">
-                    <h5>查看信息</h5>
-                    <p>进入用户中心，选择「个人信息」标签。可查看头像、昵称、用户名、邮箱等信息，显示注册时间和最后登录时间。</p>
-                    <h5>修改资料</h5>
-                    <div class="step-list">
-                      <div class="step-item">
-                        <span class="step-num">1</span>
-                        <span>点击侧边栏头像或「个人资料」按钮</span>
-                      </div>
-                      <div class="step-item">
-                        <span class="step-num">2</span>
-                        <span>在个人资料弹窗中修改信息</span>
-                      </div>
-                      <div class="step-item">
-                        <span class="step-num">3</span>
-                        <span>可修改昵称、邮箱等个人信息</span>
-                      </div>
-                      <div class="step-item">
-                        <span class="step-num">4</span>
-                        <span>可上传新头像图片</span>
-                      </div>
-                      <div class="step-item">
-                        <span class="step-num">5</span>
-                        <span>点击「保存」按钮完成修改</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div id="section-qqbind" class="manual-section" :class="{ active: activeSection === 'qqbind' }">
-                  <div class="manual-section-header">
-                    <div class="manual-section-icon">
-                      <Icon name="user" :size="24" />
-                    </div>
-                    <div class="manual-section-title">
-                      <h3>QQ账号绑定</h3>
-                      <p>绑定与验证QQ账号，确保账号安全</p>
-                    </div>
-                  </div>
-                  <div class="manual-body">
-                    <h5>为什么需要绑定QQ号？</h5>
-                    <p>本系统通过 NapCat 接入 QQ 消息，绑定QQ号后，系统会将该QQ号接收的所有消息（群聊、私聊）同步到您的账号中。只有绑定了QQ号，才能查看和管理相关消息。</p>
-                    <h5>绑定流程</h5>
-                    <div class="step-list">
-                      <div class="step-item">
-                        <span class="step-num">1</span>
-                        <span>进入用户中心，选择「个人信息」标签</span>
-                      </div>
-                      <div class="step-item">
-                        <span class="step-num">2</span>
-                        <span>在「QQ账号绑定」区域输入要绑定的QQ号</span>
-                      </div>
-                      <div class="step-item">
-                        <span class="step-num">3</span>
-                        <span>点击「获取验证码」按钮，系统会通过 NapCat 向目标QQ发送验证码私信</span>
-                      </div>
-                      <div class="step-item">
-                        <span class="step-num">4</span>
-                        <span>在手机QQ上查看收到的验证码，输入到系统中</span>
-                      </div>
-                      <div class="step-item">
-                        <span class="step-num">5</span>
-                        <span>点击「确认绑定」完成绑定操作</span>
-                      </div>
-                    </div>
-                    <h5>安全机制</h5>
-                    <div class="security-list">
-                      <div class="security-item">
-                        <Icon name="shield" :size="18" />
-                        <span><strong>身份验证</strong>：只有收到验证码并正确输入的人才能完成绑定，确保QQ账号主人操作</span>
-                      </div>
-                      <div class="security-item">
-                        <Icon name="lock" :size="18" />
-                        <span><strong>全局唯一</strong>：每个QQ号只能被一个用户绑定，防止多人绑定同一QQ号</span>
-                      </div>
-                      <div class="security-item">
-                        <Icon name="clock" :size="18" />
-                        <span><strong>验证码有效期</strong>：验证码5分钟内有效，过期需重新获取</span>
-                      </div>
-                      <div class="security-item">
-                        <Icon name="alert-circle" :size="18" />
-                        <span><strong>发送限制</strong>：每个QQ号每天最多发送10次验证码，防止滥用</span>
-                      </div>
-                    </div>
-                    <h5>解绑操作</h5>
-                    <div class="step-list">
-                      <div class="step-item">
-                        <span class="step-num">1</span>
-                        <span>在个人信息页面的绑定列表中找到要解绑的QQ号</span>
-                      </div>
-                      <div class="step-item">
-                        <span class="step-num">2</span>
-                        <span>点击「解绑」按钮</span>
-                      </div>
-                      <div class="step-item">
-                        <span class="step-num">3</span>
-                        <span>确认解绑操作</span>
-                      </div>
-                      <div class="step-item">
-                        <span class="step-num">4</span>
-                        <span>解绑后该QQ号可被其他用户绑定</span>
-                      </div>
-                    </div>
-                    <h5>常见问题</h5>
-                    <ul>
-                      <li><strong>提示"该QQ号已被其他用户绑定"？</strong>请确认该QQ号是否已被其他用户绑定，联系管理员查询绑定记录</li>
-                      <li><strong>未收到验证码？</strong>请检查 NapCat 是否正常运行，目标QQ号是否在线且能接收私信</li>
-                      <li><strong>验证码显示乱码？</strong>此问题已修复，更新代码后重新部署即可</li>
-                    </ul>
-                  </div>
-                </div>
-
-                <div id="section-admin" class="manual-section" :class="{ active: activeSection === 'admin' }">
-                  <div class="manual-section-header">
-                    <div class="manual-section-icon">
-                      <Icon name="admin" :size="24" />
-                    </div>
-                    <div class="manual-section-title">
-                      <h3>管理员功能</h3>
-                      <p>系统管理中心各项功能说明</p>
-                    </div>
-                  </div>
-                  <div class="manual-body">
-                    <h5>系统管理中心</h5>
-                    <p>管理员登录后点击侧边栏「系统」按钮进入管理中心，包含数据概览、用户管理、群聊管理、系统控制等模块。</p>
-                    <h5>数据概览</h5>
-                    <div class="stat-list">
-                      <div class="stat-item">
-                        <span class="stat-icon"><Icon name="message-circle" :size="18" /></span>
-                        <span><strong>总消息数</strong>：系统接收到的所有消息数量</span>
-                      </div>
-                      <div class="stat-item">
-                        <span class="stat-icon"><Icon name="group" :size="18" /></span>
-                        <span><strong>群聊总数</strong>：已接入的群聊数量</span>
-                      </div>
-                      <div class="stat-item">
-                        <span class="stat-icon"><Icon name="user" :size="18" /></span>
-                        <span><strong>用户总数</strong>：系统注册用户数量</span>
-                      </div>
-                      <div class="stat-item">
-                        <span class="stat-icon"><Icon name="robot" :size="18" /></span>
-                        <span><strong>AI 对话数</strong>：与 AstrBot 的对话数量</span>
-                      </div>
-                      <div class="stat-item">
-                        <span class="stat-icon"><Icon name="file" :size="18" /></span>
-                        <span><strong>文件总数</strong>：媒体文件数量</span>
-                      </div>
-                      <div class="stat-item">
-                        <span class="stat-icon"><Icon name="disk" :size="18" /></span>
-                        <span><strong>磁盘使用</strong>：文件存储占用空间</span>
-                      </div>
-                    </div>
-                    <h5>用户管理</h5>
-                    <ul>
-                      <li>查看所有系统用户列表</li>
-                      <li>支持搜索、分页浏览</li>
-                      <li>可编辑用户信息、修改角色、删除用户</li>
-                      <li>支持批量操作</li>
-                    </ul>
-                    <h5>群聊管理</h5>
-                    <ul>
-                      <li>查看所有已接入的群聊</li>
-                      <li>可查看群聊详细信息</li>
-                      <li>支持禁用/启用群聊消息接收</li>
-                    </ul>
-                    <h5>系统控制</h5>
-                    <ul>
-                      <li>AstrBot 服务启动/停止</li>
-                      <li>GPT-SoVITS 服务启动/停止（语音合成）</li>
-                      <li>TTS 服务配置</li>
-                      <li>系统日志查看</li>
-                    </ul>
-                  </div>
-                </div>
-
-                <div id="section-faq" class="manual-section" :class="{ active: activeSection === 'faq' }">
-                  <div class="manual-section-header">
-                    <div class="manual-section-icon">
-                      <Icon name="help-circle" :size="24" />
-                    </div>
-                    <div class="manual-section-title">
-                      <h3>常见问题</h3>
-                      <p>使用过程中常见问题解答</p>
-                    </div>
-                  </div>
-                  <div class="manual-body">
-                    <div class="faq-list">
-                      <div class="faq-item">
-                        <div class="faq-question">
-                          <Icon name="help-circle" :size="16" />
-                          <span>二维码无法显示？</span>
-                        </div>
-                        <div class="faq-answer">
-                          <ul>
-                            <li>请先启动 NapCat 服务</li>
-                            <li>检查网络连接是否正常</li>
-                            <li>点击「刷新二维码」重试</li>
-                            <li>确认 NapCat 配置文件中的端口设置正确</li>
-                          </ul>
-                        </div>
-                      </div>
-                      <div class="faq-item">
-                        <div class="faq-question">
-                          <Icon name="help-circle" :size="16" />
-                          <span>消息接收延迟？</span>
-                        </div>
-                        <div class="faq-answer">
-                          <ul>
-                            <li>检查 NapCat 是否正常运行</li>
-                            <li>检查 QQ 是否在线</li>
-                            <li>检查网络连接稳定性</li>
-                            <li>重启 NapCat 服务尝试恢复</li>
-                          </ul>
-                        </div>
-                      </div>
-                      <div class="faq-item">
-                        <div class="faq-question">
-                          <Icon name="help-circle" :size="16" />
-                          <span>AI 助手无响应？</span>
-                        </div>
-                        <div class="faq-answer">
-                          <ul>
-                            <li>检查 AstrBot 服务是否启动</li>
-                            <li>检查网络连接是否正常</li>
-                            <li>查看后端日志排查错误</li>
-                            <li>尝试重新发起对话</li>
-                          </ul>
-                        </div>
-                      </div>
-                      <div class="faq-item">
-                        <div class="faq-question">
-                          <Icon name="help-circle" :size="16" />
-                          <span>文件预览失败？</span>
-                        </div>
-                        <div class="faq-answer">
-                          <ul>
-                            <li>文件可能已被删除或移动</li>
-                            <li>尝试刷新页面重新加载</li>
-                            <li>检查文件权限是否正常</li>
-                            <li>确认文件格式是否被支持</li>
-                          </ul>
-                        </div>
-                      </div>
-                      <div class="faq-item">
-                        <div class="faq-question">
-                          <Icon name="help-circle" :size="16" />
-                          <span>验证码显示乱码？</span>
-                        </div>
-                        <div class="faq-answer">
-                          <ul>
-                            <li>原因：发送验证码私信时未指定UTF-8编码导致中文乱码</li>
-                            <li>解决方案：此问题已在版本更新中修复，更新代码并重新部署</li>
-                            <li>修复位置：NapCatService.java 中 StringEntity 添加 UTF-8 编码</li>
-                          </ul>
-                        </div>
-                      </div>
-                      <div class="faq-item">
-                        <div class="faq-question">
-                          <Icon name="help-circle" :size="16" />
-                          <span>QQ绑定提示"已被其他用户绑定"？</span>
-                        </div>
-                        <div class="faq-answer">
-                          <ul>
-                            <li>原因：同一个QQ号在系统中只能被一个用户绑定（全局唯一约束）</li>
-                            <li>解决方案：确认该QQ号是否已被其他用户绑定，联系管理员查询绑定记录</li>
-                            <li>检查数据库中是否存在残留的active=true的绑定记录</li>
-                          </ul>
-                        </div>
-                      </div>
-                      <div class="faq-item">
-                        <div class="faq-question">
-                          <Icon name="help-circle" :size="16" />
-                          <span>登录失败？</span>
-                        </div>
-                        <div class="faq-answer">
-                          <ul>
-                            <li>确认用户名和密码是否正确</li>
-                            <li>检查网络连接是否正常</li>
-                            <li>联系管理员确认账号状态</li>
-                          </ul>
-                        </div>
-                      </div>
-                      <div class="faq-item">
-                        <div class="faq-question">
-                          <Icon name="help-circle" :size="16" />
-                          <span>页面显示异常？</span>
-                        </div>
-                        <div class="faq-answer">
-                          <ul>
-                            <li>清除浏览器缓存后重新加载</li>
-                            <li>尝试使用其他浏览器</li>
-                            <li>确认浏览器版本是否支持</li>
-                          </ul>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div id="section-support" class="manual-section" :class="{ active: activeSection === 'support' }">
-                  <div class="manual-section-header">
-                    <div class="manual-section-icon">
-                      <Icon name="headphones" :size="24" />
-                    </div>
-                    <div class="manual-section-title">
-                      <h3>技术支持</h3>
-                      <p>获取帮助与服务维护</p>
-                    </div>
-                  </div>
-                  <div class="manual-body">
-                    <p>如遇问题，请优先查看本手册中的「常见问题」部分。若问题仍未解决，请联系系统管理员。</p>
-                    <div class="support-list">
-                      <div class="support-item">
-                        <Icon name="activity" :size="20" />
-                        <div>
-                          <h6>服务状态</h6>
-                          <p>定期检查 NapCat、AstrBot 服务是否正常运行，确保系统稳定</p>
-                        </div>
-                      </div>
-                      <div class="support-item">
-                        <Icon name="file-text" :size="20" />
-                        <div>
-                          <h6>日志查看</h6>
-                          <p>管理员可在系统管理中心查看详细日志，排查问题</p>
-                        </div>
-                      </div>
-                      <div class="support-item">
-                        <Icon name="backup" :size="20" />
-                        <div>
-                          <h6>数据备份</h6>
-                          <p>定期备份数据库，防止数据丢失</p>
-                        </div>
-                      </div>
-                    </div>
-                    <div class="contact-info">
-                      <p><strong>联系管理员</strong>：如需技术支持，请联系系统管理员获取帮助。</p>
-                    </div>
+                  <div class="form-group">
+                    <label>验证码</label>
+                    <input v-model="bindForm.code" type="text" placeholder="请输入6位验证码" maxlength="6" />
                   </div>
                 </div>
               </div>
-            </main>
+              <div class="modal-footer">
+                <button class="btn-cancel" @click="showBindModal = false">取消</button>
+                <button v-if="!bindCodeSent" class="btn-save" @click="sendBindCode" :disabled="!isBindFormValid || isBindingSending">
+                  {{ isBindingSending ? '发送中...' : '发送验证码' }}
+                </button>
+                <button v-else class="btn-save" @click="confirmBind" :disabled="!isBindConfirmValid || isBindingConfirm">
+                  {{ isBindingConfirm ? '绑定中...' : '确认绑定' }}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </main>
@@ -1038,19 +525,53 @@
         <button class="preview-close" @click="closePreview">×</button>
         <div v-if="previewMode === 'gallery'" class="preview-gallery">
           <div class="preview-gallery-header">
-            <span class="preview-gallery-title">媒体文件预览</span>
-            <small>{{ previewFiles.length }} 个文件</small>
+            <div class="preview-gallery-title-row">
+              <span class="preview-gallery-title">媒体文件预览</span>
+              <small>共 {{ previewTotalElements }} 个文件 · 第 {{ previewPage + 1 }} / {{ previewTotalPages }} 页</small>
+            </div>
+            <div class="preview-gallery-toolbar">
+              <div class="preview-search">
+                <input
+                  type="text"
+                  v-model="previewSearchQuery"
+                  placeholder="搜索文件名..."
+                  class="preview-search-input"
+                  @keydown.enter="onPreviewSearch"
+                />
+                <button
+                  v-if="previewSearchQuery"
+                  class="preview-search-clear"
+                  @click="previewSearchQuery = ''; onPreviewSearch()"
+                >×</button>
+              </div>
+              <label class="preview-select-all">
+                <input
+                  type="checkbox"
+                  :checked="isAllPreviewSelected"
+                  @change="toggleSelectAllInPreview"
+                />
+                全选本页
+              </label>
+            </div>
           </div>
           <div class="preview-gallery-body">
-            <div v-if="previewFiles.length === 0" class="preview-empty">暂无文件</div>
+            <div v-if="previewLoadingPage" class="preview-loading">加载中...</div>
+            <div v-else-if="previewFiles.length === 0" class="preview-empty">暂无文件</div>
             <div v-else class="preview-grid">
               <div
                 v-for="(file, index) in previewFiles"
                 :key="file.id"
                 class="preview-grid-item"
-                @click="enterSingleView(index)"
+                :class="{ selected: selectedMediaFileIds.has(file.id) }"
               >
-                <div class="preview-thumbnail">
+                <div class="preview-checkbox" @click.stop>
+                  <input
+                    type="checkbox"
+                    :checked="selectedMediaFileIds.has(file.id)"
+                    @change="togglePreviewSelection(file.id)"
+                  />
+                </div>
+                <div class="preview-thumbnail" @click="enterSingleView(index)">
                   <img
                     v-if="file.fileType === 'IMAGE' && file.url && !isMediaError(file.id)"
                     :src="file.url"
@@ -1078,7 +599,7 @@
                     <span>📄</span>
                   </div>
                 </div>
-                <div class="preview-grid-info">
+                <div class="preview-grid-info" @click="enterSingleView(index)">
                   <span class="preview-grid-name" :title="file.fileName">{{ file.fileName }}</span>
                   <small>{{ formatBytes(file.fileSize) }}</small>
                 </div>
@@ -1086,7 +607,38 @@
             </div>
           </div>
           <div class="preview-gallery-footer">
-            <button class="preview-nav-btn" @click="backToList">关闭预览</button>
+            <div class="preview-pagination">
+              <button
+                class="preview-page-btn"
+                :disabled="previewPage <= 0 || previewLoadingPage"
+                @click="previewGoToPage(previewPage - 1)"
+              >上一页</button>
+              <span class="preview-page-info">{{ previewPage + 1 }} / {{ previewTotalPages }}</span>
+              <button
+                class="preview-page-btn"
+                :disabled="previewPage >= previewTotalPages - 1 || previewLoadingPage"
+                @click="previewGoToPage(previewPage + 1)"
+              >下一页</button>
+              <select
+                v-if="previewTotalPages > 1"
+                class="preview-page-select"
+                :value="previewPage"
+                @change="previewGoToPage(Number($event.target.value))"
+              >
+                <option v-for="p in previewTotalPages" :key="p" :value="p - 1">第 {{ p }} 页</option>
+              </select>
+            </div>
+            <div class="preview-footer-actions">
+              <span v-if="selectedMediaFileIds.size > 0" class="preview-selected-count">
+                已选 {{ selectedMediaFileIds.size }} 个
+              </span>
+              <button
+                v-if="selectedMediaFileIds.size > 0"
+                class="btn-delete btn-sm"
+                @click="confirmDeleteSelectedFromPreview"
+              >删除选中</button>
+              <button class="preview-nav-btn" @click="backToList">关闭预览</button>
+            </div>
           </div>
         </div>
 
@@ -1148,20 +700,29 @@
 </template>
 
 <script>
-import { ref, computed, onMounted, onUnmounted } from 'vue';
-import { useRouter } from 'vue-router';
+import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue';
+import { useRouter, useRoute } from 'vue-router';
 import Icon from '../components/Icon.vue';
-import { formatFileSize, authApi } from '../services/api';
+import CreditsDashboard from '../components/credits/CreditsDashboard.vue';
+import SubscriptionDashboard from '../components/credits/SubscriptionDashboard.vue';
+import { formatFileSize, authApi, userApi } from '../services/api';
 import { useComponentControl } from '../composables/useComponentControl';
 import { useMediaManager } from '../composables/useMediaManager';
+import { useUserDashboardData } from '../composables/useUserDashboardData';
+import { useUserCreditsStore } from '../composables/useUserCreditsStore';
 
 export default {
   name: 'UserCenter',
-  components: { Icon },
+  components: { Icon, CreditsDashboard, SubscriptionDashboard },
   setup() {
     const router = useRouter();
-    const activeTab = ref('napcat');
+    const route = useRoute();
+    const activeTab = ref('dashboard');
+    const autoFocusSignIn = ref(false);
+    const autoOpenUpgrade = ref(false);
+    const autoRelatedId = ref('');
     const isMediaCollapsed = ref(false);
+    const dashboardLoaded = ref(false);
 
     const systemMessage = ref('');
     const showSystemMsg = (msg, type = 'success') => {
@@ -1171,44 +732,80 @@ export default {
 
     const componentCtrl = useComponentControl({ showSystemMsg });
     const media = useMediaManager({ showSystemMsg });
+    const dashboard = useUserDashboardData({ showSystemMsg });
+
+    // 预览搜索
+    const previewSearchQuery = ref('');
+    const onPreviewSearch = () => {
+      // 客户端过滤
+      const query = previewSearchQuery.value.trim().toLowerCase();
+      if (!query) {
+        media.loadPreviewPage(media.previewPage.value);
+        return;
+      }
+      const filtered = media.previewFiles.value.filter(f =>
+        f.fileName && f.fileName.toLowerCase().includes(query)
+      );
+      // 客户端过滤只影响当前页显示，不改变分页
+      media.previewFiles.value = filtered;
+    };
+
+    // 从预览中删除选中
+    const confirmDeleteSelectedFromPreview = async () => {
+      if (media.selectedMediaFileIds.value.size === 0) return;
+      const ids = Array.from(media.selectedMediaFileIds.value);
+      if (!confirm(`确定删除选中的 ${ids.length} 个文件吗？`)) return;
+      try {
+        await media.deleteSelectedMediaFiles();
+        // 删除后重新加载当前页
+        await media.loadPreviewPage(media.previewPage.value);
+        if (previewSearchQuery.value) onPreviewSearch();
+      } catch (e) {
+        // deleteSelectedMediaFiles 已处理错误
+      }
+    };
+
+    // 全局共享积分状态（与 Sidebar / UserMenuPopover 同步，签到后 Header 自动更新）
+    const { balance, tier, tierLabel, expiresAt } = useUserCreditsStore();
+
+    const formatShortDate = (dateStr) => {
+      if (!dateStr) return '-';
+      const d = new Date(dateStr);
+      if (isNaN(d.getTime())) return dateStr;
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    };
+
+    const formatCreditsNumber = (n) => {
+      if (n === null || n === undefined) return '0';
+      return Number(n).toLocaleString('zh-CN');
+    };
 
     const navItems = [
-      { key: 'napcat', icon: 'settings', label: 'NapCat 管理' },
-      { key: 'media', icon: 'image', label: '媒体管理' },
+      { key: 'dashboard', icon: 'dashboard', label: '数据概览' },
       { key: 'profile', icon: 'user', label: '个人信息' },
-      { key: 'manual', icon: 'book', label: '用户手册' },
+      { key: 'credits', icon: 'star', label: '用量管理' },
+      { key: 'subscription', icon: 'layers', label: '订阅管理' },
+      { key: 'media', icon: 'image', label: '媒体管理' },
     ];
 
     const handleNavClick = (key) => {
       console.log('nav click:', key);
       activeTab.value = key;
-    };
-
-    const manualSections = [
-      { id: 'overview', title: '系统概述' },
-      { id: 'login', title: '登录与权限' },
-      { id: 'layout', title: '首页布局' },
-      { id: 'napcat', title: 'NapCat 管理' },
-      { id: 'astrbot', title: 'AstrBot 助手' },
-      { id: 'messages', title: '消息管理' },
-      { id: 'media', title: '媒体文件管理' },
-      { id: 'profile', title: '个人信息' },
-      { id: 'qqbind', title: 'QQ账号绑定' },
-      { id: 'admin', title: '管理员功能' },
-      { id: 'faq', title: '常见问题' },
-      { id: 'support', title: '技术支持' },
-    ];
-
-    const activeSection = ref('overview');
-
-    const scrollToSection = (sectionId) => {
-      activeSection.value = sectionId;
-      setTimeout(() => {
-        const element = document.getElementById(`section-${sectionId}`);
-        if (element) {
-          element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      if (key === 'dashboard') {
+        if (!dashboardLoaded.value) {
+          dashboardLoaded.value = true;
+          dashboard.loadAll();
         }
-      }, 100);
+        nextTick(() => {
+          if (!qqBindingsLoading.value && qqBindings.length === 0) {
+            loadQqBindings();
+          }
+        });
+      } else if (key === 'profile') {
+        nextTick(() => {
+          loadQqBindings();
+        });
+      }
     };
 
     const userInfo = ref(null);
@@ -1270,6 +867,170 @@ export default {
       return `http://localhost:8081${normalized}`;
     });
 
+    const avatarInput = ref(null);
+    const isUploadingAvatar = ref(false);
+
+    const triggerAvatarUpload = () => {
+      avatarInput.value?.click();
+    };
+
+    const onAvatarChange = async (event) => {
+      const file = event.target.files?.[0];
+      if (!file) return;
+
+      const validTypes = ['image/jpeg', 'image/png', 'image/gif'];
+      if (!validTypes.includes(file.type)) {
+        showSystemMsg('仅支持 JPG、PNG、GIF 格式', 'error');
+        return;
+      }
+      if (file.size > 2 * 1024 * 1024) {
+        showSystemMsg('图片大小不能超过 2MB', 'error');
+        return;
+      }
+
+      isUploadingAvatar.value = true;
+      try {
+        const result = await userApi.uploadAvatar(file, 'user');
+        if (result) {
+          const newInfo = { ...userInfo.value, avatar: result.avatar || result };
+          if (typeof result === 'string') {
+            newInfo.avatar = result;
+          }
+          localStorage.setItem('user_info', JSON.stringify(newInfo));
+          userInfo.value = newInfo;
+          showSystemMsg('头像上传成功');
+        }
+      } catch (error) {
+        showSystemMsg('头像上传失败：' + error.message, 'error');
+      } finally {
+        isUploadingAvatar.value = false;
+        if (avatarInput.value) avatarInput.value.value = '';
+      }
+    };
+
+    const showPasswordModal = ref(false);
+    const passwordForm = ref({
+      oldPassword: '',
+      newPassword: '',
+      confirmPassword: ''
+    });
+    const isPasswordSaving = ref(false);
+
+    const isPasswordFormValid = computed(() => {
+      const { oldPassword, newPassword, confirmPassword } = passwordForm.value;
+      if (!oldPassword || !newPassword || !confirmPassword) return false;
+      if (newPassword.length < 6) return false;
+      if (newPassword !== confirmPassword) return false;
+      return true;
+    });
+
+    const openPasswordModal = () => {
+      passwordForm.value = { oldPassword: '', newPassword: '', confirmPassword: '' };
+      showPasswordModal.value = true;
+    };
+
+    const changePassword = async () => {
+      if (!isPasswordFormValid.value || isPasswordSaving.value) return;
+      isPasswordSaving.value = true;
+      try {
+        await authApi.changePassword(passwordForm.value.oldPassword, passwordForm.value.newPassword);
+        showPasswordModal.value = false;
+        showSystemMsg('密码修改成功');
+      } catch (error) {
+        showSystemMsg('密码修改失败：' + error.message, 'error');
+      } finally {
+        isPasswordSaving.value = false;
+      }
+    };
+
+    const qqBindings = ref([]);
+    const qqBindingsLoading = ref(false);
+
+    const loadQqBindings = async () => {
+      qqBindingsLoading.value = true;
+      try {
+        const data = await userApi.getQqBindings();
+        qqBindings.value = data || [];
+      } catch (error) {
+        showSystemMsg('加载QQ绑定失败：' + error.message, 'error');
+      } finally {
+        qqBindingsLoading.value = false;
+      }
+    };
+
+    const showBindModal = ref(false);
+    const bindCodeSent = ref(false);
+    const bindForm = ref({ qqNumber: '', code: '' });
+    const isBindingSending = ref(false);
+    const isBindingConfirm = ref(false);
+
+    const isBindFormValid = computed(() => {
+      return /^\d{5,11}$/.test(bindForm.value.qqNumber);
+    });
+
+    const isBindConfirmValid = computed(() => {
+      return bindForm.value.code && bindForm.value.code.length === 6;
+    });
+
+    const openBindModal = () => {
+      bindForm.value = { qqNumber: '', code: '' };
+      bindCodeSent.value = false;
+      showBindModal.value = true;
+    };
+
+    const sendBindCode = async () => {
+      if (!isBindFormValid.value || isBindingSending.value) return;
+      isBindingSending.value = true;
+      try {
+        await userApi.sendQqBindingCode(bindForm.value.qqNumber);
+        bindCodeSent.value = true;
+        showSystemMsg('验证码已发送');
+      } catch (error) {
+        showSystemMsg('发送失败：' + error.message, 'error');
+      } finally {
+        isBindingSending.value = false;
+      }
+    };
+
+    const confirmBind = async () => {
+      if (!isBindConfirmValid.value || isBindingConfirm.value) return;
+      isBindingConfirm.value = true;
+      try {
+        await userApi.bindQq({
+          qqNumber: bindForm.value.qqNumber,
+          code: bindForm.value.code
+        });
+        showBindModal.value = false;
+        showSystemMsg('QQ绑定成功');
+        await loadQqBindings();
+      } catch (error) {
+        showSystemMsg('绑定失败：' + error.message, 'error');
+      } finally {
+        isBindingConfirm.value = false;
+      }
+    };
+
+    const handleSetDefault = async (binding) => {
+      try {
+        await userApi.setDefaultQq(binding.id);
+        showSystemMsg('已设为默认');
+        await loadQqBindings();
+      } catch (error) {
+        showSystemMsg('设置失败：' + error.message, 'error');
+      }
+    };
+
+    const handleUnbind = async (binding) => {
+      if (!window.confirm(`确定解绑QQ ${binding.qqNumber} 吗？`)) return;
+      try {
+        await userApi.unbindQq(binding.id);
+        showSystemMsg('解绑成功');
+        await loadQqBindings();
+      } catch (error) {
+        showSystemMsg('解绑失败：' + error.message, 'error');
+      }
+    };
+
     const currentFilesTotalSize = computed(() =>
       media.mediaFiles.value.reduce((sum, f) => sum + (f.fileSize || 0), 0)
     );
@@ -1292,7 +1053,73 @@ export default {
       e.target.src = '/default-avatar.svg';
     };
 
+    const handleCreditsOpenUpgrade = () => {
+      // 切换到订阅管理 Tab，并触发升级权益弹窗自动打开
+      activeTab.value = 'subscription';
+      autoOpenUpgrade.value = false;
+      nextTick(() => {
+        autoOpenUpgrade.value = true;
+      });
+    };
+
+    const handleCreditsSwitchTab = (tab) => {
+      if (tab && navItems.some(n => n.key === tab)) {
+        activeTab.value = tab;
+      }
+    };
+
+    // 订阅页购买/退款成功后，通知用量管理页刷新余额
+    const handleRefreshCredits = () => {
+      window.dispatchEvent(new CustomEvent('credits:refresh'));
+    };
+
+    const parseInitialUrlParams = () => {
+      try {
+        const tab = route.query?.tab;
+        const focus = route.query?.focus;
+        const openUpgrade = route.query?.openUpgrade;
+        const relatedId = route.query?.relatedId;
+        if (tab && navItems.some(n => n.key === tab)) {
+          activeTab.value = tab;
+        }
+        if (tab === 'credits' && focus === 'signIn') {
+          autoFocusSignIn.value = true;
+        }
+        if (tab === 'subscription' && (openUpgrade === '1' || openUpgrade === 1 || openUpgrade === 'true')) {
+          autoOpenUpgrade.value = true;
+        }
+        if (tab === 'credits' && relatedId) {
+          autoRelatedId.value = String(relatedId);
+        }
+      } catch (e) {
+        console.warn('解析 URL query 失败:', e);
+      }
+    };
+
+    // 监听路由 query 变化（从 AstrBotChat 跳转过来时，UserCenter 可能已挂载）
+    watch(() => route.query, (newQuery) => {
+      if (!newQuery) return;
+      const tab = newQuery.tab;
+      if (tab && navItems.some(n => n.key === tab) && activeTab.value !== tab) {
+        activeTab.value = tab;
+      }
+      if (tab === 'credits' && newQuery.focus === 'signIn') {
+        autoFocusSignIn.value = false;
+        nextTick(() => { autoFocusSignIn.value = true; });
+      }
+      if (tab === 'subscription' && (newQuery.openUpgrade === '1' || newQuery.openUpgrade === 1)) {
+        autoOpenUpgrade.value = false;
+        nextTick(() => { autoOpenUpgrade.value = true; });
+      }
+      if (tab === 'credits' && newQuery.relatedId) {
+        autoRelatedId.value = '';
+        nextTick(() => { autoRelatedId.value = String(newQuery.relatedId); });
+      }
+    }, { deep: true });
+
     onMounted(() => {
+      parseInitialUrlParams();
+
       componentCtrl.startPolling();
       componentCtrl.loadNapCatWebUiUrl();
       componentCtrl.refreshQrCode();
@@ -1301,6 +1128,16 @@ export default {
       window.addEventListener('keydown', media.onPreviewKeydown);
 
       loadUserInfo();
+
+      // 数据概览为默认标签页，进入页面即加载数据
+      if (activeTab.value === 'dashboard') {
+        dashboardLoaded.value = true;
+        dashboard.loadAll();
+      }
+      // 加载QQ绑定列表（用于空状态判断）
+      nextTick(() => {
+        loadQqBindings();
+      });
 
       authApi.getCurrentUser().then(data => {
         if (data) {
@@ -1332,8 +1169,9 @@ export default {
       activeTab, navItems, isMediaCollapsed,
       formatDate, formatBytes, goHome, handleAvatarError,
       handleNavClick,
+      autoFocusSignIn, autoOpenUpgrade, autoRelatedId,
+      handleCreditsOpenUpgrade, handleRefreshCredits,
       userInfo, userAvatarUrl,
-      manualSections, activeSection, scrollToSection,
       componentStatus: componentCtrl.componentStatus,
       qrCode: componentCtrl.qrCode,
       napCatWebUiUrl: componentCtrl.napCatWebUiUrl,
@@ -1373,12 +1211,36 @@ export default {
       backToList: media.backToList,
       previewPrev: media.previewPrev,
       previewNext: media.previewNext,
+      previewPage: media.previewPage,
+      previewTotalPages: media.previewTotalPages,
+      previewTotalElements: media.previewTotalElements,
+      previewLoadingPage: media.previewLoadingPage,
+      previewGoToPage: media.previewGoToPage,
+      togglePreviewSelection: media.togglePreviewSelection,
+      isAllPreviewSelected: media.isAllPreviewSelected,
+      toggleSelectAllInPreview: media.toggleSelectAllInPreview,
       isMediaError: media.isMediaError,
       markMediaError: media.markMediaError,
       showPreviewModal: media.showPreviewModal,
+      previewSearchQuery,
+      onPreviewSearch,
+      confirmDeleteSelectedFromPreview,
       confirmDeleteSelected,
       currentFilesTotalSize,
       totalMediaPages,
+      // Dashboard
+      dashboardStats: dashboard.stats,
+      dashboardLoading: dashboard.isLoading,
+      trendChartOption: dashboard.trendChartOption,
+      groupRankingOption: dashboard.groupRankingOption,
+      distributionChartOption: dashboard.distributionChartOption,
+      aiTrendChartOption: dashboard.aiTrendChartOption,
+      trendDays: dashboard.trendDays,
+      trendInterval: dashboard.trendInterval,
+      setTrendDays: dashboard.setTrendDays,
+      loadDashboard: dashboard.loadAll,
+      balance, tier, tierLabel, expiresAt,
+      formatShortDate, formatCreditsNumber,
       showEditModal,
       isSaving,
       editForm,
@@ -1386,6 +1248,31 @@ export default {
       isValidEmail,
       isEditFormValid,
       saveProfile,
+      avatarInput,
+      isUploadingAvatar,
+      triggerAvatarUpload,
+      onAvatarChange,
+      showPasswordModal,
+      passwordForm,
+      isPasswordSaving,
+      isPasswordFormValid,
+      openPasswordModal,
+      changePassword,
+      qqBindings,
+      qqBindingsLoading,
+      loadQqBindings,
+      showBindModal,
+      bindForm,
+      bindCodeSent,
+      isBindingSending,
+      isBindingConfirm,
+      isBindFormValid,
+      isBindConfirmValid,
+      openBindModal,
+      sendBindCode,
+      confirmBind,
+      handleSetDefault,
+      handleUnbind,
     };
   }
 };
@@ -1393,13 +1280,15 @@ export default {
 
 <style scoped>
 .user-center {
-  min-height: 100vh;
+  height: 100vh;
   background-color: #f5f7fa;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .user-center-header {
+  flex-shrink: 0;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -1407,6 +1296,7 @@ export default {
   background-color: white;
   border-bottom: 1px solid #e8e8e8;
   box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+  z-index: 10;
 }
 
 .header-brand {
@@ -1425,6 +1315,51 @@ export default {
 .header-actions {
   display: flex;
   gap: 10px;
+  align-items: center;
+}
+
+/* Header 积分摘要 */
+.header-credits-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  background: linear-gradient(135deg, #f4f8ff, #faf4ff);
+  border: 1px solid #e0e8f5;
+  border-radius: 8px;
+  font-size: 13px;
+}
+.hcs-tier {
+  padding: 2px 10px;
+  border-radius: 10px;
+  background: #ecf0f1;
+  color: #7f8c8d;
+  font-weight: 600;
+  font-size: 12px;
+}
+.hcs-tier.paid {
+  background: linear-gradient(135deg, #9b59b6, #8e44ad);
+  color: #fff;
+}
+.hcs-expire {
+  color: #95a5a6;
+  font-size: 12px;
+}
+.hcs-divider {
+  color: #ccc;
+}
+.hcs-balance {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-weight: 600;
+  color: #2c3e50;
+}
+.hcs-gem {
+  font-size: 13px;
+}
+.hcs-num {
+  color: #3498db;
 }
 
 .btn-home {
@@ -2151,432 +2086,6 @@ export default {
   cursor: not-allowed;
 }
 
-.manual-panel {
-  padding: 0;
-}
-
-.manual-layout {
-  display: flex;
-  flex: 1;
-  min-height: 0;
-}
-
-.manual-sidebar {
-  width: 160px;
-  background: #2c3e50;
-  padding: 20px 0;
-  overflow-y: auto;
-  flex-shrink: 0;
-  position: sticky;
-  top: 0;
-  align-self: flex-start;
-  max-height: 100vh;
-}
-
-.manual-sidebar-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 20px 15px;
-  color: #ecf0f1;
-  font-size: 14px;
-  font-weight: 600;
-  border-bottom: 1px solid #34495e;
-  margin-bottom: 10px;
-}
-
-.manual-nav {
-  display: flex;
-  flex-direction: column;
-}
-
-.manual-nav-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 20px;
-  color: #bdc3c7;
-  cursor: pointer;
-  transition: all 0.2s;
-  font-size: 13px;
-}
-
-.manual-nav-item:hover {
-  background-color: #34495e;
-  color: #ecf0f1;
-}
-
-.manual-nav-item.active {
-  background-color: #3498db;
-  color: white;
-}
-
-.manual-nav-num {
-  width: 20px;
-  height: 20px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background-color: rgba(255,255,255,0.2);
-  border-radius: 4px;
-  font-size: 12px;
-  flex-shrink: 0;
-}
-
-.manual-nav-item.active .manual-nav-num {
-  background-color: rgba(255,255,255,0.3);
-}
-
-.manual-main {
-  flex: 1;
-  padding: 24px;
-  overflow-y: auto;
-  background-color: #f5f7fa;
-}
-
-.manual-content {
-  max-width: 900px;
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
-}
-
-.manual-section {
-  background: white;
-  border-radius: 12px;
-  padding: 0;
-  box-shadow: 0 2px 12px rgba(0,0,0,0.08);
-  overflow: hidden;
-}
-
-.manual-section-header {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 20px 24px;
-  background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
-}
-
-.manual-section-icon {
-  width: 48px;
-  height: 48px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background-color: rgba(255,255,255,0.2);
-  border-radius: 10px;
-  color: white;
-}
-
-.manual-section-title h3 {
-  margin: 0;
-  font-size: 18px;
-  font-weight: 600;
-  color: white;
-}
-
-.manual-section-title p {
-  margin: 4px 0 0 0;
-  font-size: 13px;
-  color: rgba(255,255,255,0.8);
-}
-
-.manual-body {
-  padding: 24px;
-}
-
-.manual-body h5 {
-  margin: 20px 0 10px 0;
-  font-size: 15px;
-  font-weight: 600;
-  color: #2c3e50;
-}
-
-.manual-body p {
-  margin: 12px 0;
-  color: #333;
-  font-size: 14px;
-  line-height: 1.7;
-}
-
-.manual-body ul {
-  margin: 0 0 14px 0;
-  padding-left: 0;
-  color: #555;
-  line-height: 1.9;
-  font-size: 13px;
-  list-style: none;
-}
-
-.manual-body li {
-  position: relative;
-  padding-left: 20px;
-}
-
-.manual-body li::before {
-  content: '▸';
-  position: absolute;
-  left: 0;
-  color: #3498db;
-  font-size: 14px;
-}
-
-.manual-body strong {
-  color: #2c3e50;
-  font-weight: 600;
-}
-
-.feature-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 16px;
-  margin: 16px 0;
-}
-
-.feature-card {
-  background-color: #f8f9fa;
-  border-radius: 8px;
-  padding: 16px;
-  text-align: center;
-}
-
-.feature-card h5 {
-  margin: 10px 0 6px 0;
-  font-size: 14px;
-  font-weight: 600;
-  color: #2c3e50;
-}
-
-.feature-card p {
-  margin: 0;
-  font-size: 12px;
-  color: #666;
-  line-height: 1.5;
-}
-
-.step-list {
-  background-color: #f8f9fa;
-  border-radius: 8px;
-  padding: 16px;
-  margin: 12px 0;
-}
-
-.step-item {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  padding: 8px 0;
-}
-
-.step-num {
-  width: 26px;
-  height: 26px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background-color: #3498db;
-  color: white;
-  border-radius: 50%;
-  font-size: 13px;
-  font-weight: 600;
-  flex-shrink: 0;
-}
-
-.step-item span:last-child {
-  font-size: 13px;
-  color: #555;
-  line-height: 1.6;
-}
-
-.permission-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 16px;
-  margin: 16px 0;
-}
-
-.permission-card {
-  background-color: #f8f9fa;
-  border-radius: 8px;
-  padding: 16px;
-  border-left: 4px solid #3498db;
-}
-
-.permission-card.admin {
-  border-left-color: #e67e22;
-}
-
-.permission-card h6 {
-  margin: 0 0 10px 0;
-  font-size: 14px;
-  font-weight: 600;
-  color: #2c3e50;
-}
-
-.permission-card ul {
-  margin: 0;
-}
-
-.layout-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-  gap: 16px;
-  margin: 16px 0;
-}
-
-.layout-card {
-  background-color: #f8f9fa;
-  border-radius: 8px;
-  padding: 16px;
-}
-
-.layout-card h6 {
-  margin: 0 0 6px 0;
-  font-size: 14px;
-  font-weight: 600;
-  color: #2c3e50;
-}
-
-.layout-card p {
-  margin: 0 0 10px 0;
-  font-size: 12px;
-  color: #666;
-}
-
-.responsive-info {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin: 12px 0;
-}
-
-.responsive-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 13px;
-  color: #555;
-}
-
-.function-list, .feature-list, .action-list, .stat-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin: 12px 0;
-}
-
-.function-item, .feature-item, .action-item, .stat-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 14px;
-  background-color: #f8f9fa;
-  border-radius: 6px;
-  font-size: 13px;
-  color: #555;
-}
-
-.feature-tag {
-  background-color: #3498db;
-  color: white;
-  padding: 2px 8px;
-  border-radius: 4px;
-  font-size: 12px;
-  font-weight: 500;
-}
-
-.filter-info {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  margin: 12px 0;
-}
-
-.filter-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.filter-tag {
-  background-color: #67c23a;
-  color: white;
-  padding: 2px 8px;
-  border-radius: 4px;
-  font-size: 12px;
-  font-weight: 500;
-}
-
-.faq-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.faq-item {
-  background-color: #f8f9fa;
-  border-radius: 8px;
-  overflow: hidden;
-}
-
-.faq-question {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 14px 16px;
-  background-color: #fff;
-  font-weight: 500;
-  color: #2c3e50;
-  font-size: 14px;
-  cursor: pointer;
-}
-
-.faq-answer {
-  padding: 0 16px 14px;
-}
-
-.faq-answer ul {
-  margin: 0;
-}
-
-.support-list {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-  gap: 16px;
-  margin: 16px 0;
-}
-
-.support-item {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  background-color: #f8f9fa;
-  border-radius: 8px;
-  padding: 16px;
-}
-
-.support-item h6 {
-  margin: 0 0 6px 0;
-  font-size: 14px;
-  font-weight: 600;
-  color: #2c3e50;
-}
-
-.support-item p {
-  margin: 0;
-  font-size: 12px;
-  color: #666;
-  line-height: 1.5;
-}
-
-.contact-info {
-  background-color: #e3f2fd;
-  border-left: 4px solid #2196f3;
-  border-radius: 0 8px 8px 0;
-  padding: 14px 16px;
-  margin-top: 16px;
-}
-
 .preview-modal {
   position: fixed;
   top: 0;
@@ -2649,6 +2158,139 @@ export default {
 
 .preview-grid-item {
   cursor: pointer;
+  position: relative;
+  padding: 8px;
+  border-radius: 8px;
+  border: 2px solid transparent;
+  transition: border-color 0.2s, background-color 0.2s;
+}
+
+.preview-grid-item:hover {
+  background-color: #f0f7ff;
+}
+
+.preview-grid-item.selected {
+  border-color: #3498db;
+  background-color: #e8f4fd;
+}
+
+.preview-checkbox {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  z-index: 2;
+  background: rgba(255,255,255,0.9);
+  border-radius: 3px;
+  padding: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.preview-checkbox input {
+  margin: 0;
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+}
+
+.preview-gallery-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.preview-search {
+  position: relative;
+  flex: 1;
+  min-width: 200px;
+  max-width: 320px;
+}
+
+.preview-search-input {
+  width: 100%;
+  padding: 6px 32px 6px 12px;
+  border: 1px solid #ddd;
+  border-radius: 16px;
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.preview-search-input:focus {
+  border-color: #3498db;
+}
+
+.preview-search-clear {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  color: #999;
+  cursor: pointer;
+  font-size: 16px;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.preview-search-clear:hover {
+  color: #666;
+}
+
+.preview-select-all {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  color: #555;
+  cursor: pointer;
+  user-select: none;
+}
+
+.preview-select-all input {
+  cursor: pointer;
+}
+
+.preview-footer-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.preview-selected-count {
+  font-size: 13px;
+  color: #666;
+  padding: 4px 10px;
+  background-color: #e8f4fd;
+  border-radius: 4px;
+}
+
+.btn-delete.btn-sm {
+  padding: 5px 12px;
+  font-size: 12px;
+  background-color: #e74c3c;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.btn-delete.btn-sm:hover {
+  background-color: #c0392b;
+}
+
+.preview-gallery-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.preview-gallery-header {
+  margin-bottom: 12px;
 }
 
 .preview-thumbnail {
@@ -2689,10 +2331,68 @@ export default {
 
 .preview-gallery-footer {
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
+  align-items: center;
   gap: 10px;
   padding-top: 15px;
   border-top: 1px solid #eee;
+}
+
+.preview-pagination {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.preview-page-btn {
+  padding: 5px 12px;
+  background-color: #fff;
+  color: #3498db;
+  border: 1px solid #3498db;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.2s;
+}
+
+.preview-page-btn:hover:not(:disabled) {
+  background-color: #3498db;
+  color: #fff;
+}
+
+.preview-page-btn:disabled {
+  border-color: #ccc;
+  color: #ccc;
+  cursor: not-allowed;
+  background-color: #f5f5f5;
+}
+
+.preview-page-info {
+  font-size: 13px;
+  color: #666;
+  min-width: 60px;
+  text-align: center;
+}
+
+.preview-page-select {
+  padding: 4px 8px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 12px;
+  background-color: #fff;
+  cursor: pointer;
+}
+
+.preview-page-select:focus {
+  outline: none;
+  border-color: #3498db;
+}
+
+.preview-loading {
+  text-align: center;
+  padding: 60px 20px;
+  color: #999;
+  font-size: 14px;
 }
 
 .preview-nav-btn {
@@ -2770,5 +2470,460 @@ export default {
 
 .preview-thumbnail-placeholder {
   background-color: #f0f0f0;
+}
+
+.profile-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 20px;
+}
+
+.profile-card-new {
+  height: 100%;
+}
+
+.profile-card-new h4 {
+  margin: 0 0 15px 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: #333;
+}
+
+.profile-avatar-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+
+.profile-avatar-large {
+  width: 100px;
+  height: 100px;
+  border-radius: 50%;
+  overflow: hidden;
+  border: 3px solid #3498db;
+  position: relative;
+  cursor: pointer;
+  transition: border-color 0.2s;
+}
+
+.profile-avatar-large:hover {
+  border-color: #2980b9;
+}
+
+.profile-avatar-large img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.avatar-upload-overlay {
+  position: absolute;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-size: 12px;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.profile-avatar-large:hover .avatar-upload-overlay {
+  opacity: 1;
+}
+
+.profile-info {
+  text-align: center;
+}
+
+.profile-info h3 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: #333;
+}
+
+.role-badge {
+  display: inline-block;
+  margin-top: 6px;
+  padding: 2px 10px;
+  font-size: 12px;
+  border-radius: 12px;
+  background-color: #ecf0f1;
+  color: #7f8c8d;
+}
+
+.role-badge.admin {
+  background-color: #fff3cd;
+  color: #856404;
+}
+
+.password-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+}
+
+.password-desc {
+  margin: 0;
+  color: #7f8c8d;
+  font-size: 13px;
+  text-align: center;
+}
+
+.btn-change-password {
+  padding: 8px 18px;
+  background-color: #3498db;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn-change-password:hover {
+  background-color: #2980b9;
+}
+
+.qq-loading {
+  text-align: center;
+  padding: 20px;
+  color: #7f8c8d;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.qq-default-badge {
+  padding: 2px 8px;
+  background-color: #27ae60;
+  color: white;
+  font-size: 11px;
+  border-radius: 10px;
+  font-weight: 500;
+}
+
+.qq-bindings-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.qq-bindings-header h4 {
+  margin: 0;
+  font-size: 15px;
+  color: #2c3e50;
+}
+
+.qq-add-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 12px;
+  background-color: #3498db;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.qq-add-btn:hover {
+  background-color: #2980b9;
+}
+
+.qq-binding-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.qq-action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid #ddd;
+  background-color: white;
+  border-radius: 4px;
+  color: #666;
+  cursor: pointer;
+  transition: all 0.2s;
+  padding: 0;
+}
+
+.qq-action-btn:hover {
+  border-color: #3498db;
+  color: #3498db;
+}
+
+.qq-action-btn.danger:hover {
+  border-color: #e74c3c;
+  color: #e74c3c;
+}
+
+.qq-empty {
+  text-align: center;
+  padding: 30px 20px;
+  color: #7f8c8d;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.qq-empty svg {
+  color: #95a5a6;
+}
+
+.qq-empty-hint {
+  font-size: 12px;
+  color: #95a5a6;
+}
+
+.qq-binding-number {
+  color: #7f8c8d;
+  font-size: 12px;
+}
+
+.qq-bindings-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.qq-binding-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  background-color: #f8f9fa;
+  border-radius: 6px;
+  transition: background-color 0.2s;
+}
+
+.qq-binding-item:hover {
+  background-color: #eef2f5;
+}
+
+.qq-binding-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 2px solid #ddd;
+}
+
+.qq-binding-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.qq-binding-nickname {
+  font-weight: 500;
+  color: #333;
+  font-size: 14px;
+}
+
+.bind-qr-section {
+  text-align: center;
+  padding: 16px;
+  background-color: #f8f9fa;
+  border-radius: 8px;
+  margin-bottom: 16px;
+}
+
+.bind-tip {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: #555;
+}
+
+.bind-qq-number {
+  font-size: 24px;
+  font-weight: bold;
+  color: #2c3e50;
+  margin: 8px 0;
+  letter-spacing: 2px;
+}
+
+.bind-tip-small {
+  margin: 0;
+  font-size: 12px;
+  color: #95a5a6;
+}
+
+/* ===== 数据概览 ===== */
+.dashboard-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 60px 20px;
+  color: #7f8c8d;
+  font-size: 13px;
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+}
+
+.dashboard-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 60px 20px;
+  color: #95a5a6;
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+}
+
+.dashboard-empty p {
+  margin: 0;
+  font-size: 14px;
+}
+
+/* 统计卡片 */
+.stats-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.stat-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 18px;
+  background: white;
+  border-radius: 8px;
+  border: 1px solid #e8e8e8;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+}
+
+.stat-icon {
+  width: 52px;
+  height: 52px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.stat-icon.blue { background: #e3f2fd; color: #1976d2; }
+.stat-icon.purple { background: #f3e5f5; color: #7b1fa2; }
+.stat-icon.green { background: #e8f5e9; color: #388e3c; }
+.stat-icon.orange { background: #fff3e0; color: #f57c00; }
+.stat-icon.teal { background: #e0f2f1; color: #00796b; }
+.stat-icon.red { background: #ffebee; color: #c62828; }
+.stat-icon.amber { background: #fff8e1; color: #ff8f00; }
+
+.stat-info {
+  min-width: 0;
+}
+
+.stat-value {
+  font-size: 24px;
+  font-weight: 700;
+  color: #333;
+  line-height: 1.2;
+}
+
+.stat-label {
+  font-size: 13px;
+  color: #666;
+  margin-top: 2px;
+}
+
+.stat-sub {
+  font-size: 12px;
+  color: #3498db;
+  margin-top: 2px;
+}
+
+/* 图表 */
+.charts-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.chart-card {
+  background: white;
+  border-radius: 8px;
+  border: 1px solid #e8e8e8;
+  padding: 18px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+}
+
+.chart-card h4 {
+  margin: 0 0 16px 0;
+  font-size: 14px;
+  color: #333;
+}
+
+.chart-large {
+  grid-column: 1 / -1;
+}
+
+.chart-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.chart-header h4 {
+  margin: 0;
+}
+
+.chart-controls {
+  display: flex;
+  gap: 4px;
+}
+
+.line-chart-echarts {
+  height: 280px;
+  width: 100%;
+}
+
+.ranking-chart {
+  height: 220px;
+  width: 100%;
+}
+
+.pie-chart-echarts {
+  height: 320px;
+  width: 100%;
+}
+
+@media (max-width: 768px) {
+  .charts-grid {
+    grid-template-columns: 1fr;
+  }
+  .stats-cards {
+    grid-template-columns: repeat(2, 1fr);
+  }
 }
 </style>

@@ -2,6 +2,9 @@ package com.qqai.dto.webhook;
 
 import com.qqai.entity.Message;
 
+import java.util.ArrayList;
+import java.util.List;
+
 public class MessageParseResult {
     private Long groupId;
     private String groupName;
@@ -17,6 +20,9 @@ public class MessageParseResult {
     private String replyToContent;
     private String forwardContent;
     private String miniAppContent;
+
+    /** 轻量解析阶段收集的媒体任务（图片/语音/视频），由 Controller 入库后投递到 MQ */
+    private List<MediaTaskPayload> mediaTasks = new ArrayList<>();
 
     public Long getGroupId() {
         return groupId;
@@ -128,5 +134,13 @@ public class MessageParseResult {
 
     public void setMiniAppContent(String miniAppContent) {
         this.miniAppContent = miniAppContent;
+    }
+
+    public List<MediaTaskPayload> getMediaTasks() {
+        return mediaTasks;
+    }
+
+    public void setMediaTasks(List<MediaTaskPayload> mediaTasks) {
+        this.mediaTasks = mediaTasks;
     }
 }

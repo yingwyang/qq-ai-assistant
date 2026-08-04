@@ -75,7 +75,7 @@
           </div>
         </div>
 
-        <!-- 登录模块 -->
+        <!-- NapCat登录模块 -->
         <div class="login-section">
           <h3>登录 NapCat</h3>
           <div class="login-container">
@@ -204,7 +204,7 @@ export default {
         setTimeout(() => {
           checkServiceHealth();
           getQrCode();
-        }, 5000);
+        }, 50000);
       } catch (error) {
         systemMessage.value = '启动失败: ' + error.message;
         systemMessageType.value = 'error';

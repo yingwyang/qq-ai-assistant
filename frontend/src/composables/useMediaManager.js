@@ -196,6 +196,15 @@ export function useMediaManager({ showSystemMsg, loadDiskUsage } = {}) {
   const currentPreviewIndex = ref(0);
   const previewMode = ref('single');
 
+  // 预览分页状态
+  const previewPage = ref(0);
+  const previewPageSize = ref(40);
+  const previewTotalElements = ref(0);
+  const previewTotalPages = computed(() =>
+    Math.max(1, Math.ceil(previewTotalElements.value / previewPageSize.value))
+  );
+  const previewLoadingPage = ref(false);
+
   const selectedMediaFiles = computed(() =>
     Array.from(selectedMediaFileIds.value)
       .map((id) => mediaFileCache.value.get(id))
@@ -214,13 +223,37 @@ export function useMediaManager({ showSystemMsg, loadDiskUsage } = {}) {
     showPreviewModal.value = true;
   };
 
+  const loadPreviewPage = async (page) => {
+    previewLoadingPage.value = true;
+    try {
+      const res = await messageApi.getMediaFiles(mediaFileFilter.value, page, previewPageSize.value);
+      if (res) {
+        const content = res.content || [];
+        previewFiles.value = content;
+        previewTotalElements.value = res.totalElements || 0;
+        const newCache = new Map(mediaFileCache.value);
+        content.forEach((file) => {
+          if (file.id != null) newCache.set(file.id, file);
+        });
+        mediaFileCache.value = newCache;
+        previewPage.value = page;
+      }
+    } catch (error) {
+      console.error('加载预览页失败:', error);
+    } finally {
+      previewLoadingPage.value = false;
+    }
+  };
+
   const previewAllFiles = async () => {
-    const allFiles = await loadAllMediaFilesForPreview();
-    if (!allFiles.length) return;
-    previewFiles.value = allFiles;
-    currentPreviewIndex.value = 0;
     previewMode.value = 'gallery';
     showPreviewModal.value = true;
+    await loadPreviewPage(0);
+  };
+
+  const previewGoToPage = async (page) => {
+    if (page < 0 || page >= previewTotalPages.value || previewLoadingPage.value) return;
+    await loadPreviewPage(page);
   };
 
   const enterSingleView = (index) => {
@@ -267,6 +300,9 @@ export function useMediaManager({ showSystemMsg, loadDiskUsage } = {}) {
   const closePreview = () => {
     showPreviewModal.value = false;
     previewMode.value = 'single';
+    previewFiles.value = [];
+    previewPage.value = 0;
+    previewTotalElements.value = 0;
   };
 
   const previewNext = () => {
@@ -308,7 +344,8 @@ export function useMediaManager({ showSystemMsg, loadDiskUsage } = {}) {
     deleteSelectedMediaFiles, loadAllMediaFilesForPreview, confirmPurgeMedia,
     // 预览
     showPreviewModal, previewFiles, currentPreviewIndex, currentPreviewFile, previewMode,
-    openPreview, previewAllFiles, enterSingleView, backToGallery, backToList,
+    previewPage, previewPageSize, previewTotalPages, previewTotalElements, previewLoadingPage,
+    openPreview, previewAllFiles, previewGoToPage, enterSingleView, backToGallery, backToList,
     togglePreviewSelection, isAllPreviewSelected, toggleSelectAllInPreview,
     closePreview, previewNext, previewPrev, onPreviewKeydown,
   };

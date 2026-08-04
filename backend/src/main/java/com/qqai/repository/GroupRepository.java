@@ -34,6 +34,11 @@ public interface GroupRepository extends JpaRepository<Group, Long> {
      * 查询所有活跃群聊
      */
     List<Group> findByActiveTrue();
+
+    /**
+     * 根据群类型查找活跃群聊
+     */
+    List<Group> findByGroupTypeAndActiveTrue(String groupType);
     
     /**
      * 检查群号是否存在（所有登录账号）
@@ -49,4 +54,47 @@ public interface GroupRepository extends JpaRepository<Group, Long> {
      * 单条 SQL 判断该群是否属于当前用户绑定的任一 QQ，且 active=true
      */
     long countByGroupIdAndOwnerQqInAndActiveTrue(String groupId, List<String> ownerQqList);
+
+    /**
+     * 统计当前用户绑定的任一 QQ 名下的群聊总数
+     */
+    long countByOwnerQqIn(List<String> ownerQqList);
+
+    /**
+     * 统计当前用户绑定的任一 QQ 名下的活跃群聊数量
+     */
+    long countByOwnerQqInAndActiveTrue(List<String> ownerQqList);
+
+    /**
+     * 防御性包装
+     */
+    default long safeCountByOwnerQqIn(List<String> ownerQqList) {
+        if (ownerQqList == null || ownerQqList.isEmpty()) return 0L;
+        return countByOwnerQqIn(ownerQqList);
+    }
+
+    /**
+     * 防御性包装
+     */
+    default long safeCountByOwnerQqInAndActiveTrue(List<String> ownerQqList) {
+        if (ownerQqList == null || ownerQqList.isEmpty()) return 0L;
+        return countByOwnerQqInAndActiveTrue(ownerQqList);
+    }
+
+    /**
+     * 防御性包装
+     */
+    default long safeCountByGroupIdAndOwnerQqInAndActiveTrue(String groupId, List<String> ownerQqList) {
+        if (ownerQqList == null || ownerQqList.isEmpty()) return 0L;
+        return countByGroupIdAndOwnerQqInAndActiveTrue(groupId, ownerQqList);
+    }
+
+    /**
+     * 防御性包装 findByGroupId
+     */
+    default List<Group> safeFindByGroupId(String groupId) {
+        if (groupId == null || groupId.isBlank()) return java.util.Collections.emptyList();
+        List<Group> result = findByGroupId(groupId);
+        return result != null ? result : java.util.Collections.emptyList();
+    }
 }

@@ -69,7 +69,7 @@ public class AstrBotConversationService {
 
     /**
      * 获取或创建对话
-     * 如果提供了 conversationId 则查找，否则创建新对话
+     * 如果提供了 conversationId 则查找（需验证归属），否则创建新对话
      */
     @Transactional
     public AstrBotConversation getOrCreateConversation(String conversationId, Long userId, String groupId,
@@ -77,7 +77,15 @@ public class AstrBotConversationService {
         if (conversationId != null && !conversationId.isEmpty()) {
             Optional<AstrBotConversation> existing = conversationRepository.findByConversationId(conversationId);
             if (existing.isPresent()) {
-                return existing.get();
+                AstrBotConversation conv = existing.get();
+                // 验证会话归属
+                if (conv.getUserId() != null && !conv.getUserId().equals(userId)) {
+                    // 不属于当前用户，创建新会话
+                    logger.warn("用户尝试访问他人会话，conversationId={}, userId={}, ownerId={}",
+                            conversationId, userId, conv.getUserId());
+                    return createConversation(userId, groupId, userQq, userNickname, null, model);
+                }
+                return conv;
             }
         }
         return createConversation(userId, groupId, userQq, userNickname, null, model);
@@ -98,10 +106,18 @@ public class AstrBotConversationService {
     }
 
     /**
-     * 获取所有未归档的对话
+     * 获取所有未归档的对话（废弃：请使用 getUserActiveConversations）
      */
+    @Deprecated
     public List<AstrBotConversation> getAllActiveConversations() {
         return conversationRepository.findByArchivedFalseOrderByTimeUpdatedDesc();
+    }
+
+    /**
+     * 获取指定用户的未归档对话
+     */
+    public List<AstrBotConversation> getUserActiveConversations(Long userId) {
+        return conversationRepository.findByUserIdAndArchivedFalseOrderByTimeUpdatedDesc(userId);
     }
 
     /**

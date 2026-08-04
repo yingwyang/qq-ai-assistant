@@ -476,7 +476,7 @@ export default {
   left: 0;
   right: 0;
   bottom: 0;
-  background-color: rgba(0, 0, 0, 0.5);
+  background-color: var(--modal-overlay, rgba(0, 0, 0, 0.5));
   display: flex;
   justify-content: center;
   align-items: center;
@@ -484,13 +484,13 @@ export default {
 }
 
 .profile-container {
-  background: white;
+  background: var(--card-bg, white);
   border-radius: 12px;
   width: 90%;
   max-width: 600px;
   max-height: 90vh;
   overflow-y: auto;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 4px 20px var(--card-shadow, rgba(0, 0, 0, 0.15));
 }
 
 .profile-header {
@@ -498,20 +498,20 @@ export default {
   justify-content: space-between;
   align-items: center;
   padding: 20px 24px;
-  border-bottom: 1px solid #e0e0e0;
+  border-bottom: 1px solid var(--border-color, #e0e0e0);
 }
 
 .profile-header h2 {
   margin: 0;
   font-size: 20px;
-  color: #333;
+  color: var(--text-primary, #333);
 }
 
 .close-btn {
   background: none;
   border: none;
   font-size: 24px;
-  color: #999;
+  color: var(--text-muted, #999);
   cursor: pointer;
   padding: 0;
   width: 32px;
@@ -524,8 +524,8 @@ export default {
 }
 
 .close-btn:hover {
-  background-color: #f5f5f5;
-  color: #333;
+  background-color: var(--bg-tertiary, #f5f5f5);
+  color: var(--text-primary, #333);
 }
 
 .profile-content {
@@ -543,7 +543,7 @@ export default {
 .section h3 {
   margin: 0 0 16px 0;
   font-size: 16px;
-  color: #333;
+  color: var(--text-primary, #333);
 }
 
 .section-header {
@@ -561,7 +561,7 @@ export default {
   display: flex;
   gap: 24px;
   padding: 20px;
-  background-color: #f8f9fa;
+  background-color: var(--bg-tertiary, #f8f9fa);
   border-radius: 8px;
 }
 
@@ -577,23 +577,23 @@ export default {
   height: 80px;
   border-radius: 50%;
   object-fit: cover;
-  border: 3px solid #fff;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  border: 3px solid var(--card-bg, #fff);
+  box-shadow: 0 2px 8px var(--card-shadow, rgba(0, 0, 0, 0.1));
 }
 
 .change-avatar-btn {
   padding: 6px 12px;
   font-size: 12px;
-  color: #3498db;
+  color: var(--accent-color, #3498db);
   background: none;
-  border: 1px solid #3498db;
+  border: 1px solid var(--accent-color, #3498db);
   border-radius: 4px;
   cursor: pointer;
   transition: all 0.2s;
 }
 
 .change-avatar-btn:hover {
-  background-color: #3498db;
+  background-color: var(--accent-color, #3498db);
   color: white;
 }
 
@@ -613,20 +613,22 @@ export default {
 .field label {
   width: 60px;
   font-size: 14px;
-  color: #666;
+  color: var(--text-secondary, #666);
 }
 
 .field span {
   font-size: 14px;
-  color: #333;
+  color: var(--text-primary, #333);
 }
 
 .field input {
   flex: 1;
   padding: 8px 12px;
-  border: 1px solid #ddd;
+  border: 1px solid var(--input-border, #ddd);
   border-radius: 4px;
   font-size: 14px;
+  background: var(--input-bg, #fff);
+  color: var(--text-primary, #333);
 }
 
 .role-badge {
@@ -666,12 +668,12 @@ export default {
 }
 
 .btn-edit {
-  background-color: #3498db;
+  background-color: var(--accent-color, #3498db);
   color: white;
 }
 
 .btn-edit:hover {
-  background-color: #2980b9;
+  background-color: var(--accent-hover, #2980b9);
 }
 
 .btn-save {
@@ -702,12 +704,12 @@ export default {
 }
 
 .btn-confirm {
-  background-color: #3498db;
+  background-color: var(--accent-color, #3498db);
   color: white;
 }
 
 .btn-confirm:hover:not(:disabled) {
-  background-color: #2980b9;
+  background-color: var(--accent-hover, #2980b9);
 }
 
 button:disabled {
@@ -742,15 +744,15 @@ button:disabled {
   align-items: center;
   gap: 16px;
   padding: 16px;
-  background-color: #f8f9fa;
+  background-color: var(--bg-tertiary, #f8f9fa);
   border-radius: 8px;
-  border: 2px solid transparent;
+  border: 2px solid var(--border-color, #ddd);
   transition: all 0.2s;
 }
 
 .qq-binding-item.is-default {
-  border-color: #3498db;
-  background-color: #ebf5fb;
+  border-color: var(--accent-color, #3498db);
+  background-color: var(--bg-tertiary, #ebf5fb);
 }
 
 .qq-avatar {
@@ -774,12 +776,12 @@ button:disabled {
 .qq-number {
   font-size: 16px;
   font-weight: 500;
-  color: #333;
+  color: var(--text-primary, #333);
 }
 
 .qq-nickname {
   font-size: 13px;
-  color: #666;
+  color: var(--text-secondary, #666);
   margin-top: 4px;
 }
 
@@ -809,12 +811,12 @@ button:disabled {
 }
 
 .btn-set-default {
-  background-color: #3498db;
+  background-color: var(--accent-color, #3498db);
   color: white;
 }
 
 .btn-set-default:hover {
-  background-color: #2980b9;
+  background-color: var(--accent-hover, #2980b9);
 }
 
 .btn-unbind {
@@ -832,7 +834,7 @@ button:disabled {
   left: 0;
   right: 0;
   bottom: 0;
-  background-color: rgba(0, 0, 0, 0.5);
+  background-color: var(--modal-overlay, rgba(0, 0, 0, 0.5));
   display: flex;
   justify-content: center;
   align-items: center;
@@ -840,7 +842,7 @@ button:disabled {
 }
 
 .modal-content {
-  background: white;
+  background: var(--card-bg, white);
   padding: 24px;
   border-radius: 8px;
   width: 90%;
@@ -860,16 +862,18 @@ button:disabled {
   display: block;
   margin-bottom: 6px;
   font-size: 14px;
-  color: #666;
+  color: var(--text-secondary, #666);
 }
 
 .form-group input {
   width: 100%;
   padding: 10px 12px;
-  border: 1px solid #ddd;
+  border: 1px solid var(--input-border, #ddd);
   border-radius: 4px;
   font-size: 14px;
   box-sizing: border-box;
+  background: var(--input-bg, #fff);
+  color: var(--text-primary, #333);
 }
 
 .bind-hint {
@@ -892,7 +896,7 @@ button:disabled {
 
 .btn-send-code {
   padding: 8px 14px;
-  background-color: #3498db;
+  background-color: var(--accent-color, #3498db);
   color: white;
   border: none;
   border-radius: 4px;
@@ -903,7 +907,7 @@ button:disabled {
 }
 
 .btn-send-code:hover:not(:disabled) {
-  background-color: #2980b9;
+  background-color: var(--accent-hover, #2980b9);
 }
 
 .btn-send-code:disabled {
@@ -928,7 +932,7 @@ button:disabled {
 .avatar-upload input[type="file"] {
   width: 100%;
   padding: 10px;
-  border: 2px dashed #ddd;
+  border: 2px dashed var(--input-border, #ddd);
   border-radius: 4px;
   cursor: pointer;
 }
@@ -943,7 +947,7 @@ button:disabled {
   height: 120px;
   border-radius: 50%;
   object-fit: cover;
-  border: 3px solid #fff;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  border: 3px solid var(--card-bg, #fff);
+  box-shadow: 0 2px 8px var(--card-shadow, rgba(0, 0, 0, 0.1));
 }
 </style>

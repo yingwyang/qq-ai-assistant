@@ -97,4 +97,31 @@ public interface AstrBotConversationRepository extends JpaRepository<AstrBotConv
      * 统计用户对话数量
      */
     long countByUserQq(String userQq);
+
+    /**
+     * 统计系统用户的对话数量
+     */
+    long countByUserId(Long userId);
+
+    /**
+     * 根据系统用户ID查找未归档的对话列表
+     */
+    List<AstrBotConversation> findByUserIdAndArchivedFalseOrderByTimeUpdatedDesc(Long userId);
+
+    /**
+     * 防御性包装 findByUserIdOrderByTimeUpdatedDesc
+     */
+    default List<AstrBotConversation> safeFindByUserIdOrderByTimeUpdatedDesc(Long userId) {
+        if (userId == null) return java.util.Collections.emptyList();
+        List<AstrBotConversation> result = findByUserIdOrderByTimeUpdatedDesc(userId);
+        return result != null ? result : java.util.Collections.emptyList();
+    }
+
+    /**
+     * 防御性包装 countByUserId
+     */
+    default long safeCountByUserId(Long userId) {
+        if (userId == null) return 0L;
+        return countByUserId(userId);
+    }
 }

@@ -25,6 +25,21 @@ spring:
       max-file-size: 100MB
       max-request-size: 100MB
       file-size-threshold: 0
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
+    virtual-host: ${RABBITMQ_VHOST:/}
+    # 连接失败时启动失败（不静默降级，符合 spec 要求）
+    listener:
+      simple:
+        # acknowledge-mode 默认 AUTO，配合自定义 ContainerFactory 的 RetryTemplate + defaultRequeueRejected=false
+        # 实现失败重试 3 次后 reject(requeue=false) → 进死信队列
+        retry:
+          enabled: true
+          max-attempts: 3
+          initial-interval: 1000ms
 
 server:
   port: ${SERVER_PORT:8081}
@@ -36,7 +51,7 @@ server:
 # AstrBot配置
 astrbot:
   api-url: ${ASTRBOT_API_URL:http://localhost:6185}
-  token: ${ASTRBOT_TOKEN:your-astrbot-api-key}
+  token: ${ASTRBOT_TOKEN:***REMOVED***}
   data-path: ${ASTRBOT_DATA_PATH:D:/ai/Documents/qq-web/Astrbot/data}
 
 # NapCat配置
@@ -44,9 +59,9 @@ napcat:
   api-url: ${NAPCAT_API_URL:http://localhost:6100}
   onebot-api-url: ${NAPCAT_ONEBOT_API_URL:http://localhost:6100}
   webui-url: ${NAPCAT_WEBUI_URL:http://127.0.0.1:6099}
-  token: ${NAPCAT_TOKEN:your-napcat-token}
-  webhook-token: ${NAPCAT_WEBHOOK_TOKEN:your-webhook-token}
-  self-qq: ${NAPCAT_SELF_QQ:your-qq-number}
+  token: ${NAPCAT_TOKEN:***REMOVED***}
+  webhook-token: ${NAPCAT_WEBHOOK_TOKEN:***REMOVED***}
+  self-qq: ${NAPCAT_SELF_QQ:2488130337}
 
 # GPT-SoVITS配置
 gpt-sovits:
@@ -57,6 +72,25 @@ gpt-sovits:
   prompt-lang: ${GPT_SOVITS_PROMPT_LANG:zh}
   text-lang: ${GPT_SOVITS_TEXT_LANG:zh}
   output-dir: ${GPT_SOVITS_OUTPUT_DIR:D:/ai/Documents/qq-web/qq-ai-assistant/backend/uploads/tts}
+  # 训练好的音色模型根目录
+  model-root: ${GPT_SOVITS_MODEL_ROOT:D:/ai/Documents/qq-web/GPT-SoVITS-v2pro-20250604-nvidia50}
+  default-character: ${GPT_SOVITS_DEFAULT_CHARACTER:Kisaki}
+  # 角色列表
+  characters:
+    - name: Kisaki
+      label: Kisaki（妃那）
+      gpt-path: GPT_weights_v2Pro/Kisaki-e15.ckpt
+      sovits-path: SoVITS_weights_v2Pro/Kisaki_e8_s5104.pth
+      ref-audio: reference/Kisaki_ref.wav
+      prompt-text: どうして皆さんそこに物語性を求めるのでしょうか。
+      prompt-lang: ja
+    - name: 加藤惠
+      label: 加藤惠
+      gpt-path: GPT_weights_v2Pro/加藤惠-e15.ckpt
+      sovits-path: SoVITS_weights_v2Pro/加藤惠_e8_s4144.pth
+      ref-audio: reference/katou_ref.wav
+      prompt-text: 別に泣き芸をバカにしてるわけじゃないよ。本当だよ。
+      prompt-lang: ja
 
 # MinIO配置
 minio:

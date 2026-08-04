@@ -124,6 +124,10 @@
     <path v-else-if="name === 'backup'" d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/>
     <path v-else-if="name === 'send'" d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
     <circle v-else-if="name === 'dot'" cx="12" cy="12" r="6"/>
+    <path v-else-if="name === 'sparkles'" d="M12 2l2.4 7.2L22 12l-7.6 2.8L12 22l-2.4-7.2L2 12l7.6-2.8z"/>
+    <path v-else-if="name === 'loader'" d="M12 2a10 10 0 1 0 10 10h-2a8 8 0 1 1-8-8V2z"/>
+    <path v-else-if="name === 'external-link'" d="M14 3h7v7h-2V6.41l-9.29 9.3-1.42-1.42L17.59 5H14V3zM5 5h6v2H7v10h10v-4h2v6H5V5z"/>
+    <path v-else-if="name === 'alert-circle'" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
   </svg>
 </template>
 

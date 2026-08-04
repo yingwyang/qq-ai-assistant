@@ -1,5 +1,6 @@
-import { ref } from 'vue';
+import { ref, computed } from 'vue';
 import { dashboardApi, systemApi } from '../services/api';
+import { chartColors } from '../config/echarts';
 
 export function useDashboardData() {
   const stats = ref({
@@ -11,6 +12,9 @@ export function useDashboardData() {
     totalConversations: 0,
     activeConversations: 0,
     totalFiles: 0,
+    todayActiveUsers: 0,
+    todayAiConversations: 0,
+    totalAiMessages: 0,
   });
   const messageTrend = ref([]);
   const trendDays = ref(7);
@@ -18,6 +22,8 @@ export function useDashboardData() {
   const groupRanking = ref([]);
   const qqRanking = ref([]);
   const messageTypeDistribution = ref([]);
+  const hourlyDistribution = ref([]);
+  const aiTrend = ref([]);
   const diskUsage = ref({
     uploadsSizeFormatted: '0 B',
     totalSpaceFormatted: '0 B',
@@ -25,12 +31,7 @@ export function useDashboardData() {
     freeSpaceFormatted: '0 B',
     usagePercent: 0,
   });
-  const tooltipVisible = ref(false);
-  const tooltipData = ref({ date: '', count: 0 });
-  const tooltipStyle = ref({ left: '0px', top: '0px' });
-  const scrollWrapper = ref(null);
 
-  // ===== 加载方法 =====
   const loadStats = async () => {
     try {
       stats.value = await dashboardApi.getStats();
@@ -85,187 +86,22 @@ export function useDashboardData() {
     }
   };
 
-  // ===== 图表计算方法 =====
-  const getBarHeight = (count) => {
-    const max = Math.max(...messageTrend.value.map((i) => i.count), 1);
-    return Math.max((count / max) * 100, 10);
-  };
-
-  const getLinePoints = () => {
-    if (!messageTrend.value || messageTrend.value.length === 0) return '';
-    const max = Math.max(...messageTrend.value.map((i) => i.count), 1);
-    const len = messageTrend.value.length;
-    return messageTrend.value.map((item, index) => {
-      const x = len > 1 ? (index / (len - 1)) * 100 : 50;
-      const y = 60 - (item.count / max) * 50 - 5;
-      return `${x},${y}`;
-    }).join(' ');
-  };
-
-  const getPointX = (index) => {
-    const len = messageTrend.value.length;
-    return len > 1 ? (index / (len - 1)) * 100 : 50;
-  };
-
-  const getPointY = (count) => {
-    const max = Math.max(...messageTrend.value.map((i) => i.count), 1);
-    return 60 - (count / max) * 50 - 5;
-  };
-
-  const getPointXPercent = (index) => {
-    const len = messageTrend.value.length;
-    return len > 1 ? (index / (len - 1)) * 100 : 50;
-  };
-
-  const getPointYPercent = (count) => {
-    const max = Math.max(...messageTrend.value.map((i) => i.count), 1);
-    const y = 60 - (count / max) * 50 - 5;
-    return (y / 60) * 100;
-  };
-
-  const getAreaPoints = () => {
-    if (!messageTrend.value || messageTrend.value.length === 0) return '';
-    const len = messageTrend.value.length;
-    const linePoints = getLinePoints();
-    const firstX = len > 1 ? 0 : 50;
-    const lastX = len > 1 ? 100 : 50;
-    const bottomY = 55;
-    return `${firstX},${bottomY} ${linePoints} ${lastX},${bottomY}`;
-  };
-
-  const getYAxisLabel = (index) => {
-    const max = Math.max(...messageTrend.value.map((i) => i.count), 1);
-    const step = max / 4;
-    return Math.round(step * (4 - index));
-  };
-
-  const getRankWidth = (count) => {
-    const max = Math.max(...groupRanking.value.map((i) => i.messageCount), 1);
-    return Math.max((count / max) * 100, 5);
-  };
-
-  const getQQRankWidth = (count) => {
-    const max = Math.max(...qqRanking.value.map((i) => i.messageCount), 1);
-    return Math.max((count / max) * 100, 5);
-  };
-
-  const getRankColor = (index) => {
-    const colors = ['#e74c3c', '#e67e22', '#f1c40f', '#3498db', '#9b59b6'];
-    return colors[index % colors.length];
-  };
-
-  const getDistWidth = (count) => {
-    const max = Math.max(...messageTypeDistribution.value.map((i) => i.count), 1);
-    return Math.max((count / max) * 100, 2);
-  };
-
-  const getPieGradient = () => {
-    if (!messageTypeDistribution.value || messageTypeDistribution.value.length === 0) {
-      return 'conic-gradient(#ccc 0% 100%)';
-    }
-    const total = messageTypeDistribution.value.reduce((sum, item) => sum + item.count, 0);
-    if (total === 0) return 'conic-gradient(#ccc 0% 100%)';
-    let current = 0;
-    const segments = messageTypeDistribution.value.map((item) => {
-      const start = current;
-      const percent = (item.count / total) * 100;
-      current += percent;
-      return `${getDistColor(item.type)} ${start}% ${current}%`;
-    });
-    return `conic-gradient(${segments.join(', ')})`;
-  };
-
-  const getDistPercent = (count) => {
-    const total = messageTypeDistribution.value.reduce((sum, item) => sum + item.count, 0);
-    return total > 0 ? Math.round((count / total) * 100) : 0;
-  };
-
-  const getDistColor = (type) => {
-    const colors = {
-      '文本': '#3498db',
-      '图片': '#e74c3c',
-      '视频': '#2ecc71',
-      '文件': '#f39c12',
-      '音频': '#9b59b6',
-      '语音': '#1abc9c',
-      '其他': '#95a5a6',
-    };
-    return colors[type] || '#3498db';
-  };
-
-  // ===== 提示框 =====
-  const showTooltip = (event, item) => {
-    tooltipData.value = item;
-    tooltipVisible.value = true;
-    const rect = event.target.getBoundingClientRect();
-    tooltipStyle.value = {
-      left: rect.left + rect.width / 2 - 40 + 'px',
-      top: rect.top - 50 + 'px',
-    };
-  };
-
-  const hideTooltip = () => {
-    tooltipVisible.value = false;
-  };
-
-  // ===== 名称截断 =====
-  const truncateName = (name) => {
-    if (!name) return '未知群聊';
-    return name.length > 12 ? name.substring(0, 12) + '...' : name;
-  };
-
-  const truncateQQName = (name, qq) => {
-    if (!name) return qq || '未知用户';
-    return name.length > 10 ? name.substring(0, 10) + '...' : name;
-  };
-
-  // ===== 拖拽滚动 =====
-  let isDown = false;
-  let startX;
-  let scrollLeftVal;
-  let removeDragListeners = null;
-
-  const setupDragScroll = () => {
-    const el = scrollWrapper.value;
-    if (!el) return;
-
-    const onMouseDown = (e) => {
-      isDown = true;
-      el.classList.add('dragging');
-      startX = e.pageX - el.offsetLeft;
-      scrollLeftVal = el.scrollLeft;
-    };
-    const onMouseLeave = () => { isDown = false; el.classList.remove('dragging'); };
-    const onMouseUp = () => { isDown = false; el.classList.remove('dragging'); };
-    const onMouseMove = (e) => {
-      if (!isDown) return;
-      e.preventDefault();
-      const x = e.pageX - el.offsetLeft;
-      const walk = (x - startX) * 1.5;
-      el.scrollLeft = scrollLeftVal - walk;
-    };
-
-    el.addEventListener('mousedown', onMouseDown);
-    el.addEventListener('mouseleave', onMouseLeave);
-    el.addEventListener('mouseup', onMouseUp);
-    el.addEventListener('mousemove', onMouseMove);
-
-    removeDragListeners = () => {
-      el.removeEventListener('mousedown', onMouseDown);
-      el.removeEventListener('mouseleave', onMouseLeave);
-      el.removeEventListener('mouseup', onMouseUp);
-      el.removeEventListener('mousemove', onMouseMove);
-    };
-  };
-
-  const cleanupDragScroll = () => {
-    if (removeDragListeners) {
-      removeDragListeners();
-      removeDragListeners = null;
+  const loadHourlyDistribution = async () => {
+    try {
+      hourlyDistribution.value = await dashboardApi.getHourlyDistribution();
+    } catch (error) {
+      console.error('加载时段分布失败:', error);
     }
   };
 
-  // ===== 一次性加载所有面板数据 =====
+  const loadAiTrend = async () => {
+    try {
+      aiTrend.value = await dashboardApi.getAiTrend();
+    } catch (error) {
+      console.error('加载AI趋势失败:', error);
+    }
+  };
+
   const loadAll = async () => {
     await Promise.all([
       loadStats(),
@@ -274,22 +110,314 @@ export function useDashboardData() {
       loadQQRanking(),
       loadDiskUsage(),
       loadDistribution(),
+      loadHourlyDistribution(),
+      loadAiTrend(),
     ]);
   };
+
+  const trendChartOption = computed(() => {
+    const data = messageTrend.value.map(item => item.count);
+    const dates = messageTrend.value.map(item => item.date);
+    return {
+      tooltip: {
+        trigger: 'axis',
+        backgroundColor: 'rgba(255,255,255,0.95)',
+        borderColor: '#eee',
+        borderWidth: 1,
+        textStyle: { color: '#333' },
+        formatter: (params) => {
+          const p = params[0];
+          return `<div style="font-weight:600;margin-bottom:4px">${p.axisValue}</div>
+                  <span style="color:${chartColors.primary}">●</span> ${p.value} 条消息`;
+        }
+      },
+      grid: { left: '3%', right: '4%', bottom: '3%', top: '10%', containLabel: true },
+      xAxis: {
+        type: 'category',
+        boundaryGap: false,
+        data: dates,
+        axisLine: { lineStyle: { color: '#ddd' } },
+        axisLabel: { color: '#999', fontSize: 11 },
+        axisTick: { show: false }
+      },
+      yAxis: {
+        type: 'value',
+        axisLine: { show: false },
+        axisTick: { show: false },
+        splitLine: { lineStyle: { color: '#f5f5f5', type: 'dashed' } },
+        axisLabel: { color: '#999', fontSize: 11 }
+      },
+      series: [{
+        name: '消息数',
+        type: 'line',
+        data: data,
+        smooth: true,
+        symbol: 'circle',
+        symbolSize: 6,
+        lineStyle: { width: 2.5, color: chartColors.primary },
+        itemStyle: { color: chartColors.primary },
+        areaStyle: {
+          color: {
+            type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
+            colorStops: [
+              { offset: 0, color: 'rgba(52,152,219,0.3)' },
+              { offset: 1, color: 'rgba(52,152,219,0.02)' }
+            ]
+          }
+        },
+        emphasis: {
+          focus: 'series',
+          itemStyle: { borderWidth: 2, borderColor: '#fff' }
+        },
+        animationDuration: 800,
+        animationEasing: 'cubicInOut'
+      }]
+    };
+  });
+
+  const buildRankingOption = (data) => {
+    const names = data.map(item => item.groupName || item.nickname || item.name || '未知');
+    const values = data.map(item => item.messageCount || item.count || 0);
+    return {
+      tooltip: {
+        trigger: 'axis',
+        axisPointer: { type: 'shadow' },
+        backgroundColor: 'rgba(255,255,255,0.95)',
+        borderColor: '#eee',
+        textStyle: { color: '#333' },
+        formatter: (params) => {
+          const p = params[0];
+          return `<div style="font-weight:600">${p.name}</div>
+                  消息数: <b>${p.value}</b>`;
+        }
+      },
+      grid: { left: '2%', right: '12%', bottom: '2%', top: '8%', containLabel: true },
+      xAxis: {
+        type: 'value',
+        axisLine: { show: false },
+        axisTick: { show: false },
+        splitLine: { lineStyle: { color: '#f5f5f5', type: 'dashed' } },
+        axisLabel: { color: '#999', fontSize: 11 }
+      },
+      yAxis: {
+        type: 'category',
+        data: names.reverse(),
+        axisLine: { show: false },
+        axisTick: { show: false },
+        axisLabel: { color: '#666', fontSize: 12, width: 80, overflow: 'truncate' }
+      },
+      series: [{
+        type: 'bar',
+        data: values.reverse(),
+        barWidth: '60%',
+        itemStyle: {
+          borderRadius: [0, 4, 4, 0],
+          color: (params) => {
+            const colors = chartColors.ranking;
+            return colors[params.dataIndex % colors.length];
+          }
+        },
+        label: {
+          show: true,
+          position: 'right',
+          formatter: '{c}',
+          color: '#666',
+          fontSize: 11
+        },
+        animationDuration: 600,
+        animationEasing: 'cubicOut'
+      }]
+    };
+  };
+
+  const groupRankingOption = computed(() => buildRankingOption(groupRanking.value));
+  const qqRankingOption = computed(() => buildRankingOption(qqRanking.value));
+
+  const hourlyChartOption = computed(() => {
+    const hours = hourlyDistribution.value.map(item => item.hour);
+    const counts = hourlyDistribution.value.map(item => item.count);
+    return {
+      tooltip: {
+        trigger: 'axis',
+        axisPointer: { type: 'shadow' },
+        backgroundColor: 'rgba(255,255,255,0.95)',
+        borderColor: '#eee',
+        textStyle: { color: '#333' },
+        formatter: (params) => {
+          const p = params[0];
+          return `<div style="font-weight:600">${p.axisValue}:00</div>
+                  消息数: <b>${p.value}</b>`;
+        }
+      },
+      grid: { left: '3%', right: '4%', bottom: '3%', top: '12%', containLabel: true },
+      xAxis: {
+        type: 'category',
+        data: hours,
+        axisLine: { lineStyle: { color: '#ddd' } },
+        axisLabel: { color: '#999', fontSize: 10, interval: 2 },
+        axisTick: { show: false }
+      },
+      yAxis: {
+        type: 'value',
+        axisLine: { show: false },
+        axisTick: { show: false },
+        splitLine: { lineStyle: { color: '#f5f5f5', type: 'dashed' } },
+        axisLabel: { color: '#999', fontSize: 10 }
+      },
+      series: [{
+        type: 'bar',
+        data: counts,
+        barWidth: '65%',
+        itemStyle: {
+          borderRadius: [3, 3, 0, 0],
+          color: {
+            type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
+            colorStops: [
+              { offset: 0, color: '#667eea' },
+              { offset: 1, color: '#764ba2' }
+            ]
+          }
+        },
+        emphasis: {
+          itemStyle: { shadowBlur: 10, shadowColor: 'rgba(102,126,234,0.3)' }
+        },
+        animationDuration: 600,
+        animationEasing: 'cubicOut'
+      }]
+    };
+  });
+
+  const aiTrendChartOption = computed(() => {
+    const dates = aiTrend.value.map(item => item.date);
+    const counts = aiTrend.value.map(item => item.count);
+    return {
+      tooltip: {
+        trigger: 'axis',
+        backgroundColor: 'rgba(255,255,255,0.95)',
+        borderColor: '#eee',
+        textStyle: { color: '#333' },
+        formatter: (params) => {
+          const p = params[0];
+          return `<div style="font-weight:600;margin-bottom:4px">${p.axisValue}</div>
+                  <span style="color:#f39c12">●</span> ${p.value} 条AI消息`;
+        }
+      },
+      grid: { left: '3%', right: '4%', bottom: '3%', top: '12%', containLabel: true },
+      xAxis: {
+        type: 'category',
+        boundaryGap: false,
+        data: dates,
+        axisLine: { lineStyle: { color: '#ddd' } },
+        axisLabel: { color: '#999', fontSize: 11 },
+        axisTick: { show: false }
+      },
+      yAxis: {
+        type: 'value',
+        axisLine: { show: false },
+        axisTick: { show: false },
+        splitLine: { lineStyle: { color: '#f5f5f5', type: 'dashed' } },
+        axisLabel: { color: '#999', fontSize: 11 }
+      },
+      series: [{
+        type: 'line',
+        data: counts,
+        smooth: true,
+        symbol: 'circle',
+        symbolSize: 6,
+        lineStyle: { width: 2.5, color: '#f39c12' },
+        itemStyle: { color: '#f39c12' },
+        areaStyle: {
+          color: {
+            type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
+            colorStops: [
+              { offset: 0, color: 'rgba(243,156,18,0.3)' },
+              { offset: 1, color: 'rgba(243,156,18,0.02)' }
+            ]
+          }
+        },
+        animationDuration: 800,
+        animationEasing: 'cubicInOut'
+      }]
+    };
+  });
+
+  const distributionChartOption = computed(() => {
+    const data = messageTypeDistribution.value.map(item => ({
+      name: item.type,
+      value: item.count
+    }));
+    return {
+      tooltip: {
+        trigger: 'item',
+        backgroundColor: 'rgba(255,255,255,0.95)',
+        borderColor: '#eee',
+        textStyle: { color: '#333' },
+        formatter: (params) => {
+          return `<div style="font-weight:600">${params.name}</div>
+                  数量: <b>${params.value}</b><br/>
+                  占比: <b>${params.percent}%</b>`;
+        }
+      },
+      legend: {
+        orient: 'vertical',
+        right: '5%',
+        top: 'center',
+        itemWidth: 12,
+        itemHeight: 12,
+        itemGap: 10,
+        textStyle: { color: '#666', fontSize: 12 },
+        selectedMode: true
+      },
+      series: [{
+        type: 'pie',
+        radius: ['45%', '72%'],
+        center: ['38%', '50%'],
+        avoidLabelOverlap: true,
+        itemStyle: {
+          borderRadius: 4,
+          borderColor: '#fff',
+          borderWidth: 2
+        },
+        label: {
+          show: true,
+          formatter: '{b}\n{d}%',
+          fontSize: 11,
+          color: '#666'
+        },
+        labelLine: {
+          length: 10,
+          length2: 15,
+          smooth: true
+        },
+        data: data.map(item => ({
+          ...item,
+          itemStyle: { color: chartColors.messageTypes[item.name] || chartColors.primary }
+        })),
+        emphasis: {
+          scale: true,
+          scaleSize: 8,
+          itemStyle: {
+            shadowBlur: 10,
+            shadowOffsetX: 0,
+            shadowColor: 'rgba(0,0,0,0.2)'
+          }
+        },
+        animationType: 'scale',
+        animationDuration: 800,
+        animationEasing: 'cubicOut'
+      }]
+    };
+  });
 
   return {
     stats, messageTrend, trendDays, trendInterval,
     groupRanking, qqRanking, messageTypeDistribution, diskUsage,
-    tooltipVisible, tooltipData, tooltipStyle, scrollWrapper,
+    hourlyDistribution, aiTrend,
     loadStats, loadTrend, setTrendDays,
     loadRanking, loadQQRanking, loadDiskUsage, loadDistribution,
-    getBarHeight, getLinePoints, getPointX, getPointY,
-    getPointXPercent, getPointYPercent, getAreaPoints, getYAxisLabel,
-    getRankWidth, getQQRankWidth, getRankColor,
-    getDistWidth, getPieGradient, getDistPercent, getDistColor,
-    showTooltip, hideTooltip,
-    truncateName, truncateQQName,
-    setupDragScroll, cleanupDragScroll,
+    loadHourlyDistribution, loadAiTrend,
+    trendChartOption, groupRankingOption, qqRankingOption,
+    distributionChartOption, hourlyChartOption, aiTrendChartOption,
     loadAll,
   };
 }

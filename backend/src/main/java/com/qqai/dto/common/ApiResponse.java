@@ -1,9 +1,15 @@
 package com.qqai.dto.common;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+
+@JsonInclude(JsonInclude.Include.NON_NULL)
 public class ApiResponse<T> {
     private int code;
     private String message;
     private T data;
+    private String status;
+    private String errorCode;
+    private Object details;
 
     public ApiResponse() {
     }
@@ -15,15 +21,36 @@ public class ApiResponse<T> {
     }
 
     public static <T> ApiResponse<T> success(T data) {
-        return new ApiResponse<>(200, "ok", data);
+        ApiResponse<T> resp = new ApiResponse<>(200, "ok", data);
+        resp.setStatus("ok");
+        return resp;
     }
 
     public static <T> ApiResponse<T> success() {
-        return new ApiResponse<>(200, "ok", null);
+        ApiResponse<T> resp = new ApiResponse<>(200, "ok", null);
+        resp.setStatus("ok");
+        return resp;
     }
 
     public static <T> ApiResponse<T> error(int code, String message) {
-        return new ApiResponse<>(code, message, null);
+        ApiResponse<T> resp = new ApiResponse<>(code, message, null);
+        resp.setStatus("error");
+        return resp;
+    }
+
+    public static <T> ApiResponse<T> error(int code, String errorCode, String message) {
+        ApiResponse<T> resp = new ApiResponse<>(code, message, null);
+        resp.setStatus("error");
+        resp.setErrorCode(errorCode);
+        return resp;
+    }
+
+    public static <T> ApiResponse<T> error(int code, String errorCode, String message, Object details) {
+        ApiResponse<T> resp = new ApiResponse<>(code, message, null);
+        resp.setStatus("error");
+        resp.setErrorCode(errorCode);
+        resp.setDetails(details);
+        return resp;
     }
 
     public int getCode() {
@@ -48,5 +75,29 @@ public class ApiResponse<T> {
 
     public void setData(T data) {
         this.data = data;
+    }
+
+    public String getStatus() {
+        return status;
+    }
+
+    public void setStatus(String status) {
+        this.status = status;
+    }
+
+    public String getErrorCode() {
+        return errorCode;
+    }
+
+    public void setErrorCode(String errorCode) {
+        this.errorCode = errorCode;
+    }
+
+    public Object getDetails() {
+        return details;
+    }
+
+    public void setDetails(Object details) {
+        this.details = details;
     }
 }

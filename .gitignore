@@ -48,22 +48,3 @@ frontend/devserver.err
 
 # Trae specs
 .trae/
-
-# 会话摘要（含个人信息与配置细节）
-SESSION_SUMMARY_*.md
-
-# IDE 运行时
-.idea/
-*.swp
-*.swo
-
-# 系统崩溃转储
-hs_err_pid*.log
-
-# Maven Wrapper
-mvnw
-mvnw.cmd
-.mvn/
-
-# 依赖缓存
-.cache/

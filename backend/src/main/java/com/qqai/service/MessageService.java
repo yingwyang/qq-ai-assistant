@@ -4,12 +4,11 @@ import com.qqai.entity.Message;
 import com.qqai.entity.Group;
 import com.qqai.repository.GroupRepository;
 import com.qqai.repository.MessageRepository;
+import com.qqai.dto.webhook.AiAnalysisPayload;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import com.qqai.event.MessageSavedEvent;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Pageable;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
@@ -63,7 +62,7 @@ public class MessageService {
     private NapCatService napCatService;
 
     @Autowired
-    private ApplicationEventPublisher eventPublisher;
+    private MessageQueueService messageQueueService;
 
     @Value("${file.storage.local-path:./uploads/images}")
     private String localStoragePath;
@@ -81,7 +80,9 @@ public class MessageService {
         message.setArchived(false);
         Message savedMessage = messageRepository.save(message);
         messageBroadcastService.broadcastNewMessage(savedMessage);
-        eventPublisher.publishEvent(new MessageSavedEvent(savedMessage));
+        // 投递 AI 分析任务到 RabbitMQ（替代旧的 ApplicationEvent 机制）
+        messageQueueService.sendAiAnalysis(
+                new AiAnalysisPayload(savedMessage.getId(), savedMessage.getContent()));
         return savedMessage;
     }
 
@@ -155,7 +156,8 @@ public class MessageService {
     public void processAllUnprocessedMessages() {
         List<Message> unprocessedMessages = getUnprocessedMessages();
         for (Message message : unprocessedMessages) {
-            eventPublisher.publishEvent(new MessageSavedEvent(message));
+            messageQueueService.sendAiAnalysis(
+                    new AiAnalysisPayload(message.getId(), message.getContent()));
         }
     }
 
@@ -266,6 +268,12 @@ public class MessageService {
             map.put("avatar", g.getAvatar() != null ? g.getAvatar()
                     : "https://q.qlogo.cn/headimg_dl?dst_uin=" + g.getGroupId() + "&spec=100");
             map.put("unreadCount", 0L);
+            try {
+                // chat_groups.groupType 字段是 VARCHAR，存的是枚举名（String）
+                map.put("groupType", g.getGroupType());
+            } catch (Exception ignored) {
+                map.put("groupType", null);
+            }
             Long lastRecvMs = messageRepository.findLastMessageTime(g.getGroupId());
             LocalDateTime t = epochMsToLocalDateTime(lastRecvMs);
             map.put("lastMessageTime", t != null ? t.toString()
@@ -357,6 +365,14 @@ public class MessageService {
 
             Long unreadCount = unreadCountMap.getOrDefault(gid, 0L);
             groupMap.put("unreadCount", unreadCount);
+
+            // 注入群类型（用于前端展示群类型徽章和匹配融入型分析模板）
+            try {
+                // chat_groups.groupType 是 VARCHAR，直接存枚举名
+                groupMap.put("groupType", group.getGroupType());
+            } catch (Exception ignored) {
+                groupMap.put("groupType", null);
+            }
 
             Long lastRecvMs = lastRecvMsMap.get(gid);
             LocalDateTime lastMessageTime = epochMsToLocalDateTime(lastRecvMs);

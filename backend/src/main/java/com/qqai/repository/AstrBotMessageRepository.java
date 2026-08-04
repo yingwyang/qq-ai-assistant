@@ -77,6 +77,20 @@ public interface AstrBotMessageRepository extends JpaRepository<AstrBotMessage, 
     List<AstrBotMessage> findOldMessages(@Param("beforeTime") LocalDateTime beforeTime);
 
     /**
+     * 统计指定时间范围内的消息数量
+     */
+    @Query("SELECT COUNT(m) FROM AstrBotMessage m WHERE m.timeCreated >= :start AND m.timeCreated < :end")
+    long countByTimeCreatedBetween(@Param("start") LocalDateTime start, @Param("end") LocalDateTime end);
+
+    /**
+     * 按天统计指定时间范围内的消息数量（用于 AI 对话趋势）
+     */
+    @Query(value = "SELECT DATE_FORMAT(time_created, '%Y-%m-%d') AS day, COUNT(*) AS cnt FROM astrbot_messages " +
+            "WHERE time_created >= :start AND time_created < :end " +
+            "GROUP BY DATE_FORMAT(time_created, '%Y-%m-%d') ORDER BY day", nativeQuery = true)
+    List<Object[]> countDailyBetween(@Param("start") LocalDateTime start, @Param("end") LocalDateTime end);
+
+    /**
      * 查找某段时间内的消息
      */
     @Query("SELECT m FROM AstrBotMessage m WHERE m.conversationId = :conversationId AND m.timeCreated BETWEEN :startTime AND :endTime ORDER BY m.timeCreated ASC")
@@ -90,8 +104,44 @@ public interface AstrBotMessageRepository extends JpaRepository<AstrBotMessage, 
      * 使用 Pageable 实现限制
      */
     default List<AstrBotMessage> findRecentMessagesByConversationId(String conversationId, int limit) {
-        return findByConversationIdOrderByTimeCreatedAsc(conversationId, 
+        return findByConversationIdOrderByTimeCreatedAsc(conversationId,
                 org.springframework.data.domain.PageRequest.of(0, limit))
                 .getContent();
+    }
+
+    /**
+     * 统计多个会话的消息总数
+     */
+    long countByConversationIdIn(List<String> conversationIds);
+
+    /**
+     * 按天统计多个会话在指定时间范围内的每日消息数量（用于用户级 AI 对话趋势）
+     * 返回 [date(MM-dd), count] 对
+     */
+    @Query(value = "SELECT DATE_FORMAT(time_created, '%m-%d') AS date, COUNT(*) AS cnt FROM astrbot_messages " +
+            "WHERE conversation_id IN :conversationIds " +
+            "AND time_created >= :start AND time_created < :end " +
+            "GROUP BY DATE_FORMAT(time_created, '%m-%d') ORDER BY DATE_FORMAT(time_created, '%m-%d')", nativeQuery = true)
+    List<Object[]> countDailyByConversationIdInAndTimeCreatedBetween(
+            @Param("conversationIds") List<String> conversationIds,
+            @Param("start") LocalDateTime start,
+            @Param("end") LocalDateTime end);
+
+    /**
+     * 防御性包装
+     */
+    default List<Object[]> safeCountDailyByConversationIdInAndTimeCreatedBetween(
+            List<String> conversationIds, LocalDateTime start, LocalDateTime end) {
+        if (conversationIds == null || conversationIds.isEmpty()) return java.util.Collections.emptyList();
+        List<Object[]> result = countDailyByConversationIdInAndTimeCreatedBetween(conversationIds, start, end);
+        return result != null ? result : java.util.Collections.emptyList();
+    }
+
+    /**
+     * 防御性包装 countByConversationIdIn
+     */
+    default long safeCountByConversationIdIn(List<String> conversationIds) {
+        if (conversationIds == null || conversationIds.isEmpty()) return 0L;
+        return countByConversationIdIn(conversationIds);
     }
 }

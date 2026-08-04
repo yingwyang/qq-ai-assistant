@@ -79,7 +79,8 @@ public interface MessageRepository extends JpaRepository<Message, Long> {
     /**
      * 查询最近对话的群聊（未归档&未被用户删除）
      */
-    @Query("SELECT m.groupId, MAX(m.groupName) as groupName FROM Message m WHERE m.archived = false AND m.deleted = false GROUP BY m.groupId ORDER BY MAX(m.serverRecvMs) DESC LIMIT 10")
+    @Query(value = "SELECT group_id, MAX(group_name) AS groupName FROM messages WHERE archived = false AND deleted = false " +
+            "GROUP BY group_id ORDER BY MAX(server_recv_ms) DESC LIMIT 10", nativeQuery = true)
     List<Object[]> findRecentGroups();
 
     // ==================== 按用户QQ过滤的查询方法 ====================
@@ -147,7 +148,8 @@ public interface MessageRepository extends JpaRepository<Message, Long> {
     /**
      * 统计消息最多的QQ账号（取前10）
      */
-    @Query("SELECT m.userQq, MAX(m.userNickname) as nickname, COUNT(m) as cnt FROM Message m WHERE m.archived = false GROUP BY m.userQq ORDER BY cnt DESC LIMIT 10")
+    @Query(value = "SELECT user_qq, MAX(user_nickname) AS nickname, COUNT(*) AS cnt FROM messages WHERE archived = false " +
+            "GROUP BY user_qq ORDER BY cnt DESC LIMIT 10", nativeQuery = true)
     List<Object[]> findTopQQByMessageCount();
 
     /**
@@ -179,6 +181,19 @@ public interface MessageRepository extends JpaRepository<Message, Long> {
      */
     @Query("SELECT COUNT(m) FROM Message m WHERE m.groupId = :groupId AND m.serverRecvMs > :sinceMs AND m.archived = false AND m.deleted = false")
     Long countUnreadMessagesSince(@Param("groupId") String groupId, @Param("sinceMs") Long sinceMs);
+
+    /**
+     * 统计指定时间范围内活跃用户数（按 userQq 去重）
+     */
+    @Query("SELECT COUNT(DISTINCT m.userQq) FROM Message m WHERE m.sendTime >= :start AND m.sendTime < :end AND m.userQq IS NOT NULL")
+    Long countActiveUsersBetween(@Param("start") LocalDateTime start, @Param("end") LocalDateTime end);
+
+    /**
+     * 按小时统计指定日期的消息数量（用于热力图）
+     */
+    @Query(value = "SELECT HOUR(send_time) AS hour, COUNT(*) AS cnt FROM messages WHERE DATE(send_time) = :date " +
+            "GROUP BY HOUR(send_time) ORDER BY hour", nativeQuery = true)
+    List<Object[]> countByHour(@Param("date") java.time.LocalDate date);
 
     /**
      * 查询群聊最新服务端接收毫秒时间（排除已归档&已被用户删除）
@@ -228,4 +243,104 @@ public interface MessageRepository extends JpaRepository<Message, Long> {
         GROUP BY g.group_id
         """, nativeQuery = true)
     List<Object[]> recentGroupStats(@Param("userId") Long userId, @Param("groupIds") List<String> groupIds);
+
+    // ==================== 用户级 Dashboard 按多个 selfQq 过滤的统计方法 ====================
+
+    /**
+     * 统计当前用户 QQ 账号下的消息总数
+     */
+    long countBySelfQqIn(List<String> selfQqs);
+
+    /**
+     * 防御性包装：空列表时直接返回 0，避免生成空 IN 子句
+     */
+    default long safeCountBySelfQqIn(List<String> selfQqs) {
+        if (selfQqs == null || selfQqs.isEmpty()) return 0L;
+        return countBySelfQqIn(selfQqs);
+    }
+
+    /**
+     * 统计指定时间范围内、当前用户 QQ 账号下的消息数量
+     */
+    long countBySendTimeBetweenAndSelfQqIn(LocalDateTime start, LocalDateTime end, List<String> selfQqs);
+
+    /**
+     * 防御性包装：空列表时直接返回 0，避免生成空 IN 子句
+     */
+    default long safeCountBySendTimeBetweenAndSelfQqIn(LocalDateTime start, LocalDateTime end, List<String> selfQqs) {
+        if (selfQqs == null || selfQqs.isEmpty()) return 0L;
+        return countBySendTimeBetweenAndSelfQqIn(start, end, selfQqs);
+    }
+
+    /**
+     * 按消息类型统计数量（按多个登录者QQ过滤）
+     */
+    @Query("SELECT m.messageType, COUNT(m) FROM Message m WHERE m.selfQq IN :selfQqs GROUP BY m.messageType")
+    List<Object[]> countByMessageTypeAndSelfQqIn(@Param("selfQqs") List<String> selfQqs);
+
+    /**
+     * 防御性包装：空列表时直接返回空集合
+     */
+    default List<Object[]> safeCountByMessageTypeAndSelfQqIn(List<String> selfQqs) {
+        if (selfQqs == null || selfQqs.isEmpty()) return java.util.Collections.emptyList();
+        List<Object[]> result = countByMessageTypeAndSelfQqIn(selfQqs);
+        return result != null ? result : java.util.Collections.emptyList();
+    }
+
+    /**
+     * 按小时统计指定日期的消息数量（按多个登录者QQ过滤，热力图）
+     */
+    @Query(value = "SELECT HOUR(m.send_time) AS hour, COUNT(*) AS cnt FROM messages m " +
+            "WHERE DATE(m.send_time) = DATE(:today) AND m.self_qq IN (:selfQqs) " +
+            "GROUP BY HOUR(m.send_time) ORDER BY hour", nativeQuery = true)
+    List<Object[]> countByHourAndSelfQqIn(@Param("today") LocalDateTime today, @Param("selfQqs") List<String> selfQqs);
+
+    /**
+     * 防御性包装
+     */
+    default List<Object[]> safeCountByHourAndSelfQqIn(LocalDateTime today, List<String> selfQqs) {
+        if (selfQqs == null || selfQqs.isEmpty()) return java.util.Collections.emptyList();
+        List<Object[]> result = countByHourAndSelfQqIn(today, selfQqs);
+        return result != null ? result : java.util.Collections.emptyList();
+    }
+
+    /**
+     * 统计消息最多的 QQ 账号（按多个登录者QQ过滤，分页取前N）
+     */
+    @Query("SELECT m.userQq, MAX(m.userNickname) AS nickname, COUNT(m) AS cnt FROM Message m " +
+            "WHERE m.archived = false AND m.selfQq IN :selfQqs GROUP BY m.userQq ORDER BY cnt DESC")
+    List<Object[]> findTopQQByMessageCountAndSelfQqIn(@Param("selfQqs") List<String> selfQqs, Pageable pageable);
+
+    /**
+     * 防御性包装
+     */
+    default List<Object[]> safeFindTopQQByMessageCountAndSelfQqIn(List<String> selfQqs, Pageable pageable) {
+        if (selfQqs == null || selfQqs.isEmpty()) return java.util.Collections.emptyList();
+        List<Object[]> result = findTopQQByMessageCountAndSelfQqIn(selfQqs, pageable);
+        return result != null ? result : java.util.Collections.emptyList();
+    }
+
+    /**
+     * 查询当前用户 QQ 账号下有消息的去重群聊列表（未归档&未被用户删除）
+     */
+    @Query("SELECT DISTINCT m.groupId FROM Message m WHERE m.selfQq IN :selfQqs AND m.archived = false AND m.deleted = false")
+    List<String> findGroupIdsBySelfQqIn(@Param("selfQqs") List<String> selfQqs);
+
+    /**
+     * 防御性包装
+     */
+    default List<String> safeFindGroupIdsBySelfQqIn(List<String> selfQqs) {
+        if (selfQqs == null || selfQqs.isEmpty()) return java.util.Collections.emptyList();
+        List<String> result = findGroupIdsBySelfQqIn(selfQqs);
+        return result != null ? result : java.util.Collections.emptyList();
+    }
+
+    /**
+     * 防御性包装 countActiveMessagesByGroupIdAndSelfQqIn
+     */
+    default Long safeCountActiveMessagesByGroupIdAndSelfQqIn(String groupId, List<String> selfQqList) {
+        if (selfQqList == null || selfQqList.isEmpty()) return 0L;
+        Long result = countActiveMessagesByGroupIdAndSelfQqIn(groupId, selfQqList);
+        return result != null ? result : 0L;
+    }
 }

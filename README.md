@@ -1,11 +1,5 @@
 # 铃音QQ对话 - 跨端智能聊天辅助系统
 
-<p align="center">
-  <strong>作者：何彦珏 (He Yanjue)</strong> · 东华理工大学 · 软件学院 · 软件工程<br>
-  <a href="mailto:2488130337@qq.com">📧 2488130337@qq.com</a> · 
-  <a href="tel:19079444215">📱 19079444215</a>
-</p>
-
 基于 **Spring Boot 3 + Vue 3 + AstrBot + NapCat + GPT-SoVITS** 的跨端智能聊天辅助系统。
 
 ---
@@ -57,6 +51,7 @@
 - **Spring Security + JWT** — 登录鉴权
 - **Spring Data JPA (Hibernate)** — 数据持久化
 - **MySQL 8.0+** — 主数据库
+- **RabbitMQ 3.12+** — 消息队列（异步媒体下载 / AI 分析 / 消息广播）
 - **FFmpeg** — 语音格式转换（AMR → MP3）
 - **WebSocket** — 实时消息推送
 - **Maven** — 项目构建
@@ -74,8 +69,22 @@
 
 - **AstrBot** — AI 聊天与消息总结
 - **NapCat** — QQ 消息监听与 OneBot 协议实现
+- **RabbitMQ** — 消息队列（Webhook 异步化 / 媒体下载 / AI 分析 / 广播解耦）
 - **GPT-SoVITS** — 语音合成（可选）
 - **FFmpeg** — 音视频处理
+
+### RabbitMQ 消息队列架构
+
+后端通过 RabbitMQ 实现异步解耦，包含 3 条 Direct Exchange 队列 + 1 条 Fanout Exchange 队列，每条业务队列配备独立死信队列（DLQ）：
+
+| Exchange | 类型 | 队列 | Prefetch | 消费者 | DLQ | 说明 |
+|----------|------|------|----------|--------|-----|------|
+| `qqai.media` | Direct | `media.download.queue` | 5 | MediaDownloadConsumer | `media.download.dlq` | 图片/视频异步下载 |
+| `qqai.voice` | Direct | `voice.transcode.queue` | 2 | VoiceTranscodeConsumer | `voice.transcode.dlq` | 语音 SILK→MP3 转码 |
+| `qqai.ai` | Direct | `ai.analysis.queue` | 3 | AiAnalysisConsumer | `ai.analysis.dlq` | AstrBot AI 摘要生成 |
+| `qqai.broadcast` | Fanout | `broadcast.queue` | 3 | BroadcastConsumer | — | WebSocket 消息广播 |
+
+**重试策略**：所有业务消费者使用 RetryTemplate（3 次指数退避 1s→2s→4s），耗尽后 `RejectAndDontRequeueRecoverer` 触发死信路由到 DLQ。DLQ 消费者做兜底处理（回填失败占位符或日志告警）。
 
 ---
 
@@ -86,11 +95,11 @@ qq-ai-assistant/
 ├── backend/                            # Spring Boot 后端
 │   ├── src/main/java/com/qqai/
 │   │   ├── common/                    # 通用工具（头像解析、限流、安全助手）
-│   │   ├── config/                    # 配置类（Security / WebSocket / JWT / CORS ...）
+│   │   ├── config/                    # 配置类（Security / WebSocket / JWT / CORS / RabbitMQ ...）
+│   │   ├── consumer/                  # RabbitMQ 消费者（媒体下载 / 语音转码 / AI 分析 / 广播）
 │   │   ├── controller/                # API 控制器（15+ 个）
 │   │   ├── dto/                       # 数据传输对象（auth / message / user / webhook）
 │   │   ├── entity/                    # JPA 实体类（10 张表）
-│   │   ├── event/                     # 事件监听（消息保存事件）
 │   │   ├── exception/                 # 自定义异常（业务/权限/未找到/未授权）
 │   │   ├── plugin/                    # Groovy 插件接口与插件管理器
 │   │   ├── repository/                # 数据访问层（10 个 Repository）
@@ -131,6 +140,7 @@ qq-ai-assistant/
 ├── .env.example                       # 环境变量模板
 ├── .gitignore
 ├── AGENTS.md                          # Codex 协作手册
+├── docker-compose.yml                 # Docker 一键部署（MySQL + RabbitMQ）
 └── README.md
 ```
 
@@ -209,15 +219,23 @@ qq-ai-assistant/
 | group_name | VARCHAR(200) | 群名称 |
 | user_qq | VARCHAR(20) NOT NULL | 发送者QQ |
 | user_nickname | VARCHAR(100) | 发送者昵称 |
-| message_type | ENUM(8种) DEFAULT 'TEXT' | TEXT / IMAGE / VIDEO / AUDIO / FILE / VOICE / AT / REPLY |
+| message_type | ENUM(10种) DEFAULT 'TEXT' | TEXT / IMAGE / VIDEO / AUDIO / FILE / VOICE / AT / REPLY / FORWARD / APP |
 | content | TEXT | 文本内容或文件描述 |
 | file_id | VARCHAR(100) | 关联 file_records.file_id |
 | at_qq | VARCHAR(20) | @的用户QQ |
 | reply_to_message_id | BIGINT | 回复的消息ID |
+| reply_to_nickname | VARCHAR(100) | 被引用消息发送者昵称 |
+| reply_to_content | TEXT | 被引用消息内容摘要 |
+| forward_content | TEXT | 合并转发消息原始内容（JSON） |
+| mini_app_content | TEXT | 小程序分享消息原始内容（JSON） |
 | ai_summary | TEXT | AI总结内容 |
 | send_time | TIMESTAMP NOT NULL | 发送时间 |
+| raw_msg_time | BIGINT | OneBot 原始 Unix 时间戳（秒） |
+| msg_seq | INT | OneBot message_seq（时间接近时二次排序） |
+| server_recv_ms | BIGINT | 服务端收到消息时的毫秒级 epoch |
 | created_at | TIMESTAMP | 入库时间 |
 | archived / processed | BOOLEAN | 归档标记 / 处理标记 |
+| media_pending | BOOLEAN DEFAULT FALSE | 媒体是否待异步下载/转码（true=前端显示加载占位符） |
 | is_self_message | BOOLEAN DEFAULT FALSE | 是否为登录账号自己发送 |
 | self_qq | VARCHAR(20) | 登录账号的QQ号 |
 
@@ -307,6 +325,7 @@ qq-ai-assistant/
 - **Node.js 18+**
 - **Maven 3.8+**
 - **MySQL 8.0+**（推荐使用 docker / 本地安装）
+- **RabbitMQ 3.12+**（推荐使用 docker / 本地安装）
 - **FFmpeg**（用于语音转换，可选）
 
 ### 步骤一：部署 MySQL 数据库
@@ -334,7 +353,33 @@ qq-ai-assistant/
 
     > 如果你选择不手动初始化数据库，也可以让 JPA 的 `ddl-auto: update` 自动建表；首次启动时 `DataInitializer` 会自动创建默认管理员。
 
-### 步骤二：配置后端
+### 步骤二：部署 RabbitMQ 消息队列
+
+RabbitMQ 用于异步处理媒体下载、语音转码、AI 分析和消息广播，是后端启动的必要依赖。
+
+**方式一：Docker 部署（推荐）**
+
+```bash
+docker run -d --name rabbitmq \
+  -p 5672:5672 \
+  -p 15672:15672 \
+  -e RABBITMQ_DEFAULT_USER=guest \
+  -e RABBITMQ_DEFAULT_PASS=guest \
+  --restart unless-stopped \
+  rabbitmq:3.12-management
+```
+
+**方式二：本地安装**
+
+- Windows：从 [rabbitmq.com](https://www.rabbitmq.com/install-windows.html) 下载安装包，先安装 Erlang/OTP，再安装 RabbitMQ
+- macOS：`brew install rabbitmq && brew services start rabbitmq`
+- Linux：`sudo apt install rabbitmq-server && sudo systemctl enable --now rabbitmq-server`
+
+**验证**：打开浏览器访问管理界面 **http://localhost:15672**，默认账号 `guest / guest`。
+
+> 也可使用项目根目录的 `docker-compose.yml` 一键启动 MySQL + RabbitMQ：`docker compose up -d`
+
+### 步骤三：配置后端
 
 编辑 [`backend/src/main/resources/application.yml`](backend/src/main/resources/application.yml)，主要配置项如下（均可通过环境变量覆盖）：
 
@@ -348,6 +393,19 @@ spring:
   jpa:
     hibernate:
       ddl-auto: update       # 首次部署建议用 update；生产建议 validate
+  rabbitmq:
+    host:           ${RABBITMQ_HOST:localhost}
+    port:           ${RABBITMQ_PORT:5672}
+    username:       ${RABBITMQ_USERNAME:guest}
+    password:       ${RABBITMQ_PASSWORD:guest}
+    virtual-host:   ${RABBITMQ_VHOST:/}
+    # 连接失败时启动失败（不静默降级）
+    listener:
+      simple:
+        retry:
+          enabled:           true
+          max-attempts:      3
+          initial-interval:  1000ms
 
 server:
   port: ${SERVER_PORT:8081}
@@ -417,7 +475,7 @@ java -jar target/qq-ai-assistant-1.0-SNAPSHOT.jar
 ========================================
 ```
 
-### 步骤四：启动前端
+### 步骤五：启动前端
 
 ```bash
 cd frontend
@@ -434,7 +492,7 @@ npm run build
 # 产物在 frontend/dist/，可部署到 Nginx / 任意静态服务器
 ```
 
-### 步骤五：登录系统
+### 步骤六：登录系统
 
 1. 打开浏览器，访问前端页面 `http://localhost:5173`。
 2. 使用默认管理员账号登录：
@@ -445,7 +503,7 @@ npm run build
     - 进入 **用户主页** — 绑定自己的QQ号，查看 NapCat 推送过来的消息。
 4. 首次绑定QQ号后，该QQ号的群聊与消息才会显示在首页。
 
-### 步骤六：配置 NapCat Webhook（关键）
+### 步骤七：配置 NapCat Webhook（关键）
 
 1. 启动 NapCat 并扫码登录机器人账号。
 2. 在 NapCat WebUI 中配置 HTTP Webhook 上报：
@@ -473,7 +531,7 @@ npm run build
     - `token` 必须与 `application.yml` 中的 `napcat.webhook-token` 一致
     - `reportSelfMessage: true` 用于接收机器人自己发送的消息
 
-### 步骤七：配置 AstrBot（可选）
+### 步骤八：配置 AstrBot（可选）
 
 ```bash
 # 在 AstrBot 目录
@@ -482,7 +540,7 @@ python main.py
 
 并将 `application.yml` 中的 `astrbot.api-url`、`astrbot.token` 指向对应服务。
 
-### 步骤八：配置 GPT-SoVITS（可选）
+### 步骤九：配置 GPT-SoVITS（可选）
 
 ```bash
 cd GPT-SoVITS-v2pro-20250604-nvidia50
@@ -497,6 +555,9 @@ runtime\python.exe api_v2.py -a 127.0.0.1 -p 7860
 |------|------|------|
 | Spring Boot 后端 | 8081 | 主 API 服务 |
 | Vue 前端开发 | 5173 | Vite 开发服务器 |
+| MySQL | 3306 | 主数据库 |
+| RabbitMQ AMQP | 5672 | 消息队列（后端连接） |
+| RabbitMQ 管理界面 | 15672 | Web 管理控制台（guest/guest） |
 | AstrBot | 6185 | AI 对话服务 |
 | NapCat | 6099 | QQ 消息监听 |
 | GPT-SoVITS API | 7860 | 语音合成 API |
@@ -670,23 +731,9 @@ backend/uploads/images/
 
 ---
 
-## 作者信息
-
-| 项目 | 内容 |
-|------|------|
-| 姓名 | 何彦珏 (He Yanjue) |
-| 学校 | 东华理工大学 · 软件学院 · 软件工程 |
-| 求职意向 | Java 开发工程师 / 后端开发工程师 |
-| 邮箱 | 2488130337@qq.com |
-| 电话 | 19079444215 |
-
-详细简历请查看 [RESUME.md](RESUME.md)。
-
----
-
 ## 许可证
 
-本项目基于 [MIT License](LICENSE) 开源。
+MIT License
 
 ---
 

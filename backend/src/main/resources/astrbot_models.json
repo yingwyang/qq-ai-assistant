@@ -1,0 +1,54 @@
+{
+  "default_provider_id": "siliconflow/deepseek-ai/DeepSeek-V2.5",
+  "fallback_models": [],
+  "providers": [
+    {
+      "id": "anthropic_chat_completion",
+      "type": "anthropic_chat_completion",
+      "display_name": "anthropic_chat_completion",
+      "models": []
+    },
+    {
+      "id": "googlegenai_chat_completion",
+      "type": "googlegenai_chat_completion",
+      "display_name": "googlegenai_chat_completion",
+      "models": []
+    },
+    {
+      "id": "openai_chat_completion",
+      "type": "openai_chat_completion",
+      "display_name": "openai_chat_completion",
+      "models": []
+    },
+    {
+      "id": "groq_chat_completion",
+      "type": "groq_chat_completion",
+      "display_name": "groq_chat_completion",
+      "models": []
+    },
+    {
+      "id": "aihubmix_chat_completion",
+      "type": "aihubmix_chat_completion",
+      "display_name": "aihubmix_chat_completion",
+      "models": []
+    },
+    {
+      "id": "openrouter_chat_completion",
+      "type": "openrouter_chat_completion",
+      "display_name": "openrouter_chat_completion",
+      "models": []
+    },
+    {
+      "id": "xai_chat_completion",
+      "type": "xai_chat_completion",
+      "display_name": "xai_chat_completion",
+      "models": []
+    },
+    {
+      "id": "zhipu_chat_completion",
+      "type": "zhipu_chat_completion",
+      "display_name": "zhipu_chat_completion",
+      "models": []
+    }
+  ]
+}

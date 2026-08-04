@@ -11,6 +11,11 @@ import java.util.concurrent.Executor;
 @EnableAsync
 public class AsyncConfig {
 
+    /**
+     * 消息异步处理线程池。
+     * 注意：AI 摘要分析已迁移至 RabbitMQ（ai.analysis.queue → AiAnalysisConsumer），
+     * 此线程池不再用于 AI 总结任务。仅保留供 @Deprecated processMessageAsync 及未来其他异步任务使用。
+     */
     @Bean("messageTaskExecutor")
     public Executor messageTaskExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();

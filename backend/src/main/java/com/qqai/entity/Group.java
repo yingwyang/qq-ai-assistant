@@ -28,6 +28,9 @@ public class Group {
     
     @Column(length = 200)
     private String groupName;  // 群名称
+
+    @Column(length = 32)
+    private String groupType = "OTHER";  // 群类型: GAME/STUDY/WORK/HOBBY/LIFE/SOCIAL/OTHER
     
     @Column(length = 255)
     private String avatar;  // 群头像URL
@@ -60,6 +63,9 @@ public class Group {
     
     public String getGroupName() { return groupName; }
     public void setGroupName(String groupName) { this.groupName = groupName; }
+
+    public String getGroupType() { return groupType; }
+    public void setGroupType(String groupType) { this.groupType = groupType; }
     
     public String getAvatar() { return avatar; }
     public void setAvatar(String avatar) { this.avatar = avatar; }

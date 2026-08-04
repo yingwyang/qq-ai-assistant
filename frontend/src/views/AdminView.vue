@@ -1,5 +1,5 @@
 <template>
-  <div class="admin-view">
+  <div class="admin-view" :class="'theme-' + (currentTheme || 'light')">
     <!-- 顶部导航栏 -->
     <header class="admin-header">
       <div class="header-brand">
@@ -20,16 +20,18 @@
       <!-- 左侧导航 -->
       <aside class="admin-sidebar">
         <nav class="admin-nav">
-          <div
-            v-for="item in navItems"
-            :key="item.key"
-            class="nav-item"
-            :class="{ active: activeTab === item.key }"
-            @click="activeTab = item.key"
-          >
-            <Icon :name="item.icon" :size="18" />
-            <span>{{ item.label }}</span>
-          </div>
+          <template v-for="item in navItems" :key="item.key">
+            <div v-if="item.isGroup" class="nav-group-title">{{ item.label }}</div>
+            <div
+              v-else
+              class="nav-item"
+              :class="{ active: activeTab === item.key }"
+              @click="setActiveTab(item.key)"
+            >
+              <Icon :name="item.icon" :size="18" />
+              <span>{{ item.label }}</span>
+            </div>
+          </template>
         </nav>
       </aside>
 
@@ -61,10 +63,11 @@
               </div>
             </div>
             <div class="stat-card">
-              <div class="stat-icon green"><Icon name="group" :size="28" /></div>
+              <div class="stat-icon green"><Icon name="user" :size="28" /></div>
               <div class="stat-info">
                 <div class="stat-value">{{ stats.totalUsers }}</div>
                 <div class="stat-label">用户总数</div>
+                <div class="stat-today">今日活跃 {{ stats.todayActiveUsers || 0 }}</div>
               </div>
             </div>
             <div class="stat-card">
@@ -80,6 +83,14 @@
               <div class="stat-info">
                 <div class="stat-value">{{ stats.totalFiles }}</div>
                 <div class="stat-label">文件总数</div>
+              </div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-icon amber"><Icon name="sparkles" :size="28" /></div>
+              <div class="stat-info">
+                <div class="stat-value">{{ stats.totalAiMessages || 0 }}</div>
+                <div class="stat-label">AI消息总数</div>
+                <div class="stat-today">近7天 {{ stats.todayAiConversations || 0 }}</div>
               </div>
             </div>
             <div class="stat-card disk-card">
@@ -125,120 +136,60 @@
                   </button>
                 </div>
               </div>
-              <div class="line-chart">
-                <div class="line-chart-yaxis">
-                  <span v-for="n in 5" :key="n">{{ getYAxisLabel(n - 1) }}</span>
-                </div>
-                <div class="line-chart-scroll-wrapper" ref="scrollWrapper">
-                  <div class="line-chart-scroll" :style="{ minWidth: Math.max(messageTrend.length * (trendInterval === 'hour' ? 55 : 36), 400) + 'px' }">
-                    <svg viewBox="0 0 100 60" preserveAspectRatio="none">
-                      <!-- 网格横线 -->
-                      <line
-                        v-for="n in 5"
-                        :key="'grid-h-' + n"
-                        x1="0"
-                        :y1="n * 12"
-                        x2="100"
-                        :y2="n * 12"
-                        stroke="#f0f0f0"
-                        stroke-width="0.3"
-                      />
-                      <!-- 网格竖线 -->
-                      <line
-                        v-for="(item, index) in messageTrend"
-                        :key="'grid-v-' + index"
-                        :x1="getPointX(index)"
-                        y1="0"
-                        :x2="getPointX(index)"
-                        y2="60"
-                        stroke="#f0f0f0"
-                        stroke-width="0.2"
-                      />
-                      <!-- 面积填充 -->
-                      <polygon
-                        v-if="messageTrend.length > 0"
-                        fill="rgba(52, 152, 219, 0.1)"
-                        :points="getAreaPoints()"
-                      />
-                      <!-- 折线 -->
-                      <polyline
-                        fill="none"
-                        stroke="#3498db"
-                        stroke-width="0.4"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        vector-effect="non-scaling-stroke"
-                        :points="getLinePoints()"
-                      />
-                    </svg>
-                    <div class="data-points-overlay">
-                      <div
-                        v-for="(item, index) in messageTrend"
-                        :key="'pt-' + index"
-                        class="data-point-css"
-                        :style="{ left: getPointXPercent(index) + '%', top: getPointYPercent(item.count) + '%' }"
-                        @mouseenter="showTooltip($event, item)"
-                        @mouseleave="hideTooltip"
-                      ></div>
-                    </div>
-                    <div v-if="tooltipVisible" class="chart-tooltip" :style="tooltipStyle">
-                      <div class="tooltip-date">{{ tooltipData.date }}</div>
-                      <div class="tooltip-value">{{ tooltipData.count }} 条消息</div>
-                    </div>
-                    <div class="line-chart-labels" :class="{ 'hour-labels': trendInterval === 'hour' }">
-                        <span v-for="(item, index) in messageTrend" :key="index">
-                          {{ item.date }}
-                        </span>
-                      </div>
-                  </div>
-                </div>
-              </div>
+              <v-chart
+                class="line-chart-echarts"
+                :option="trendChartOption"
+                autoresize
+              />
             </div>
 
             <div class="chart-card">
               <h4>活跃群聊排行 TOP5</h4>
-              <div class="ranking-list">
-                <div
-                  v-for="(group, index) in groupRanking.slice(0, 5)"
-                  :key="group.groupId"
-                  class="rank-item"
-                >
-                  <div class="rank-num">{{ index + 1 }}</div>
-                  <div class="rank-name" :title="group.groupName">
-                    {{ truncateName(group.groupName) }}
-                  </div>
-                  <div class="rank-bar-wrapper">
-                    <div
-                      class="rank-bar"
-                      :style="{ width: getRankWidth(group.messageCount) + '%', backgroundColor: getRankColor(index) }"
-                    ></div>
-                  </div>
-                  <div class="rank-count">{{ group.messageCount }}</div>
-                </div>
-              </div>
+              <v-chart
+                class="ranking-chart"
+                :option="groupRankingOption"
+                autoresize
+              />
             </div>
 
             <div class="chart-card">
               <h4>活跃QQ账号排行 TOP5</h4>
-              <div class="ranking-list">
-                <div
-                  v-for="(qq, index) in qqRanking.slice(0, 5)"
-                  :key="qq.qq"
-                  class="rank-item"
-                >
-                  <div class="rank-num">{{ index + 1 }}</div>
-                  <div class="rank-name" :title="qq.nickname">
-                    {{ truncateQQName(qq.nickname, qq.qq) }}
-                  </div>
-                  <div class="rank-bar-wrapper">
-                    <div
-                      class="rank-bar"
-                      :style="{ width: getQQRankWidth(qq.messageCount) + '%', backgroundColor: getRankColor(index) }"
-                    ></div>
-                  </div>
-                  <div class="rank-count">{{ qq.messageCount }}</div>
-                </div>
-              </div>
+              <v-chart
+                class="ranking-chart"
+                :option="qqRankingOption"
+                autoresize
+              />
+            </div>
+          </div>
+
+          <!-- 消息类型分布 -->
+          <div class="chart-card distribution-card">
+            <h4>消息类型分布</h4>
+            <v-chart
+              class="pie-chart-echarts"
+              :option="distributionChartOption"
+              autoresize
+            />
+          </div>
+
+          <!-- 新增图表区域：时段分布 + AI趋势 -->
+          <div class="charts-row">
+            <div class="chart-card">
+              <h4>今日消息时段分布</h4>
+              <v-chart
+                class="bar-chart-echarts"
+                :option="hourlyChartOption"
+                autoresize
+              />
+            </div>
+
+            <div class="chart-card">
+              <h4>近7天 AI 对话趋势</h4>
+              <v-chart
+                class="line-chart-echarts"
+                :option="aiTrendChartOption"
+                autoresize
+              />
             </div>
           </div>
         </div>
@@ -437,45 +388,6 @@
               </div>
               <div v-else class="loading-box">
                 <p>获取登录二维码中...</p>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- 消息分布 -->
-        <div v-if="activeTab === 'distribution'" class="tab-panel">
-          <div class="panel-title">
-            <Icon name="chart" :size="20" />
-            <h2>消息类型分布</h2>
-          </div>
-          <div class="distribution-layout">
-            <div class="distribution-chart">
-              <div
-                v-for="item in messageTypeDistribution"
-                :key="item.type"
-                class="dist-item"
-              >
-                <div class="dist-label">{{ item.type }}</div>
-                <div class="dist-bar-wrapper">
-                  <div
-                    class="dist-bar"
-                    :style="{ width: getDistWidth(item.count) + '%' }"
-                  ></div>
-                </div>
-                <div class="dist-count">{{ item.count }}</div>
-              </div>
-            </div>
-            <div class="pie-chart-wrapper">
-              <div class="pie-chart" :style="{ background: getPieGradient() }"></div>
-              <div class="pie-legend">
-                <div
-                  v-for="item in messageTypeDistribution"
-                  :key="item.type"
-                  class="legend-item"
-                >
-                  <span class="legend-dot" :style="{ backgroundColor: getDistColor(item.type) }"></span>
-                  <span class="legend-text">{{ item.type }} {{ getDistPercent(item.count) }}%</span>
-                </div>
               </div>
             </div>
           </div>
@@ -910,8 +822,612 @@
             </div>
           </div>
         </div>
+
+        <!-- ===== 积分管理：规则配置 ===== -->
+        <div v-if="activeTab === 'credit-rule'" class="tab-panel">
+          <div class="panel-title">
+            <Icon name="settings" :size="20" />
+            <h2>积分规则配置</h2>
+          </div>
+
+          <div v-if="ruleLoading" class="loading-box">加载规则中...</div>
+
+          <div v-else class="credit-rule-wrap">
+            <div class="section-card">
+              <h4>基础奖励</h4>
+              <div class="rule-form-grid">
+                <div class="rule-item">
+                  <label>新人奖励</label>
+                  <input type="number" v-model.number="ruleForm.newUserBonus" min="0" class="config-input" />
+                  <small>注册即送积分</small>
+                </div>
+                <div class="rule-item">
+                  <label>每日签到积分</label>
+                  <input type="number" v-model.number="ruleForm.signInPoints" min="0" class="config-input" />
+                  <small>每日签到奖励</small>
+                </div>
+              </div>
+            </div>
+
+            <div class="section-card">
+              <h4>AI 费率配置</h4>
+              <div class="rule-form-grid">
+                <div class="rule-item">
+                  <label>tokenUnit（每多少 token 计费）</label>
+                  <input type="number" v-model.number="ruleForm.tokenUnit" min="1" class="config-input" />
+                </div>
+                <div class="rule-item">
+                  <label>promptRate（输入倍率）</label>
+                  <input type="number" v-model.number="ruleForm.promptRate" min="0" class="config-input" />
+                </div>
+                <div class="rule-item">
+                  <label>completionRate（输出倍率）</label>
+                  <input type="number" v-model.number="ruleForm.completionRate" min="0" class="config-input" />
+                </div>
+                <div class="rule-item">
+                  <label>minCost（单次最小消耗）</label>
+                  <input type="number" v-model.number="ruleForm.minCost" min="0" class="config-input" />
+                </div>
+                <div class="rule-item">
+                  <label>defaultCostPerMsg（默认每条消耗）</label>
+                  <input type="number" v-model.number="ruleForm.defaultCostPerMsg" min="0" class="config-input" />
+                </div>
+                <div class="rule-item toggle-item">
+                  <label>管理员免费（adminFree）</label>
+                  <label class="rule-switch">
+                    <input type="checkbox" v-model="ruleForm.adminFree" />
+                    <span>{{ ruleForm.adminFree ? '已开启' : '已关闭' }}</span>
+                  </label>
+                </div>
+                <div class="rule-item toggle-item">
+                  <label>允许透支（allowOverdraft）</label>
+                  <label class="rule-switch">
+                    <input type="checkbox" v-model="ruleForm.allowOverdraft" />
+                    <span>{{ ruleForm.allowOverdraft ? '已开启' : '已关闭' }}</span>
+                  </label>
+                  <small>注：后端实体暂未持久化此字段</small>
+                </div>
+              </div>
+            </div>
+
+            <div class="section-card">
+              <h4>套餐配置（4 档）</h4>
+              <div class="plans-edit-grid">
+                <div v-for="plan in planMeta" :key="plan.key" class="plan-edit-card">
+                  <div class="plan-edit-name">{{ plan.name }}</div>
+                  <div class="plan-edit-row">
+                    <label>价格（元）</label>
+                    <input type="number" v-model.number="ruleForm[plan.priceField]" min="0" step="0.01" class="config-input" />
+                  </div>
+                  <div class="plan-edit-row">
+                    <label>赠送积分</label>
+                    <input type="number" v-model.number="ruleForm[plan.creditField]" min="0" class="config-input" />
+                  </div>
+                </div>
+              </div>
+              <div class="plan-duration-row">
+                <label>套餐时长（天，所有档位共享）</label>
+                <input type="number" v-model.number="ruleForm.planDurationDays" min="1" class="config-input plan-duration-input" />
+              </div>
+            </div>
+
+            <div class="rule-actions">
+              <button class="btn-action promote rule-save-btn" :disabled="ruleSaving" @click="saveRule">
+                {{ ruleSaving ? '保存中...' : '保存并立即生效' }}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ===== 积分管理：用户积分 ===== -->
+        <div v-if="activeTab === 'credit-users'" class="tab-panel">
+          <div class="panel-title">
+            <Icon name="user" :size="20" />
+            <h2>用户积分</h2>
+          </div>
+
+          <div class="user-search-bar">
+            <input
+              v-model="ucKeyword"
+              type="text"
+              placeholder="搜索用户名或昵称..."
+              class="user-search-input"
+              @input="onUcSearchInput"
+            />
+          </div>
+
+          <div class="user-table-wrapper">
+            <table class="user-table">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>用户名</th>
+                  <th>昵称</th>
+                  <th>角色</th>
+                  <th>余额</th>
+                  <th>订阅等级</th>
+                  <th>订阅到期</th>
+                  <th>累计收入</th>
+                  <th>累计支出</th>
+                  <th>消费封禁</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-if="ucLoading">
+                  <td colspan="11" class="audit-loading">加载中...</td>
+                </tr>
+                <tr v-else-if="ucList.length === 0">
+                  <td colspan="11" class="audit-empty">暂无用户数据</td>
+                </tr>
+                <tr v-for="row in ucList" :key="row.userId">
+                  <td>{{ row.userId }}</td>
+                  <td>{{ row.username }}</td>
+                  <td>{{ row.nickname || '-' }}</td>
+                  <td>
+                    <span class="role-badge" :class="(row.role || 'USER').toLowerCase()">
+                      {{ row.role === 'ADMIN' ? '管理员' : '普通用户' }}
+                    </span>
+                  </td>
+                  <td class="amount-cell">{{ row.balance }}</td>
+                  <td>
+                    <span class="tier-badge" :class="('tier-' + (row.subscriptionTier || 'FREE')).toLowerCase()">
+                      {{ row.subscriptionTier || 'FREE' }}
+                    </span>
+                  </td>
+                  <td>{{ formatDate(row.subscriptionExpiresAt) }}</td>
+                  <td class="credits-cell">{{ row.totalEarned }}</td>
+                  <td class="spent-cell">{{ row.totalSpent }}</td>
+                  <td>
+                    <span class="status-badge" :class="row.consumptionBanned ? 'inactive' : 'active'">
+                      {{ row.consumptionBanned ? '已封禁' : '正常' }}
+                    </span>
+                  </td>
+                  <td>
+                    <div class="action-btns">
+                      <button class="btn-action promote" @click="openAdjustModal(row)">调整积分</button>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="user-pagination">
+            <span class="pagination-info">
+              共 {{ ucTotalElements }} 条，第 {{ ucPage + 1 }} / {{ Math.max(1, ucTotalPages) }} 页
+            </span>
+            <div class="pagination-btns">
+              <button class="btn-page" :disabled="ucPage === 0" @click="goToUcPage(0)">首页</button>
+              <button class="btn-page" :disabled="ucPage === 0" @click="goToUcPage(ucPage - 1)">上一页</button>
+              <button class="btn-page" :disabled="ucPage >= ucTotalPages - 1" @click="goToUcPage(ucPage + 1)">下一页</button>
+              <button class="btn-page" :disabled="ucPage >= ucTotalPages - 1" @click="goToUcPage(ucTotalPages - 1)">末页</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ===== 积分管理：积分流水 ===== -->
+        <div v-if="activeTab === 'credit-transactions'" class="tab-panel">
+          <div class="panel-title">
+            <Icon name="file" :size="20" />
+            <h2>积分流水</h2>
+          </div>
+
+          <!-- 顶栏汇总 -->
+          <div class="tx-summary-bar">
+            <div class="tx-summary-card earned">
+              <div class="tx-summary-label">收入合计（本页）</div>
+              <div class="tx-summary-value">+{{ txSummary.earned }}</div>
+            </div>
+            <div class="tx-summary-card spent">
+              <div class="tx-summary-label">支出合计（本页）</div>
+              <div class="tx-summary-value">-{{ txSummary.spent }}</div>
+            </div>
+            <div class="tx-summary-card net">
+              <div class="tx-summary-label">净额（本页）</div>
+              <div class="tx-summary-value">{{ txSummary.net > 0 ? '+' : '' }}{{ txSummary.net }}</div>
+            </div>
+            <div class="tx-summary-card count">
+              <div class="tx-summary-label">本页条数</div>
+              <div class="tx-summary-value">{{ txSummary.count }}</div>
+            </div>
+          </div>
+
+          <!-- 筛选区 -->
+          <div class="tx-filters">
+            <div class="tx-filter-row">
+              <input v-model="txFilters.userId" type="text" placeholder="用户 ID" class="tx-filter-input" />
+              <select v-model="txFilters.type" class="audit-action-select">
+                <option v-for="opt in txTypeOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+              </select>
+              <select v-model="txFilters.direction" class="audit-action-select">
+                <option v-for="opt in txDirectionOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+              </select>
+              <input v-model="txFilters.relatedId" type="text" placeholder="关联 ID" class="tx-filter-input" />
+            </div>
+            <div class="tx-filter-row">
+              <input v-model="txFilters.start" type="date" class="tx-filter-input" title="开始日期" />
+              <input v-model="txFilters.end" type="date" class="tx-filter-input" title="结束日期" />
+              <input v-model="txFilters.min" type="number" placeholder="最小金额" class="tx-filter-input" />
+              <input v-model="txFilters.max" type="number" placeholder="最大金额" class="tx-filter-input" />
+              <button class="btn-action promote" @click="searchTransactions">搜索</button>
+              <button class="btn-action" @click="resetTxFilters">重置</button>
+              <button class="btn-action promote" :disabled="txExporting" @click="exportTransactions">
+                {{ txExporting ? '导出中...' : '导出 JSON' }}
+              </button>
+            </div>
+          </div>
+
+          <div class="user-table-wrapper">
+            <table class="user-table">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>用户 ID</th>
+                  <th>类型</th>
+                  <th>方向</th>
+                  <th>金额</th>
+                  <th>余额</th>
+                  <th>备注</th>
+                  <th>关联 ID</th>
+                  <th>时间</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-if="txLoading">
+                  <td colspan="9" class="audit-loading">加载中...</td>
+                </tr>
+                <tr v-else-if="txList.length === 0">
+                  <td colspan="9" class="audit-empty">暂无流水数据</td>
+                </tr>
+                <tr v-for="tx in txList" :key="tx.id">
+                  <td>{{ tx.id }}</td>
+                  <td>{{ tx.userId }}</td>
+                  <td>{{ txTypeTextLabel(tx.type) }}</td>
+                  <td>
+                    <span class="dir-badge" :class="(tx.direction || '').toLowerCase()">
+                      {{ tx.direction === 'IN' ? '收入' : '支出' }}
+                    </span>
+                  </td>
+                  <td :class="tx.direction === 'IN' ? 'credits-cell' : 'spent-cell'">
+                    {{ tx.direction === 'IN' ? '+' : '-' }}{{ Math.abs(tx.amount) }}
+                  </td>
+                  <td>{{ tx.balanceAfter }}</td>
+                  <td class="audit-detail">{{ tx.remark || '-' }}</td>
+                  <td class="audit-target">{{ tx.relatedId || '-' }}</td>
+                  <td>{{ formatDate(tx.createdAt) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="user-pagination">
+            <span class="pagination-info">
+              共 {{ txTotalElements }} 条，第 {{ txPage + 1 }} / {{ Math.max(1, txTotalPages) }} 页
+            </span>
+            <div class="pagination-btns">
+              <button class="btn-page" :disabled="txPage === 0" @click="goToTxPage(0)">首页</button>
+              <button class="btn-page" :disabled="txPage === 0" @click="goToTxPage(txPage - 1)">上一页</button>
+              <button class="btn-page" :disabled="txPage >= txTotalPages - 1" @click="goToTxPage(txPage + 1)">下一页</button>
+              <button class="btn-page" :disabled="txPage >= txTotalPages - 1" @click="goToTxPage(txTotalPages - 1)">末页</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ===== 积分管理：订单管理 ===== -->
+        <div v-if="activeTab === 'credit-orders'" class="tab-panel">
+          <div class="panel-title">
+            <Icon name="file" :size="20" />
+            <h2>订单管理</h2>
+          </div>
+
+          <!-- 筛选区 -->
+          <div class="tx-filters">
+            <div class="tx-filter-row">
+              <input v-model="orderFilters.orderNo" type="text" placeholder="订单号精确搜索" class="tx-filter-input" />
+              <input v-model="orderFilters.keyword" type="text" placeholder="用户关键字" class="tx-filter-input" />
+              <div class="status-multi-select">
+                <span class="status-multi-label">状态：</span>
+                <label v-for="opt in orderStatusOptions" :key="opt.value" class="status-chip" :class="{ active: orderFilters.statusSelected.includes(opt.value) }">
+                  <input type="checkbox" :value="opt.value" v-model="orderFilters.statusSelected" />
+                  {{ opt.label }}
+                </label>
+              </div>
+            </div>
+            <div class="tx-filter-row">
+              <input v-model="orderFilters.start" type="date" class="tx-filter-input" title="开始日期" />
+              <input v-model="orderFilters.end" type="date" class="tx-filter-input" title="结束日期" />
+              <input v-model="orderFilters.minPrice" type="number" step="0.01" placeholder="最小金额" class="tx-filter-input" />
+              <input v-model="orderFilters.maxPrice" type="number" step="0.01" placeholder="最大金额" class="tx-filter-input" />
+              <button class="btn-action promote" @click="searchOrders">搜索</button>
+              <button class="btn-action" @click="resetOrderFilters">重置</button>
+              <button class="btn-action promote" :disabled="ordersExporting" @click="exportOrders">
+                {{ ordersExporting ? '导出中...' : '导出 JSON' }}
+              </button>
+              <button class="btn-action promote" @click="openManualModal">+ 补单</button>
+            </div>
+          </div>
+
+          <div class="user-table-wrapper">
+            <table class="user-table">
+              <thead>
+                <tr>
+                  <th>订单号</th>
+                  <th>用户 ID</th>
+                  <th>套餐</th>
+                  <th>金额</th>
+                  <th>积分</th>
+                  <th>状态</th>
+                  <th>支付时间</th>
+                  <th>到期</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-if="ordersLoading">
+                  <td colspan="9" class="audit-loading">加载中...</td>
+                </tr>
+                <tr v-else-if="orders.length === 0">
+                  <td colspan="9" class="audit-empty">暂无订单数据</td>
+                </tr>
+                <tr v-for="o in orders" :key="o.orderNo">
+                  <td class="order-no-cell" @click="openOrderDetail(o.orderNo)" :title="o.orderNo">{{ o.orderNo }}</td>
+                  <td>{{ o.userId }}</td>
+                  <td>{{ planTierText(o.planTier) }}</td>
+                  <td class="amount-cell">¥{{ Number(o.price || 0).toFixed(2) }}</td>
+                  <td class="credits-cell">{{ o.creditAmount }}</td>
+                  <td><span class="status-tag" :class="'status-' + o.status">{{ orderStatusText(o.status) }}</span></td>
+                  <td>{{ formatDate(o.paidAt) }}</td>
+                  <td>{{ formatDate(o.expiresAt) }}</td>
+                  <td class="action-cell">
+                    <button class="btn-link" @click="openOrderDetail(o.orderNo)">详情</button>
+                    <button v-if="o.status === 'PENDING'" class="btn-link btn-danger" @click="openCancelModal(o.orderNo)">作废</button>
+                    <button v-if="o.status === 'PAID'" class="btn-link btn-warn" @click="openRefundModal(o.orderNo)">退款</button>
+                    <button class="btn-link" @click="exportSingleOrder(o.orderNo)">导出</button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="user-pagination">
+            <span class="pagination-info">
+              共 {{ ordersTotalElements }} 条，第 {{ ordersPage + 1 }} / {{ Math.max(1, ordersTotalPages) }} 页
+            </span>
+            <div class="pagination-btns">
+              <button class="btn-page" :disabled="ordersPage === 0" @click="goToOrdersPage(0)">首页</button>
+              <button class="btn-page" :disabled="ordersPage === 0" @click="goToOrdersPage(ordersPage - 1)">上一页</button>
+              <button class="btn-page" :disabled="ordersPage >= ordersTotalPages - 1" @click="goToOrdersPage(ordersPage + 1)">下一页</button>
+              <button class="btn-page" :disabled="ordersPage >= ordersTotalPages - 1" @click="goToOrdersPage(ordersTotalPages - 1)">末页</button>
+            </div>
+          </div>
+        </div>
       </main>
     </div>
+
+    <!-- ===== 调整积分弹窗 ===== -->
+    <div v-if="adjustModal.visible" class="modal-overlay" @click.self="closeAdjustModal">
+      <div class="modal-content small-modal credit-modal">
+        <div class="modal-header">
+          <h3>调整积分</h3>
+          <button class="btn-close" @click="closeAdjustModal">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="refund-order-info">
+            <div><label>用户：</label><span>{{ adjustModal.username }}（{{ adjustModal.nickname || '-' }}）</span></div>
+            <div><label>当前余额：</label><span>{{ adjustModal.balance }}</span></div>
+          </div>
+          <div class="form-group">
+            <label>调整金额（正数增加、负数扣减）<span style="color:red">*</span></label>
+            <input type="number" v-model.number="adjustModal.amount" placeholder="例如 100 或 -50" />
+          </div>
+          <div class="form-group">
+            <label>调整原因 <span style="color:red">*</span></label>
+            <textarea v-model="adjustModal.reason" rows="3" placeholder="请输入调账原因（审计日志可见）"></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-cancel" @click="closeAdjustModal">取消</button>
+          <button class="btn-save" :disabled="adjustModal.submitting" @click="submitAdjust">
+            {{ adjustModal.submitting ? '提交中...' : '确认调整' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 补单弹窗 ===== -->
+    <div v-if="manualModal.visible" class="modal-overlay" @click.self="closeManualModal">
+      <div class="modal-content credit-modal manual-modal">
+        <div class="modal-header">
+          <h3>管理员补单</h3>
+          <button class="btn-close" @click="closeManualModal">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label>用户 ID <span style="color:red">*</span></label>
+            <input type="number" v-model.number="manualModal.userId" placeholder="目标用户 ID" />
+          </div>
+          <div class="form-group">
+            <label>套餐 <span style="color:red">*</span></label>
+            <select v-model="manualModal.planCode" class="audit-action-select" style="width:100%">
+              <option v-for="opt in orderPlanOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+            </select>
+          </div>
+          <div class="form-grid-2">
+            <div class="form-group">
+              <label>自定义价格（分，可选）</label>
+              <input type="number" v-model.number="manualModal.priceCents" placeholder="留空用套餐默认" />
+            </div>
+            <div class="form-group">
+              <label>自定义积分（可选）</label>
+              <input type="number" v-model.number="manualModal.pointsGranted" placeholder="留空用套餐默认" />
+            </div>
+          </div>
+          <div class="form-grid-2">
+            <div class="form-group">
+              <label>时长（天，可选）</label>
+              <input type="number" v-model.number="manualModal.durationDays" placeholder="留空用套餐默认" />
+            </div>
+            <div class="form-group">
+              <label>自定义订单号（可选）</label>
+              <input type="text" v-model="manualModal.orderNo" placeholder="留空自动生成" />
+            </div>
+          </div>
+          <div class="form-group">
+            <label>备注</label>
+            <textarea v-model="manualModal.remark" rows="2" placeholder="可选"></textarea>
+          </div>
+          <p class="modal-tip">提交后将直接创建为 PAID 状态订单并发放积分。</p>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-cancel" @click="closeManualModal">取消</button>
+          <button class="btn-save" :disabled="manualModal.submitting" @click="submitManualCreate">
+            {{ manualModal.submitting ? '提交中...' : '确认补单' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 作废弹窗 ===== -->
+    <div v-if="cancelModal.visible" class="modal-overlay" @click.self="closeCancelModal">
+      <div class="modal-content small-modal credit-modal">
+        <div class="modal-header">
+          <h3>作废订单</h3>
+          <button class="btn-close" @click="closeCancelModal">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="refund-order-info">
+            <div><label>订单号：</label><span>{{ cancelModal.orderNo }}</span></div>
+          </div>
+          <div class="form-group">
+            <label>作废原因</label>
+            <textarea v-model="cancelModal.reason" rows="3" placeholder="可选"></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-cancel" @click="closeCancelModal">取消</button>
+          <button class="btn-save btn-warn" :disabled="cancelModal.submitting" @click="submitCancel">
+            {{ cancelModal.submitting ? '提交中...' : '确认作废' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 退款弹窗 ===== -->
+    <div v-if="refundModal.visible" class="modal-overlay" @click.self="closeRefundModal">
+      <div class="modal-content small-modal credit-modal">
+        <div class="modal-header">
+          <h3>订单退款</h3>
+          <button class="btn-close" @click="closeRefundModal">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="refund-order-info">
+            <div><label>订单号：</label><span>{{ refundModal.orderNo }}</span></div>
+          </div>
+          <div class="form-group">
+            <label>退款比例（0~1，默认 1.0 全额）<span style="color:red">*</span></label>
+            <input type="number" v-model.number="refundModal.refundRatio" step="0.01" min="0.01" max="1" />
+          </div>
+          <div class="form-group">
+            <label>退款原因 <span style="color:red">*</span></label>
+            <textarea v-model="refundModal.reason" rows="3" placeholder="请输入退款原因"></textarea>
+          </div>
+          <p class="modal-tip">将按比例扣减已发放积分。</p>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-cancel" @click="closeRefundModal">取消</button>
+          <button class="btn-save btn-warn" :disabled="refundModal.submitting" @click="submitRefund">
+            {{ refundModal.submitting ? '提交中...' : '确认退款' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 订单详情抽屉 ===== -->
+    <Transition name="drawer">
+      <div v-if="detailDrawer.visible" class="drawer-overlay" @click.self="closeOrderDetail">
+        <div class="drawer-container admin-drawer">
+          <div class="drawer-header">
+            <div class="drawer-title">
+              <span>订单详情</span>
+              <span class="drawer-order-no">{{ detailDrawer.orderNo }}</span>
+              <span v-if="detailDrawer.data" class="status-tag" :class="'status-' + detailDrawer.data.status">
+                {{ orderStatusText(detailDrawer.data.status) }}
+              </span>
+            </div>
+            <button class="drawer-close" @click="closeOrderDetail">×</button>
+          </div>
+          <div class="drawer-body">
+            <div v-if="detailDrawer.loading" class="audit-loading">加载中...</div>
+            <template v-else-if="detailDrawer.data">
+              <div class="detail-section">
+                <h5>订单基础信息</h5>
+                <div class="detail-grid">
+                  <div class="detail-item"><label>订单号</label><span>{{ detailDrawer.data.orderNo }}</span></div>
+                  <div class="detail-item"><label>用户 ID</label><span>{{ detailDrawer.data.userId }}</span></div>
+                  <div class="detail-item"><label>套餐</label><span>{{ planTierText(detailDrawer.data.planTier) }}</span></div>
+                  <div class="detail-item"><label>状态</label><span>{{ orderStatusText(detailDrawer.data.status) }}</span></div>
+                  <div class="detail-item"><label>创建时间</label><span>{{ formatDate(detailDrawer.data.createdAt) }}</span></div>
+                  <div class="detail-item"><label>更新时间</label><span>{{ formatDate(detailDrawer.data.updatedAt) }}</span></div>
+                </div>
+              </div>
+              <div class="detail-section">
+                <h5>金额与权益</h5>
+                <div class="detail-grid">
+                  <div class="detail-item"><label>订单金额</label><span class="amount-cell">¥{{ Number(detailDrawer.data.price || 0).toFixed(2) }}</span></div>
+                  <div class="detail-item"><label>获得积分</label><span class="credits-cell">{{ detailDrawer.data.creditAmount }}</span></div>
+                  <div class="detail-item"><label>时长</label><span>{{ detailDrawer.data.durationDays }} 天</span></div>
+                  <div class="detail-item"><label>支付方式</label><span>{{ detailDrawer.data.paymentMethod || '-' }}</span></div>
+                  <div class="detail-item"><label>支付时间</label><span>{{ formatDate(detailDrawer.data.paidAt) }}</span></div>
+                  <div class="detail-item"><label>到期时间</label><span>{{ formatDate(detailDrawer.data.expiresAt) }}</span></div>
+                </div>
+              </div>
+              <div v-if="detailDrawer.data.status === 'REFUNDED' || detailDrawer.data.refundReason || detailDrawer.data.refundedAt" class="detail-section">
+                <h5>退款信息</h5>
+                <div class="detail-grid">
+                  <div class="detail-item"><label>退款时间</label><span>{{ formatDate(detailDrawer.data.refundedAt) }}</span></div>
+                  <div class="detail-item"><label>退款金额</label><span class="amount-cell">¥{{ Number(detailDrawer.data.refundAmount || 0).toFixed(2) }}</span></div>
+                  <div class="detail-item"><label>退款原因</label><span>{{ detailDrawer.data.refundReason || '-' }}</span></div>
+                  <div class="detail-item"><label>退款管理员 ID</label><span>{{ detailDrawer.data.refundAdminUserId || '-' }}</span></div>
+                </div>
+              </div>
+              <div class="detail-section">
+                <h5>订单时间轴</h5>
+                <div class="timeline">
+                  <div v-for="(evt, i) in orderTimeline" :key="i" class="timeline-item" :class="{ done: evt.done, last: i === orderTimeline.length - 1 }">
+                    <div class="timeline-dot"></div>
+                    <div class="timeline-content">
+                      <div class="timeline-title">{{ evt.title }} <span class="timeline-op">（{{ evt.operator }}）</span></div>
+                      <div class="timeline-time">{{ formatDate(evt.time) }}</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div v-if="detailDrawer.relatedTransactions.length > 0" class="detail-section">
+                <h5>关联流水</h5>
+                <div class="related-list">
+                  <div v-for="tx in detailDrawer.relatedTransactions" :key="tx.id" class="related-item">
+                    <div class="related-left">
+                      <span class="related-type" :class="tx.type">{{ txTypeTextLabel(tx.type) }}</span>
+                      <span class="related-desc">{{ tx.remark || '-' }}</span>
+                    </div>
+                    <div class="related-right">
+                      <span class="related-amount" :class="tx.direction === 'IN' ? 'add' : 'sub'">
+                        {{ tx.direction === 'IN' ? '+' : '-' }}{{ Math.abs(tx.amount) }}
+                      </span>
+                      <span class="related-time">{{ formatDate(tx.createdAt) }}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </template>
+          </div>
+          <div v-if="detailDrawer.data" class="drawer-footer">
+            <button v-if="detailDrawer.data.status === 'PAID'" class="btn-save btn-warn" style="width:100%" @click="openRefundModal(detailDrawer.data.orderNo)">退款</button>
+          </div>
+        </div>
+      </div>
+    </Transition>
 
     <!-- 媒体文件预览弹窗（相册风格） -->
     <div v-if="showPreviewModal" class="preview-modal" @click.self="closePreview">
@@ -1073,7 +1589,8 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { useRouter } from 'vue-router';
 import Icon from '../components/Icon.vue';
-import { formatFileSize } from '../services/api';
+import { formatFileSize, logout as apiLogout } from '../services/api';
+import { useTheme } from '../composables/useTheme';
 import { useDashboardData } from '../composables/useDashboardData';
 import { useComponentControl } from '../composables/useComponentControl';
 import { useUserManagement } from '../composables/useUserManagement';
@@ -1081,12 +1598,28 @@ import { useMediaManager } from '../composables/useMediaManager';
 import { useSystemLog } from '../composables/useSystemLog';
 import { useConfigManagement } from '../composables/useConfigManagement';
 import { useMaintenance } from '../composables/useMaintenance';
+import { useAdminCreditsRule } from '../composables/useAdminCreditsRule';
+import { useAdminUserCredits } from '../composables/useAdminUserCredits';
+import {
+  useAdminTransactions,
+  TX_TYPE_OPTIONS as TX_TYPE_OPTS,
+  TX_DIRECTION_OPTIONS as TX_DIR_OPTS,
+  txTypeText as txTypeTextLabel,
+} from '../composables/useAdminTransactions';
+import {
+  useAdminOrders,
+  ORDER_STATUS_OPTIONS as ORDER_STATUS_OPTS,
+  ORDER_PLAN_OPTIONS as ORDER_PLAN_OPTS,
+  orderStatusText as orderStatusLabel,
+  planTierText as planTierLabel,
+} from '../composables/useAdminOrders';
 
 export default {
   name: 'AdminView',
   components: { Icon },
   setup() {
     const router = useRouter();
+    const { theme: currentTheme } = useTheme();
     const activeTab = ref('dashboard');
 
     const systemMessage = ref('');
@@ -1105,17 +1638,41 @@ export default {
     const systemLog = useSystemLog({ showSystemMsg });
     const configMgmt = useConfigManagement({ showSystemMsg });
     const maintenance = useMaintenance({ showSystemMsg });
+    // 积分管理 4 个子模块
+    const adminRule = useAdminCreditsRule({ showSystemMsg });
+    const adminUserCredits = useAdminUserCredits({ showSystemMsg });
+    const adminTx = useAdminTransactions({ showSystemMsg });
+    const adminOrders = useAdminOrders({ showSystemMsg });
 
     const navItems = [
       { key: 'dashboard', icon: 'dashboard', label: '数据概览' },
       { key: 'users', icon: 'group', label: '用户管理' },
       { key: 'components', icon: 'settings', label: '组件控制' },
       { key: 'media', icon: 'image', label: '媒体管理' },
-      { key: 'distribution', icon: 'chart', label: '消息分布' },
       { key: 'log', icon: 'file', label: '系统日志' },
       { key: 'config', icon: 'config', label: '配置管理' },
       { key: 'maintenance', icon: 'backup', label: '数据维护' },
+      // 积分管理分组
+      { key: 'group-credits', label: '积分管理', isGroup: true },
+      { key: 'credit-rule', icon: 'settings', label: '规则配置' },
+      { key: 'credit-users', icon: 'user', label: '用户积分' },
+      { key: 'credit-transactions', icon: 'file', label: '积分流水' },
+      { key: 'credit-orders', icon: 'file', label: '订单管理' },
     ];
+
+    // 切换 Tab 时按需懒加载积分管理数据
+    const setActiveTab = (key) => {
+      activeTab.value = key;
+      if (key === 'credit-rule') {
+        adminRule.loadRule();
+      } else if (key === 'credit-users') {
+        adminUserCredits.loadUserCredits(0);
+      } else if (key === 'credit-transactions') {
+        adminTx.loadTransactions(0);
+      } else if (key === 'credit-orders') {
+        adminOrders.loadOrders(0);
+      }
+    };
 
     const currentFilesTotalSize = computed(() =>
       media.mediaFiles.value.reduce((sum, f) => sum + (f.fileSize || 0), 0)
@@ -1144,7 +1701,13 @@ export default {
       return new Date(dateStr).toLocaleString('zh-CN');
     };
     const goHome = () => router.push('/');
-    const logout = () => {
+    const logout = async () => {
+      // 通知后端停止插件 + 注销 JWT
+      try {
+        await apiLogout();
+      } catch (e) {
+        console.warn('后端登出失败（忽略）:', e);
+      }
       localStorage.removeItem('auth_token');
       localStorage.removeItem('user_role');
       localStorage.removeItem('user_info');
@@ -1162,38 +1725,31 @@ export default {
       media.loadMediaFiles();
       configMgmt.loadConfig();
       maintenance.loadBackupList();
-      dashboard.setupDragScroll();
       window.addEventListener('keydown', media.onPreviewKeydown);
     });
     onUnmounted(() => {
       componentCtrl.stopPolling();
-      dashboard.cleanupDragScroll();
       userMgmt.cleanup();
+      adminUserCredits.cleanup();
       window.removeEventListener('keydown', media.onPreviewKeydown);
     });
 
     return {
-      activeTab, navItems, systemMessage, systemMessageType,
-      isMediaCollapsed, formatDate, formatFileSize, goHome, logout,
+      currentTheme, activeTab, navItems, systemMessage, systemMessageType,
+      isMediaCollapsed, formatDate, formatFileSize, goHome, logout, setActiveTab,
       // Dashboard
       stats: dashboard.stats, messageTrend: dashboard.messageTrend,
+      trendChartOption: dashboard.trendChartOption,
+      groupRankingOption: dashboard.groupRankingOption,
+      qqRankingOption: dashboard.qqRankingOption,
+      distributionChartOption: dashboard.distributionChartOption,
+      hourlyChartOption: dashboard.hourlyChartOption,
+      aiTrendChartOption: dashboard.aiTrendChartOption,
       trendDays: dashboard.trendDays, trendInterval: dashboard.trendInterval,
       groupRanking: dashboard.groupRanking, qqRanking: dashboard.qqRanking,
       messageTypeDistribution: dashboard.messageTypeDistribution,
       diskUsage: dashboard.diskUsage,
-      tooltipVisible: dashboard.tooltipVisible, tooltipData: dashboard.tooltipData,
-      tooltipStyle: dashboard.tooltipStyle, scrollWrapper: dashboard.scrollWrapper,
       setTrendDays: dashboard.setTrendDays,
-      getBarHeight: dashboard.getBarHeight, getLinePoints: dashboard.getLinePoints,
-      getPointX: dashboard.getPointX, getPointY: dashboard.getPointY,
-      getPointXPercent: dashboard.getPointXPercent, getPointYPercent: dashboard.getPointYPercent,
-      getAreaPoints: dashboard.getAreaPoints, getYAxisLabel: dashboard.getYAxisLabel,
-      getRankWidth: dashboard.getRankWidth, getQQRankWidth: dashboard.getQQRankWidth,
-      getRankColor: dashboard.getRankColor,
-      getDistWidth: dashboard.getDistWidth, getPieGradient: dashboard.getPieGradient,
-      getDistPercent: dashboard.getDistPercent, getDistColor: dashboard.getDistColor,
-      showTooltip: dashboard.showTooltip, hideTooltip: dashboard.hideTooltip,
-      truncateName: dashboard.truncateName, truncateQQName: dashboard.truncateQQName,
       // Component control
       componentStatus: componentCtrl.componentStatus, qrCode: componentCtrl.qrCode,
       napCatWebUiUrl: componentCtrl.napCatWebUiUrl, autoLogin: componentCtrl.autoLogin,
@@ -1260,6 +1816,52 @@ export default {
       switchSubTab: systemLog.switchSubTab, formatTimestamp: systemLog.formatTimestamp,
       actionLabel: systemLog.actionLabel, resultBadgeClass: systemLog.resultBadgeClass,
       levelClass: systemLog.levelClass,
+      // ===== 积分管理：规则配置 =====
+      ruleLoading: adminRule.ruleLoading, ruleSaving: adminRule.ruleSaving,
+      ruleForm: adminRule.form, planMeta: adminRule.planMeta,
+      loadRule: adminRule.loadRule, saveRule: adminRule.saveRule,
+      // ===== 积分管理：用户积分 =====
+      ucList: adminUserCredits.ucList, ucLoading: adminUserCredits.ucLoading,
+      ucKeyword: adminUserCredits.ucKeyword, ucPage: adminUserCredits.ucPage,
+      ucSize: adminUserCredits.ucSize, ucTotalElements: adminUserCredits.ucTotalElements,
+      ucTotalPages: adminUserCredits.ucTotalPages,
+      adjustModal: adminUserCredits.adjustModal,
+      loadUserCredits: adminUserCredits.loadUserCredits, onUcSearchInput: adminUserCredits.onUcSearchInput,
+      goToUcPage: adminUserCredits.goToUcPage,
+      openAdjustModal: adminUserCredits.openAdjustModal, closeAdjustModal: adminUserCredits.closeAdjustModal,
+      submitAdjust: adminUserCredits.submitAdjust,
+      // ===== 积分管理：积分流水 =====
+      txList: adminTx.txList, txLoading: adminTx.txLoading,
+      txPage: adminTx.txPage, txSize: adminTx.txSize,
+      txTotalElements: adminTx.txTotalElements, txTotalPages: adminTx.txTotalPages,
+      txExporting: adminTx.txExporting,
+      txFilters: adminTx.filters, txSummary: adminTx.summary,
+      txTypeOptions: TX_TYPE_OPTS, txDirectionOptions: TX_DIR_OPTS,
+      txTypeTextLabel: txTypeTextLabel,
+      loadTransactions: adminTx.loadTransactions, searchTransactions: adminTx.searchTransactions,
+      resetTxFilters: adminTx.resetFilters, goToTxPage: adminTx.goToTxPage,
+      exportTransactions: adminTx.exportTransactions,
+      // ===== 积分管理：订单管理 =====
+      orders: adminOrders.orders, ordersLoading: adminOrders.ordersLoading,
+      ordersPage: adminOrders.ordersPage, ordersSize: adminOrders.ordersSize,
+      ordersTotalElements: adminOrders.ordersTotalElements, ordersTotalPages: adminOrders.ordersTotalPages,
+      ordersExporting: adminOrders.ordersExporting,
+      orderFilters: adminOrders.filters,
+      orderStatusOptions: ORDER_STATUS_OPTS, orderPlanOptions: ORDER_PLAN_OPTS,
+      orderStatusText: orderStatusLabel, planTierText: planTierLabel,
+      manualModal: adminOrders.manualModal, refundModal: adminOrders.refundModal,
+      cancelModal: adminOrders.cancelModal,
+      detailDrawer: adminOrders.detailDrawer, orderTimeline: adminOrders.timelineEvents,
+      loadOrders: adminOrders.loadOrders, searchOrders: adminOrders.searchOrders,
+      resetOrderFilters: adminOrders.resetOrderFilters, goToOrdersPage: adminOrders.goToOrdersPage,
+      openManualModal: adminOrders.openManualModal, closeManualModal: adminOrders.closeManualModal,
+      submitManualCreate: adminOrders.submitManualCreate,
+      openCancelModal: adminOrders.openCancelModal, closeCancelModal: adminOrders.closeCancelModal,
+      submitCancel: adminOrders.submitCancel,
+      openRefundModal: adminOrders.openRefundModal, closeRefundModal: adminOrders.closeRefundModal,
+      submitRefund: adminOrders.submitRefund,
+      exportSingleOrder: adminOrders.exportSingleOrder, exportOrders: adminOrders.exportOrders,
+      openOrderDetail: adminOrders.openOrderDetail, closeOrderDetail: adminOrders.closeOrderDetail,
     };
   },
 };
@@ -1267,10 +1869,11 @@ export default {
 
 <style scoped>
 .admin-view {
-  min-height: 100vh;
-  background: #f5f6fa;
+  height: 100vh;
+  background: var(--bg-primary, #f5f5f5);
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .admin-header {
@@ -1279,8 +1882,9 @@ export default {
   align-items: center;
   padding: 0 24px;
   height: 56px;
-  background: #2c3e50;
+  background: var(--sidebar-bg, #2c3e50);
   color: #fff;
+  border-bottom: 1px solid var(--border-color, #34495e);
 }
 
 .header-brand {
@@ -1321,14 +1925,17 @@ export default {
 .admin-layout {
   display: flex;
   flex: 1;
+  min-height: 0;
   overflow: hidden;
 }
 
 .admin-sidebar {
   width: 200px;
-  background: #fff;
-  border-right: 1px solid #e8e8e8;
+  height: 100%;
+  background: var(--sidebar-bg, #2c3e50);
+  border-right: 1px solid var(--border-color, #34495e);
   padding: 16px 0;
+  overflow-y: auto;
 }
 
 .admin-nav {
@@ -1346,25 +1953,35 @@ export default {
   border-radius: 6px;
   cursor: pointer;
   font-size: 14px;
-  color: #555;
+  color: var(--sidebar-text, #ecf0f1);
   transition: all 0.2s;
 }
 
 .nav-item:hover {
-  background: #f5f6fa;
-  color: #2c3e50;
+  background: rgba(255,255,255,0.1);
+  color: #fff;
 }
 
 .nav-item.active {
-  background: #e3f2fd;
-  color: #1976d2;
+  background: var(--accent-color, #3498db);
+  color: #fff;
   font-weight: 600;
+}
+
+.nav-group-title {
+  padding: 8px 14px 4px;
+  font-size: 18px;
+  font-weight: 600;
+  color: #090f16;
 }
 
 .admin-main {
   flex: 1;
+  height: 100%;
+  min-height: 0;
   overflow-y: auto;
   padding: 20px;
+  background-color: var(--bg-primary, #f5f5f5);
 }
 
 .panel-title {
@@ -1377,7 +1994,7 @@ export default {
 .panel-title h2 {
   margin: 0;
   font-size: 18px;
-  color: #2c3e50;
+  color: var(--text-primary, #333);
 }
 
 /* 统计卡片 */
@@ -1393,9 +2010,10 @@ export default {
   align-items: center;
   gap: 12px;
   padding: 18px;
-  background: #fff;
+  background: var(--card-bg, #fff);
   border-radius: 8px;
-  border: 1px solid #e8e8e8;
+  border: 1px solid var(--border-color, #e8e8e8);
+  box-shadow: 0 2px 8px var(--card-shadow, rgba(0,0,0,0.08));
 }
 
 .stat-icon {
@@ -1413,6 +2031,12 @@ export default {
 .stat-icon.orange { background: #fff3e0; color: #f57c00; }
 .stat-icon.teal { background: #e0f2f1; color: #00796b; }
 .stat-icon.red { background: #ffebee; color: #c62828; }
+.stat-icon.amber { background: #fff8e1; color: #ff8f00; }
+
+.bar-chart-echarts {
+  height: 240px;
+  width: 100%;
+}
 
 .disk-card {
   flex-direction: column;
@@ -1456,12 +2080,12 @@ export default {
 .stat-value {
   font-size: 24px;
   font-weight: 700;
-  color: #2c3e50;
+  color: var(--text-primary, #333);
 }
 
 .stat-label {
   font-size: 13px;
-  color: #888;
+  color: var(--text-secondary, #666);
 }
 
 .stat-today {
@@ -1479,20 +2103,36 @@ export default {
 }
 
 .chart-card {
-  background: #fff;
+  background: var(--card-bg, #fff);
   border-radius: 8px;
-  border: 1px solid #e8e8e8;
+  border: 1px solid var(--border-color, #e8e8e8);
   padding: 18px;
+  box-shadow: 0 2px 8px var(--card-shadow, rgba(0,0,0,0.08));
 }
 
 .chart-card h4 {
   margin: 0 0 16px 0;
   font-size: 14px;
-  color: #2c3e50;
+  color: var(--text-primary, #333);
 }
 
 .chart-large {
   grid-column: 1 / -1;
+}
+
+.line-chart-echarts {
+  height: 280px;
+  width: 100%;
+}
+
+.ranking-chart {
+  height: 220px;
+  width: 100%;
+}
+
+.pie-chart-echarts {
+  height: 320px;
+  width: 100%;
 }
 
 .chart-header {
@@ -1513,283 +2153,29 @@ export default {
 
 .chart-btn {
   padding: 4px 10px;
-  border: 1px solid #e0e0e0;
-  background: #fff;
+  border: 1px solid var(--border-color, #e0e0e0);
+  background: var(--card-bg, #fff);
   border-radius: 4px;
   font-size: 12px;
-  color: #666;
+  color: var(--text-secondary, #666);
   cursor: pointer;
   transition: all 0.2s;
 }
 
 .chart-btn:hover {
-  border-color: #3498db;
-  color: #3498db;
+  border-color: var(--accent-color, #3498db);
+  color: var(--accent-color, #3498db);
 }
 
 .chart-btn.active {
-  background: #3498db;
+  background: var(--accent-color, #3498db);
   color: #fff;
-  border-color: #3498db;
+  border-color: var(--accent-color, #3498db);
 }
 
-.bar-chart {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-around;
-  height: 160px;
-  gap: 8px;
-}
-
-.bar-item {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-}
-
-.bar-wrapper {
-  width: 100%;
-  height: 120px;
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-}
-
-.bar {
-  width: 60%;
-  border-radius: 4px 4px 0 0;
-  background: #3498db;
-  transition: height 0.5s ease;
-}
-
-.bar-label {
-  font-size: 11px;
-  color: #888;
-}
-
-.bar-value {
-  font-size: 11px;
-  font-weight: 600;
-  color: #3498db;
-}
-
-/* 线状图 */
-.line-chart {
-  display: flex;
-  height: 200px;
-  gap: 8px;
-}
-
-.line-chart-yaxis {
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  align-items: flex-end;
-  padding-right: 4px;
-  font-size: 10px;
-  color: #aaa;
-  width: 28px;
-  flex-shrink: 0;
-}
-
-.line-chart-scroll-wrapper {
-  flex: 1;
-  overflow-x: auto;
-  overflow-y: hidden;
-  cursor: grab;
-  position: relative;
-}
-
-.line-chart-scroll-wrapper:active {
-  cursor: grabbing;
-}
-
-.line-chart-scroll-wrapper::-webkit-scrollbar {
-  display: none;
-}
-
-.line-chart-scroll {
-  position: relative;
-  height: 100%;
-}
-
-.line-chart-scroll svg {
-  width: 100%;
-  height: calc(100% - 24px);
-  overflow: visible;
-}
-
-.data-points-overlay {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: calc(100% - 24px);
-  pointer-events: none;
-}
-
-.data-point-css {
-  position: absolute;
-  width: 5px;
-  height: 5px;
-  background: #3498db;
-  border-radius: 50%;
-  transform: translate(-50%, -50%);
-  cursor: pointer;
-  pointer-events: auto;
-  transition: transform 0.2s, box-shadow 0.2s;
-}
-
-.data-point-css:hover {
-  transform: translate(-50%, -50%) scale(1.8);
-  box-shadow: 0 0 6px rgba(52, 152, 219, 0.5);
-}
-
-.chart-tooltip {
-  position: fixed;
-  background: rgba(0, 0, 0, 0.8);
-  color: #fff;
-  padding: 6px 10px;
-  border-radius: 4px;
-  font-size: 12px;
-  pointer-events: none;
-  z-index: 1000;
-  white-space: nowrap;
-}
-
-.tooltip-date {
-  font-size: 11px;
-  color: #ccc;
-  margin-bottom: 2px;
-}
-
-.tooltip-value {
-  font-weight: 600;
-}
-
-.line-chart-labels {
-  display: flex;
-  justify-content: space-between;
-  padding-top: 4px;
-}
-
-.line-chart-labels span {
-  font-size: 11px;
-  color: #888;
-  text-align: center;
-  flex: 1;
-  white-space: nowrap;
-}
-
-.line-chart-labels.hour-labels span {
-  font-size: 8px;
-}
-
-/* 分布图布局 */
-.distribution-layout {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 24px;
-  align-items: center;
-}
-
-.pie-chart-wrapper {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 16px;
-}
-
-.pie-chart {
-  width: 120px;
-  height: 120px;
-  border-radius: 50%;
-  transition: background 0.3s ease;
-}
-
-.pie-legend {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.legend-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  color: #666;
-}
-
-.legend-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 2px;
-  flex-shrink: 0;
-}
-
-.ranking-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.rank-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.rank-num {
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  background: #e8e8e8;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 11px;
-  font-weight: 700;
-  color: #666;
-  flex-shrink: 0;
-}
-
-.rank-item:nth-child(1) .rank-num { background: #e74c3c; color: #fff; }
-.rank-item:nth-child(2) .rank-num { background: #e67e22; color: #fff; }
-.rank-item:nth-child(3) .rank-num { background: #f1c40f; color: #fff; }
-
-.rank-name {
-  width: 100px;
-  font-size: 12px;
-  color: #444;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  flex-shrink: 0;
-}
-
-.rank-bar-wrapper {
-  flex: 1;
-  height: 10px;
-  background: #eee;
-  border-radius: 5px;
-  overflow: hidden;
-}
-
-.rank-bar {
-  height: 100%;
-  border-radius: 5px;
-  transition: width 0.5s ease;
-}
-
-.rank-count {
-  width: 50px;
-  font-size: 12px;
-  color: #666;
-  text-align: right;
-  flex-shrink: 0;
+/* 分布图卡片 */
+.distribution-card {
+  margin-bottom: 20px;
 }
 
 /* 用户表格 */
@@ -1801,23 +2187,24 @@ export default {
   width: 320px;
   max-width: 100%;
   padding: 8px 14px;
-  border: 1px solid #e0e0e0;
+  border: 1px solid var(--border-color, #e0e0e0);
   border-radius: 6px;
   font-size: 13px;
   outline: none;
   transition: border-color 0.2s;
   box-sizing: border-box;
+  background: var(--input-bg, #fff);
 }
 
 .user-search-input:focus {
-  border-color: #3498db;
+  border-color: var(--accent-color, #3498db);
   box-shadow: 0 0 0 2px rgba(52, 152, 219, 0.15);
 }
 
 .user-table-wrapper {
-  background: #fff;
+  background: var(--card-bg, #fff);
   border-radius: 8px;
-  border: 1px solid #e8e8e8;
+  border: 1px solid var(--border-color, #e8e8e8);
   overflow-x: auto;
 }
 
@@ -1828,23 +2215,23 @@ export default {
 }
 
 .user-table th {
-  background: #f8f9fa;
+  background: var(--bg-tertiary, #f8f9fa);
   padding: 12px 16px;
   text-align: left;
   font-weight: 600;
-  color: #555;
-  border-bottom: 1px solid #e8e8e8;
+  color: var(--text-secondary, #666);
+  border-bottom: 1px solid var(--border-color, #e8e8e8);
   white-space: nowrap;
 }
 
 .user-table td {
   padding: 12px 16px;
-  border-bottom: 1px solid #f0f0f0;
-  color: #444;
+  border-bottom: 1px solid var(--border-color, #f0f0f0);
+  color: var(--text-primary, #333);
 }
 
 .user-table tbody tr:hover {
-  background: #f8f9fa;
+  background: var(--bg-tertiary, #f8f9fa);
 }
 
 .role-badge {
@@ -1928,7 +2315,7 @@ export default {
 .empty-table {
   padding: 60px;
   text-align: center;
-  color: #888;
+  color: var(--text-secondary, #666);
 }
 
 /* 分页控件 */
@@ -1952,18 +2339,18 @@ export default {
 
 .btn-page {
   padding: 6px 14px;
-  border: 1px solid #e0e0e0;
-  background: #fff;
+  border: 1px solid var(--border-color, #e0e0e0);
+  background: var(--card-bg, #fff);
   border-radius: 4px;
   font-size: 12px;
-  color: #555;
+  color: var(--text-primary, #333);
   cursor: pointer;
   transition: all 0.2s;
 }
 
 .btn-page:hover:not(:disabled) {
-  border-color: #3498db;
-  color: #3498db;
+  border-color: var(--accent-color, #3498db);
+  color: var(--accent-color, #3498db);
 }
 
 .btn-page:disabled {
@@ -1982,8 +2369,8 @@ export default {
 }
 
 .component-card {
-  background: #fff;
-  border: 1px solid #e8e8e8;
+  background: var(--card-bg, #fff);
+  border: 1px solid var(--border-color, #e8e8e8);
   border-radius: 8px;
   padding: 18px;
 }
@@ -2011,7 +2398,7 @@ export default {
   flex: 1;
   font-weight: 600;
   font-size: 14px;
-  color: #2c3e50;
+  color: var(--text-primary, #333);
 }
 
 .component-status-text {
@@ -2078,16 +2465,16 @@ button:disabled {
 
 /* 区块卡片 */
 .section-card {
-  background: #fff;
+  background: var(--card-bg, #fff);
   border-radius: 8px;
-  border: 1px solid #e8e8e8;
+  border: 1px solid var(--border-color, #e8e8e8);
   padding: 18px;
 }
 
 .section-card h4 {
   margin: 0 0 16px 0;
   font-size: 14px;
-  color: #2c3e50;
+  color: var(--text-primary, #333);
 }
 
 .login-area {
@@ -2140,56 +2527,6 @@ button:disabled {
 .loading-box {
   padding: 40px;
   color: #888;
-}
-
-/* 消息分布 */
-.distribution-chart {
-  background: #fff;
-  border-radius: 8px;
-  border: 1px solid #e8e8e8;
-  padding: 18px;
-}
-
-.dist-item {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 0;
-  border-bottom: 1px solid #f0f0f0;
-}
-
-.dist-item:last-child {
-  border-bottom: none;
-}
-
-.dist-label {
-  width: 60px;
-  font-size: 13px;
-  color: #555;
-  flex-shrink: 0;
-}
-
-.dist-bar-wrapper {
-  flex: 1;
-  height: 12px;
-  background: #eee;
-  border-radius: 6px;
-  overflow: hidden;
-}
-
-.dist-bar {
-  height: 100%;
-  border-radius: 6px;
-  background: #3498db;
-  transition: width 0.5s ease;
-}
-
-.dist-count {
-  width: 60px;
-  font-size: 13px;
-  color: #666;
-  text-align: right;
-  flex-shrink: 0;
 }
 
 /* 系统消息 */
@@ -2249,23 +2586,23 @@ button:disabled {
   align-items: center;
   gap: 4px;
   padding: 4px 10px;
-  border: 1px solid #e0e0e0;
-  background: #fff;
+  border: 1px solid var(--border-color, #e0e0e0);
+  background: var(--card-bg, #fff);
   border-radius: 4px;
   font-size: 12px;
-  color: #666;
+  color: var(--text-secondary, #666);
   cursor: pointer;
   transition: all 0.2s;
 }
 
 .collapse-toggle:hover {
-  border-color: #3498db;
-  color: #3498db;
+  border-color: var(--accent-color, #3498db);
+  color: var(--accent-color, #3498db);
 }
 
 .media-manager-card {
-  background: #fff;
-  border: 1px solid #e8e8e8;
+  background: var(--card-bg, #fff);
+  border: 1px solid var(--border-color, #e8e8e8);
   border-radius: 8px;
   padding: 16px;
 }
@@ -2318,19 +2655,19 @@ button:disabled {
 .media-table th,
 .media-table td {
   padding: 10px 8px;
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid var(--border-color, #f0f0f0);
   text-align: left;
-  color: #444;
+  color: var(--text-primary, #333);
 }
 
 .media-table th {
   font-weight: 600;
-  color: #333;
-  background: #fafafa;
+  color: var(--text-primary, #333);
+  background: var(--bg-tertiary, #fafafa);
 }
 
 .media-table tbody tr:hover {
-  background: #fafafa;
+  background: var(--bg-tertiary, #fafafa);
 }
 
 .media-table .col-checkbox {
@@ -2356,18 +2693,18 @@ button:disabled {
 
 .media-pagination button {
   padding: 6px 12px;
-  border: 1px solid #e0e0e0;
-  background: #fff;
+  border: 1px solid var(--border-color, #e0e0e0);
+  background: var(--card-bg, #fff);
   border-radius: 4px;
   cursor: pointer;
   font-size: 12px;
-  color: #666;
+  color: var(--text-secondary, #666);
   transition: all 0.2s;
 }
 
 .media-pagination button:hover:not(:disabled) {
-  border-color: #3498db;
-  color: #3498db;
+  border-color: var(--accent-color, #3498db);
+  color: var(--accent-color, #3498db);
 }
 
 .media-pagination button:disabled {
@@ -2452,17 +2789,17 @@ button:disabled {
 .btn-preview {
   padding: 4px 10px;
   font-size: 12px;
-  color: #3498db;
-  background: #f0f9ff;
-  border: 1px solid #b7d8f7;
+  color: var(--accent-color, #3498db);
+  background: var(--bg-tertiary, #f0f9ff);
+  border: 1px solid var(--border-color, #b7d8f7);
   border-radius: 4px;
   cursor: pointer;
   transition: all 0.2s;
 }
 
 .btn-preview:hover:not(:disabled) {
-  background: #e0f2ff;
-  border-color: #3498db;
+  background: var(--bg-tertiary, #e0f2ff);
+  border-color: var(--accent-color, #3498db);
 }
 
 .btn-preview:disabled {
@@ -2486,7 +2823,7 @@ button:disabled {
 }
 
 .preview-content {
-  background: #fff;
+  background: var(--card-bg, #fff);
   border-radius: 8px;
   max-width: 90vw;
   max-height: 90vh;
@@ -2576,18 +2913,18 @@ button:disabled {
 
 .preview-nav-btn {
   padding: 8px 16px;
-  border: 1px solid #e0e0e0;
-  background: #fff;
+  border: 1px solid var(--border-color, #e0e0e0);
+  background: var(--card-bg, #fff);
   border-radius: 4px;
   cursor: pointer;
   font-size: 13px;
-  color: #555;
+  color: var(--text-primary, #333);
   transition: all 0.2s;
 }
 
 .preview-nav-btn:hover:not(:disabled) {
-  border-color: #3498db;
-  color: #3498db;
+  border-color: var(--accent-color, #3498db);
+  color: var(--accent-color, #3498db);
 }
 
 .preview-nav-btn:disabled {
@@ -2771,8 +3108,8 @@ button:disabled {
 }
 
 .config-group-card {
-  background: #fff;
-  border: 1px solid #e8e8e8;
+  background: var(--card-bg, #fff);
+  border: 1px solid var(--border-color, #e8e8e8);
   border-radius: 8px;
   padding: 18px;
 }
@@ -2789,7 +3126,7 @@ button:disabled {
 .config-group-header h4 {
   margin: 0;
   font-size: 15px;
-  color: #2c3e50;
+  color: var(--text-primary, #333);
 }
 
 .config-group-actions {
@@ -2836,7 +3173,7 @@ button:disabled {
 .config-value {
   flex: 1;
   font-size: 13px;
-  color: #333;
+  color: var(--text-primary, #333);
   padding: 6px 0;
   min-height: 30px;
   display: flex;
@@ -2859,23 +3196,23 @@ button:disabled {
 .config-input {
   flex: 1;
   padding: 6px 10px;
-  border: 1px solid #e0e0e0;
+  border: 1px solid var(--border-color, #e0e0e0);
   border-radius: 4px;
   font-size: 13px;
-  color: #333;
+  color: var(--text-primary, #333);
   outline: none;
   transition: border-color 0.2s;
 }
 
 .config-input:focus {
-  border-color: #3498db;
+  border-color: var(--accent-color, #3498db);
 }
 
 .btn-toggle-secret {
   padding: 4px 8px;
-  border: 1px solid #e0e0e0;
+  border: 1px solid var(--border-color, #e0e0e0);
   border-radius: 4px;
-  background: #fff;
+  background: var(--card-bg, #fff);
   cursor: pointer;
   font-size: 14px;
   line-height: 1;
@@ -2883,7 +3220,7 @@ button:disabled {
 }
 
 .btn-toggle-secret:hover {
-  border-color: #3498db;
+  border-color: var(--accent-color, #3498db);
 }
 
 /* 数据维护 */
@@ -2922,7 +3259,7 @@ button:disabled {
   justify-content: space-between;
   align-items: center;
   padding: 10px 14px;
-  background: #f8f9fa;
+  background: var(--bg-tertiary, #f8f9fa);
   border-radius: 6px;
   transition: background 0.2s;
 }
@@ -2940,7 +3277,7 @@ button:disabled {
 .backup-name {
   font-size: 13px;
   font-weight: 500;
-  color: #2c3e50;
+  color: var(--text-primary, #333);
 }
 
 .backup-meta {
@@ -2988,24 +3325,24 @@ button:disabled {
   background: transparent;
   border: none;
   border-bottom: 2px solid transparent;
-  color: #666;
+  color: var(--text-secondary, #666);
   cursor: pointer;
   font-size: 14px;
   transition: all 0.2s;
 }
 .log-sub-tab:hover {
-  color: #2c3e50;
+  color: var(--text-primary, #333);
 }
 .log-sub-tab.active {
-  color: #2c3e50;
-  border-bottom-color: #2c3e50;
+  color: var(--text-primary, #333);
+  border-bottom-color: var(--accent-color, #3498db);
   font-weight: 600;
 }
 .log-section {
-  background: #fff;
+  background: var(--card-bg, #fff);
   border-radius: 8px;
   padding: 16px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+  box-shadow: 0 1px 3px var(--card-shadow, rgba(0, 0, 0, 0.06));
 }
 .log-toolbar {
   display: flex;
@@ -3020,20 +3357,20 @@ button:disabled {
 }
 .log-level-btn {
   padding: 4px 12px;
-  background: #f5f6fa;
-  border: 1px solid #e0e0e0;
+  background: var(--bg-tertiary, #f5f6fa);
+  border: 1px solid var(--border-color, #e0e0e0);
   border-radius: 4px;
   cursor: pointer;
   font-size: 12px;
-  color: #666;
+  color: var(--text-secondary, #666);
   transition: all 0.2s;
 }
 .log-level-btn:hover {
-  background: #e9ecef;
+  background: var(--bg-tertiary, #e9ecef);
 }
 .log-level-btn.active {
   color: #fff;
-  border-color: #2c3e50;
+  border-color: var(--accent-color, #3498db);
 }
 .log-level-btn.active.level-all {
   background: #2c3e50;
@@ -3128,7 +3465,7 @@ button:disabled {
 .audit-search-input,
 .audit-action-select {
   padding: 6px 10px;
-  border: 1px solid #e0e0e0;
+  border: 1px solid var(--border-color, #e0e0e0);
   border-radius: 4px;
   font-size: 13px;
   outline: none;
@@ -3144,7 +3481,7 @@ button:disabled {
 }
 .audit-table-wrapper {
   overflow-x: auto;
-  border: 1px solid #e0e0e0;
+  border: 1px solid var(--border-color, #e0e0e0);
   border-radius: 6px;
 }
 .audit-table {
@@ -3153,24 +3490,24 @@ button:disabled {
   font-size: 13px;
 }
 .audit-table thead {
-  background: #f5f6fa;
+  background: var(--bg-tertiary, #f5f6fa);
 }
 .audit-table th {
   padding: 10px 12px;
   text-align: left;
   font-weight: 600;
-  color: #333;
-  border-bottom: 1px solid #e0e0e0;
+  color: var(--text-primary, #333);
+  border-bottom: 1px solid var(--border-color, #e0e0e0);
   white-space: nowrap;
 }
 .audit-table td {
   padding: 8px 12px;
-  border-bottom: 1px solid #f0f0f0;
-  color: #555;
+  border-bottom: 1px solid var(--border-color, #f0f0f0);
+  color: var(--text-primary, #333);
   vertical-align: top;
 }
 .audit-table tbody tr:hover {
-  background: #fafbfc;
+  background: var(--bg-tertiary, #fafbfc);
 }
 .audit-loading,
 .audit-empty {
@@ -3213,5 +3550,645 @@ button:disabled {
   max-width: 300px;
   word-break: break-all;
   color: #666;
+}
+
+/* ===== 积分管理：规则配置 ===== */
+.credit-rule-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.rule-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 16px;
+  margin-top: 12px;
+}
+.rule-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.rule-item label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary, #333);
+}
+.rule-item small {
+  font-size: 11px;
+  color: #999;
+}
+.rule-item.toggle-item {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  background: var(--bg-tertiary, #fafbfc);
+  border-radius: 6px;
+}
+.rule-item.toggle-item label:first-child {
+  flex: 1;
+}
+.rule-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 12px;
+  color: #666;
+}
+.rule-switch input[type='checkbox'] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+.plans-edit-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+.plan-edit-card {
+  padding: 14px;
+  background: var(--bg-tertiary, #fafbfc);
+  border: 1px solid var(--border-color, #e8e8e8);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.plan-edit-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary, #333);
+}
+.plan-edit-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.plan-edit-row label {
+  font-size: 12px;
+  color: #666;
+}
+.plan-duration-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 14px;
+}
+.plan-duration-row label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary, #333);
+}
+.plan-duration-input {
+  width: 120px;
+}
+.rule-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 8px;
+}
+.rule-save-btn {
+  min-width: 160px;
+}
+
+/* ===== 积分管理：流水汇总 + 筛选 ===== */
+.tx-summary-bar {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.tx-summary-card {
+  padding: 14px 16px;
+  border-radius: 8px;
+  background: var(--card-bg, #fff);
+  border: 1px solid var(--border-color, #e8e8e8);
+}
+.tx-summary-card.earned { border-left: 3px solid #4caf50; }
+.tx-summary-card.spent { border-left: 3px solid #f44336; }
+.tx-summary-card.net { border-left: 3px solid #2196f3; }
+.tx-summary-card.count { border-left: 3px solid #ff9800; }
+.tx-summary-label {
+  font-size: 12px;
+  color: #888;
+  margin-bottom: 4px;
+}
+.tx-summary-value {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-primary, #333);
+}
+.tx-filters {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  background: var(--card-bg, #fff);
+  border: 1px solid var(--border-color, #e8e8e8);
+  border-radius: 8px;
+  margin-bottom: 16px;
+}
+.tx-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.tx-filter-input {
+  padding: 6px 10px;
+  border: 1px solid var(--border-color, #d9d9d9);
+  border-radius: 4px;
+  font-size: 13px;
+  min-width: 140px;
+  background: var(--card-bg, #fff);
+  color: var(--text-primary, #333);
+}
+.tx-filter-input:focus {
+  outline: none;
+  border-color: var(--accent-color, #3498db);
+}
+.status-multi-select {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.status-multi-label {
+  font-size: 13px;
+  color: #666;
+}
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border: 1px solid var(--border-color, #d9d9d9);
+  border-radius: 12px;
+  font-size: 12px;
+  cursor: pointer;
+  color: #666;
+  user-select: none;
+  transition: all 0.2s;
+}
+.status-chip input[type='checkbox'] {
+  width: 13px;
+  height: 13px;
+  cursor: pointer;
+}
+.status-chip.active {
+  background: var(--accent-color, #3498db);
+  color: #fff;
+  border-color: var(--accent-color, #3498db);
+}
+
+/* ===== 积分管理：徽章 + 单元格 ===== */
+.tier-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.tier-badge.tier-free { background: #eceff1; color: #607d8b; }
+.tier-badge.tier-lite { background: #e3f2fd; color: #1976d2; }
+.tier-badge.tier-pro { background: #f3e5f5; color: #7b1fa2; }
+.tier-badge.tier-proplus { background: #fff3e0; color: #f57c00; }
+.tier-badge.tier-ultra { background: #ffebee; color: #c62828; }
+.dir-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.dir-badge.in { background: #e8f5e9; color: #2e7d32; }
+.dir-badge.out { background: #ffebee; color: #c62828; }
+.credits-cell {
+  color: #2e7d32;
+  font-weight: 600;
+}
+.spent-cell {
+  color: #c62828;
+  font-weight: 600;
+}
+.amount-cell {
+  color: #1976d2;
+  font-weight: 600;
+}
+.order-no-cell {
+  font-family: 'Consolas', 'Monaco', monospace;
+  font-size: 12px;
+  color: var(--accent-color, #3498db);
+  cursor: pointer;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.order-no-cell:hover {
+  text-decoration: underline;
+}
+.action-cell {
+  white-space: nowrap;
+}
+.status-tag {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.status-tag.status-PENDING { background: #fff8e1; color: #ff8f00; }
+.status-tag.status-PAID { background: #e8f5e9; color: #2e7d32; }
+.status-tag.status-REFUNDED { background: #f3e5f5; color: #7b1fa2; }
+.status-tag.status-CANCELLED { background: #eceff1; color: #607d8b; }
+.status-tag.status-EXPIRED { background: #ffebee; color: #c62828; }
+
+/* ===== 通用链接按钮 ===== */
+.btn-link {
+  background: none;
+  border: none;
+  color: var(--accent-color, #3498db);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  transition: background 0.2s;
+}
+.btn-link:hover {
+  background: rgba(52, 152, 219, 0.1);
+}
+.btn-link.btn-danger { color: #c62828; }
+.btn-link.btn-danger:hover { background: rgba(198, 40, 40, 0.1); }
+.btn-link.btn-warn { color: #ef6c00; }
+.btn-link.btn-warn:hover { background: rgba(239, 108, 0, 0.1); }
+
+/* ===== 模态框（积分管理复用） ===== */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+.modal-content {
+  background: var(--card-bg, #fff);
+  border-radius: 8px;
+  width: 520px;
+  max-width: 92vw;
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+}
+.modal-content.small-modal {
+  width: 420px;
+}
+.modal-content.credit-modal {
+  width: 560px;
+}
+.modal-content.manual-modal {
+  width: 620px;
+}
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border-color, #e8e8e8);
+}
+.modal-header h3 {
+  margin: 0;
+  font-size: 16px;
+  color: var(--text-primary, #333);
+}
+.btn-close {
+  background: none;
+  border: none;
+  font-size: 22px;
+  line-height: 1;
+  color: #999;
+  cursor: pointer;
+  padding: 0 4px;
+}
+.btn-close:hover {
+  color: #333;
+}
+.modal-body {
+  padding: 20px;
+  overflow-y: auto;
+  flex: 1;
+}
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 14px 20px;
+  border-top: 1px solid var(--border-color, #e8e8e8);
+}
+.btn-cancel {
+  padding: 8px 18px;
+  border: 1px solid var(--border-color, #d9d9d9);
+  background: var(--card-bg, #fff);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-primary, #333);
+}
+.btn-cancel:hover {
+  background: var(--bg-tertiary, #fafbfc);
+}
+.btn-save {
+  padding: 8px 18px;
+  border: none;
+  background: var(--accent-color, #3498db);
+  color: #fff;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.btn-save:hover:not(:disabled) {
+  opacity: 0.9;
+}
+.btn-save:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.btn-save.btn-warn {
+  background: #ef6c00;
+}
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+.form-group label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary, #333);
+}
+.form-group input,
+.form-group textarea,
+.form-group select {
+  padding: 8px 10px;
+  border: 1px solid var(--border-color, #d9d9d9);
+  border-radius: 4px;
+  font-size: 13px;
+  background: var(--card-bg, #fff);
+  color: var(--text-primary, #333);
+}
+.form-group input:focus,
+.form-group textarea:focus,
+.form-group select:focus {
+  outline: none;
+  border-color: var(--accent-color, #3498db);
+}
+.form-grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+.modal-tip {
+  margin: 8px 0 0;
+  padding: 8px 12px;
+  background: #fff8e1;
+  border-radius: 4px;
+  font-size: 12px;
+  color: #ff8f00;
+}
+.refund-order-info {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+  background: var(--bg-tertiary, #fafbfc);
+  border-radius: 6px;
+  margin-bottom: 14px;
+}
+.refund-order-info label {
+  font-weight: 600;
+  color: #666;
+  margin-right: 6px;
+}
+.refund-order-info span {
+  color: var(--text-primary, #333);
+}
+
+/* ===== 订单详情抽屉 ===== */
+.drawer-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  justify-content: flex-end;
+  z-index: 1000;
+}
+.drawer-container {
+  width: 560px;
+  max-width: 92vw;
+  height: 100%;
+  background: var(--card-bg, #fff);
+  display: flex;
+  flex-direction: column;
+  box-shadow: -4px 0 16px rgba(0, 0, 0, 0.15);
+}
+.drawer-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border-color, #e8e8e8);
+}
+.drawer-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary, #333);
+}
+.drawer-order-no {
+  font-family: 'Consolas', 'Monaco', monospace;
+  font-size: 12px;
+  color: #888;
+  font-weight: 400;
+}
+.drawer-close {
+  background: none;
+  border: none;
+  font-size: 22px;
+  color: #999;
+  cursor: pointer;
+}
+.drawer-close:hover {
+  color: #333;
+}
+.drawer-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px;
+}
+.detail-section {
+  margin-bottom: 22px;
+}
+.detail-section h5 {
+  margin: 0 0 12px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary, #333);
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border-color, #f0f0f0);
+}
+.detail-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 16px;
+}
+.detail-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.detail-item label {
+  font-size: 11px;
+  color: #999;
+}
+.detail-item span {
+  font-size: 13px;
+  color: var(--text-primary, #333);
+}
+
+/* ===== 时间轴 ===== */
+.timeline {
+  position: relative;
+  padding-left: 18px;
+}
+.timeline::before {
+  content: '';
+  position: absolute;
+  left: 5px;
+  top: 4px;
+  bottom: 4px;
+  width: 2px;
+  background: var(--border-color, #e0e0e0);
+}
+.timeline-item {
+  position: relative;
+  padding-bottom: 16px;
+}
+.timeline-item.last {
+  padding-bottom: 0;
+}
+.timeline-dot {
+  position: absolute;
+  left: -16px;
+  top: 4px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #bbb;
+  border: 2px solid var(--card-bg, #fff);
+}
+.timeline-item.done .timeline-dot {
+  background: var(--accent-color, #3498db);
+}
+.timeline-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary, #333);
+}
+.timeline-op {
+  font-size: 11px;
+  color: #999;
+  font-weight: 400;
+}
+.timeline-time {
+  font-size: 11px;
+  color: #aaa;
+  margin-top: 2px;
+}
+
+/* ===== 关联流水 ===== */
+.related-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.related-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  background: var(--bg-tertiary, #fafbfc);
+  border-radius: 6px;
+}
+.related-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+}
+.related-type {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  background: #e3f2fd;
+  color: #1976d2;
+  white-space: nowrap;
+}
+.related-desc {
+  font-size: 12px;
+  color: #666;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.related-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.related-amount {
+  font-weight: 600;
+}
+.related-amount.add { color: #2e7d32; }
+.related-amount.sub { color: #c62828; }
+.related-time {
+  color: #aaa;
+  font-size: 11px;
+}
+.drawer-footer {
+  padding: 14px 20px;
+  border-top: 1px solid var(--border-color, #e8e8e8);
+}
+
+/* 抽屉过渡动画 */
+.drawer-enter-active,
+.drawer-leave-active {
+  transition: opacity 0.25s ease;
+}
+.drawer-enter-active .drawer-container,
+.drawer-leave-active .drawer-container {
+  transition: transform 0.25s ease;
+}
+.drawer-enter-from,
+.drawer-leave-to {
+  opacity: 0;
+}
+.drawer-enter-from .drawer-container,
+.drawer-leave-to .drawer-container {
+  transform: translateX(100%);
 }
 </style>

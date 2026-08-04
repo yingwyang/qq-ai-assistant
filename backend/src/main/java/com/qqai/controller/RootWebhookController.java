@@ -3,12 +3,14 @@ package com.qqai.controller;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.qqai.dto.common.ApiResponse;
+import com.qqai.dto.webhook.MediaTaskPayload;
 import com.qqai.dto.webhook.MessageParseResult;
 import com.qqai.entity.Message;
 import com.qqai.entity.UserQqBinding;
 import com.qqai.repository.UserQqBindingRepository;
 import com.qqai.service.GroupService;
 import com.qqai.service.MessageParserService;
+import com.qqai.service.MessageQueueService;
 import com.qqai.service.MessageService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -43,6 +45,9 @@ public class RootWebhookController {
     private MessageParserService messageParserService;
 
     @Autowired
+    private MessageQueueService messageQueueService;
+
+    @Autowired
     private UserQqBindingRepository userQqBindingRepository;
 
     @Value("${napcat.webhook-token:}")
@@ -68,6 +73,7 @@ public class RootWebhookController {
             @RequestParam(value = "access_token", required = false) String accessToken) {
 
         log.info("【根路径】收到NapCat消息: {}", payload.substring(0, Math.min(500, payload.length())));
+        long webhookStartMs = System.currentTimeMillis();
         log.debug("Authorization: {}", authHeader);
         log.debug("X-Token: {}", xToken);
         log.debug("X-OneBot-Token: {}", xOneBotToken);
@@ -123,8 +129,8 @@ public class RootWebhookController {
                 }
             }
 
-            // 调用解析服务
-            MessageParseResult parsed = messageParserService.parse(json);
+            // 调用轻量解析服务（不执行媒体下载/转码，仅收集媒体任务）
+            MessageParseResult parsed = messageParserService.parseLightweight(json);
 
             if (parsed.getGroupId() == null || parsed.getUserId() == null) {
                 log.warn("消息缺少必要字段: groupId={}, userId={}", parsed.getGroupId(), parsed.getUserId());
@@ -160,6 +166,10 @@ public class RootWebhookController {
             // 创建消息实体
             Message message = buildMessage(parsed, finalMessageId, nickname, groupName, isSelfMessage, currentSelfQq);
 
+            // 若含媒体任务，标记 mediaPending=true（前端显示占位符，消费者完成后回填并推送 message_update）
+            boolean hasMediaTasks = parsed.getMediaTasks() != null && !parsed.getMediaTasks().isEmpty();
+            message.setMediaPending(hasMediaTasks);
+
             // 保存到数据库
             Message savedMessage;
             try {
@@ -168,21 +178,36 @@ public class RootWebhookController {
                 log.debug("消息已存在（数据库唯一约束冲突）: messageId={}", finalMessageId);
                 return ResponseEntity.ok(ApiResponse.success("消息已存在"));
             }
-            log.info("消息已保存到数据库, ID: {}, 类型: {}, {}",
-                    savedMessage.getId(), parsed.getMsgType(), isSelfMessage ? "登录账号发送" : "其他成员发送");
+            log.info("消息已保存到数据库, ID: {}, 类型: {}, mediaPending={}, {}",
+                    savedMessage.getId(), parsed.getMsgType(), hasMediaTasks,
+                    isSelfMessage ? "登录账号发送" : "其他成员发送");
+
+            // 投递媒体任务到 RabbitMQ（图片/视频 → media.download，语音 → voice.transcode）
+            if (hasMediaTasks) {
+                for (MediaTaskPayload task : parsed.getMediaTasks()) {
+                    task.setMessageId(savedMessage.getId());
+                    if ("voice".equals(task.getMediaType())) {
+                        messageQueueService.sendVoiceTranscode(task);
+                    } else {
+                        messageQueueService.sendMediaDownload(task);
+                    }
+                }
+                log.info("已投递 {} 个媒体任务, dbId={}", parsed.getMediaTasks().size(), savedMessage.getId());
+            }
 
             // 保存群聊信息
             String ownerQq = isSelfMessage ? String.valueOf(parsed.getUserId())
                     : (currentSelfQq != null ? currentSelfQq : String.valueOf(parsed.getUserId()));
             groupService.saveGroupInfo(ownerQq, String.valueOf(parsed.getGroupId()), groupName);
 
+            log.info("Webhook 处理完成, 耗时: {}ms", System.currentTimeMillis() - webhookStartMs);
             Map<String, Object> okResult = new HashMap<>();
             okResult.put("status", "ok");
             okResult.put("id", savedMessage.getId());
             return ResponseEntity.ok(okResult);
 
         } catch (Exception e) {
-            log.error("处理消息时出错: {}", e.getMessage(), e);
+            log.error("处理消息时出错, 耗时: {}ms, 错误: {}", System.currentTimeMillis() - webhookStartMs, e.getMessage(), e);
             return ResponseEntity.internalServerError().body("Error: " + e.getMessage());
         }
     }

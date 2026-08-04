@@ -1,0 +1,68 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:testdb;MODE=MySQL;DB_CLOSE_DELAY=-1
+    username: sa
+    password:
+    driver-class-name: org.h2.Driver
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.H2Dialect
+  flyway:
+    enabled: false
+
+jwt:
+  secret: test-secret-key-must-be-at-least-32-characters-long-for-jwt-signing
+  expiration: 86400000
+
+napcat:
+  self-qq: "123456"
+  api-url: http://127.0.0.1:3000
+  token: test-napcat-token
+  webhook-token: test-webhook-token
+  webui-url: http://127.0.0.1:6099
+
+minio:
+  endpoint: http://127.0.0.1:9000
+  access-key: test-access-key
+  secret-key: test-secret-key
+  bucket-name: test-bucket
+
+astrbot:
+  api-url: http://127.0.0.1:6185
+  token: test-astrbot-token
+  data-path: ./target/test-astrbot-data
+
+gpt-sovits:
+  api-url: http://127.0.0.1:5000
+  token: test-gpt-sovits-token
+  ref-audio-path: ./target/test-ref.wav
+  prompt-text: test prompt
+  prompt-lang: zh
+  text-lang: zh
+  output-dir: ./target/test-gpt-sovits-output
+
+file:
+  storage:
+    local-path: ./target/test-uploads/images
+    archive-path: ./target/test-uploads/archive
+  purge:
+    base-dir: ./target/test-uploads
+
+app:
+  plugin:
+    dir: ./target/test-plugins
+
+archive:
+  days-before: 90
+  cron: "0 0 2 * * ?"
+
+logging:
+  file:
+    name: ./target/test-logs/application.log
+  level:
+    root: WARN
+    com.qqai: INFO

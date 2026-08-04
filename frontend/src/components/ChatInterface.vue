@@ -54,7 +54,7 @@
           <Icon name="trash" :size="14" /> 删除
         </button>
         <button
-          @click="analyzeSelected"
+          @click="openAnalysisPicker"
           :disabled="selectedMessages.length === 0"
           class="btn-analyze"
         >
@@ -62,8 +62,50 @@
         </button>
       </div>
     </div>
-    
-    <!-- 消息列表区域 -->
+
+    <!-- AI 分析类型选择弹窗 -->
+    <div v-if="showAnalysisPicker" class="analysis-picker-mask" @click.self="closeAnalysisPicker">
+      <div class="analysis-picker">
+        <div class="analysis-picker-header">
+          <div class="analysis-picker-title">选择分析维度</div>
+          <div class="analysis-picker-sub">
+            不同维度产出对「融入圈子」有不同价值的洞察
+            <span v-if="groupTypeLabel" class="analysis-picker-gt">（当前群类型：{{ groupTypeLabel }}）</span>
+          </div>
+          <button class="analysis-picker-close" @click="closeAnalysisPicker" title="关闭">
+            <Icon name="close" :size="16" />
+          </button>
+        </div>
+        <div class="analysis-picker-grid">
+          <button
+            v-for="opt in analysisTypeOptions"
+            :key="opt.value"
+            :class="['analysis-picker-item', { recommended: opt.recommended }]"
+            :disabled="selectedMessages.length === 0"
+            @click="analyzeWithType(opt.value)"
+          >
+            <div class="analysis-picker-icon">{{ opt.icon }}</div>
+            <div class="analysis-picker-info">
+              <div class="analysis-picker-name">
+                {{ opt.label }}
+                <span v-if="opt.recommended" class="recommended-tag">推荐</span>
+              </div>
+              <div class="analysis-picker-desc">{{ opt.desc }}</div>
+            </div>
+          </button>
+        </div>
+        <!-- 用户附加输入框：和转发内容一起发给 LLM -->
+        <div class="analysis-picker-input-area">
+          <textarea
+            v-model="analysisUserPrompt"
+            class="analysis-picker-input"
+            placeholder="补充说明（可选）：例如『重点分析图片内容』或『我刚进群，帮我找共同话题』..."
+            rows="2"
+            @keydown.enter.prevent="analyzeWithType(analysisTypeOptions[0]?.value)"
+          ></textarea>
+        </div>
+      </div>
+    </div>
     <div class="messages-area" ref="messagesContainer" @scroll="handleScroll">
       <div v-if="isLoadingMore" class="load-more-hint">加载更早的消息...</div>
       <div v-if="messages.length === 0 && !isLoading" class="empty-state">
@@ -201,6 +243,8 @@ export default {
     const isMultiSelect = ref(false);
     const selectedMessageIds = ref(new Set());
     const quickSelectCount = ref('');
+    const showAnalysisPicker = ref(false);
+    const analysisUserPrompt = ref('');
     
     // 计算选中的消息数量
     const selectedMessages = computed(() => Array.from(selectedMessageIds.value));
@@ -209,6 +253,51 @@ export default {
     const selectedMessagesData = computed(() => {
       return messages.value.filter(msg => selectedMessageIds.value.has(msg.id));
     });
+
+    // 群类型标签（从 props.group.groupType 推断，用于给推荐分析类型打标）
+    const GROUP_TYPE_LABELS = {
+      GAME: '游戏群', STUDY: '学习群', WORK: '工作群',
+      HOBBY: '兴趣群', LIFE: '生活群', SOCIAL: '社交群',
+      OTHER: '其他群'
+    };
+    const GROUP_TYPE_RECOMMEND = {
+      GAME: ['meme-dictionary', 'integration-guide', 'summary'],
+      STUDY: ['summary', 'topic-trend', 'integration-guide'],
+      WORK: ['summary', 'integration-guide', 'social-graph'],
+      HOBBY: ['meme-dictionary', 'persona-match', 'summary'],
+      LIFE: ['integration-guide', 'topic-trend', 'summary'],
+      SOCIAL: ['social-graph', 'persona-match', 'integration-guide'],
+      OTHER: ['summary', 'integration-guide']
+    };
+    const groupType = computed(() => {
+      const gt = props.group?.groupType;
+      return gt && GROUP_TYPE_RECOMMEND[gt] ? gt : 'OTHER';
+    });
+    const groupTypeLabel = computed(() => GROUP_TYPE_LABELS[groupType.value] || '其他群');
+
+    // 6 种融入导向分析类型选项（根据群类型高亮推荐）
+    const analysisTypeOptions = computed(() => {
+      const recommended = new Set(GROUP_TYPE_RECOMMEND[groupType.value] || GROUP_TYPE_RECOMMEND.OTHER);
+      const list = [
+        { value: 'summary', label: '群聊速览', desc: '群主题 / 氛围 / 近期热点，快速了解群在聊什么', icon: '📊' },
+        { value: 'social-graph', label: '社交图谱', desc: '活跃人物 / 意见领袖 / 话题带动者，知道谁是关键人', icon: '🕸️' },
+        { value: 'topic-trend', label: '话题趋势', desc: '上升 / 稳定 / 衰退话题，把握参与时机', icon: '📈' },
+        { value: 'integration-guide', label: '融入指南 ⭐', desc: '参与建议 / 共同兴趣 / 避雷提示（核心维度）', icon: '🧭' },
+        { value: 'meme-dictionary', label: '梗词典', desc: '群内特有梗 / 缩写 / 表情含义，看懂黑话', icon: '📖' },
+        { value: 'persona-match', label: '人设匹配', desc: '形象定位建议 / 发言风格参考，塑造受欢迎的人设', icon: '🎭' }
+      ];
+      return list.map(o => ({ ...o, recommended: recommended.has(o.value) }));
+    });
+
+    const openAnalysisPicker = () => {
+      if (selectedMessages.value.length === 0) {
+        showToast('请先选择要分析的消息', 'warning');
+        return;
+      }
+      analysisUserPrompt.value = '';
+      showAnalysisPicker.value = true;
+    };
+    const closeAnalysisPicker = () => { showAnalysisPicker.value = false; };
 
     // 群成员昵称映射（从后端接口加载，覆盖历史所有发送者）
     const groupMemberMap = ref(new Map());
@@ -607,125 +696,112 @@ export default {
       showToast(`已选择最近 ${recentMessages.length} 条消息`, 'success');
     };
     
-    // 分析选中的消息
-    const analyzeSelected = async () => {
+    // 分析选中的消息（保留的工具函数：CQ 清理/转发解析，用于前端展示已选消息的折叠卡片）
+    const extractForwardXmlTitles = (xml) => {
+      if (!xml || typeof xml !== 'string') return [];
+      try {
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(xml, 'text/xml');
+        return Array.from(doc.querySelectorAll('item title')).map(t => t.textContent || '');
+      } catch (e) {
+        return [];
+      }
+    };
+    const extractForwardMessages = (msg) => {
+      if (Array.isArray(msg.forwardMessages)) return msg.forwardMessages;
+      const c = msg.content || '';
+      if (!c.trim()) return [];
+      try {
+        const jsonMatch = c.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
+        if (jsonMatch) {
+          const parsed = JSON.parse(jsonMatch[1]);
+          if (Array.isArray(parsed)) return parsed;
+          if (parsed.messages && Array.isArray(parsed.messages)) return parsed.messages;
+          if (parsed.content && Array.isArray(parsed.content)) return parsed.content;
+          if (parsed.xmlContent && typeof parsed.xmlContent === 'string') {
+            const titles = extractForwardXmlTitles(parsed.xmlContent);
+            return titles.slice(1).map((text, i) => ({
+              id: `forward-${msg.id}-${i}`, userNickname: '', content: text, messageType: 'TEXT'
+            }));
+          }
+        }
+      } catch (e) { /* ignore */ }
+      if (c.includes('<msg') && c.includes('</msg>')) {
+        const titles = extractForwardXmlTitles(c);
+        return titles.slice(1).map((text, i) => ({
+          id: `forward-${msg.id}-${i}`, userNickname: '', content: text, messageType: 'TEXT'
+        }));
+      }
+      return [];
+    };
+    const cleanMessageText = (text) => {
+      if (!text) return '[无内容]';
+      return text
+        .replace(/\[CQ:image[^\]]*\]/g, '[图片]')
+        .replace(/\[CQ:video[^\]]*\]/g, '[视频]')
+        .replace(/\[CQ:(record|voice)[^\]]*\]/g, '[语音]')
+        .replace(/\[CQ:face[^\]]*\]/g, '[表情]')
+        .replace(/\[CQ:file[^\]]*\]/g, '[文件]')
+        .replace(/\[CQ:at,qq=([^,\]]+)\]/g, (match, qq) => {
+          const nickname = qqNicknameMap.value.get(String(qq));
+          return nickname ? `@${nickname}` : `@${qq}`;
+        })
+        .replace(/\[CQ:reply[^\]]*\]/g, '')
+        .replace(/\[CQ:forward[^\]]*\]/g, '[聊天记录]')
+        .replace(/\[CQ:[^\]]+\]/g, '')
+        .trim() || '[无内容]';
+    };
+    const formatMessageForAnalysis = (msg) => {
+      const type = (msg.messageType || 'TEXT').toUpperCase();
+      if (type === 'FORWARD') {
+        const children = extractForwardMessages(msg);
+        if (children.length === 0) return '[聊天记录]';
+        const lines = children.map(child => {
+          const childType = (child.messageType || 'TEXT').toUpperCase();
+          const childText = childType === 'FORWARD'
+            ? formatMessageForAnalysis(child)
+            : cleanMessageText(child.content);
+          return `${child.userNickname || child.userName || '未知用户'}: ${childText}`;
+        });
+        return `[聊天记录]\n${lines.join('\n')}`;
+      }
+      if (type === 'IMAGE') return '[图片]';
+      if (type === 'VIDEO') return '[视频]';
+      if (type === 'VOICE' || type === 'AUDIO') return '[语音]';
+      return cleanMessageText(msg.content);
+    };
+
+    // 用指定的 analysisType 启动分析（由分析类型选择器按钮调用）
+    // —— 注意：不再在前端构造 prompt，LLM prompt 由后端按 messageIds 查 DB + 渲染 prompts.yml 模板生成
+    const analyzeWithType = (analysisType) => {
       if (selectedMessages.value.length === 0) {
         showToast('请先选择要分析的消息', 'warning');
         return;
       }
-      
-      // 从 XML 中提取聊天记录 title
-      const extractForwardXmlTitles = (xml) => {
-        if (!xml || typeof xml !== 'string') return [];
-        try {
-          const parser = new DOMParser();
-          const doc = parser.parseFromString(xml, 'text/xml');
-          return Array.from(doc.querySelectorAll('item title')).map(t => t.textContent || '');
-        } catch (e) {
-          return [];
-        }
-      };
-
-      // 解析转发消息中的子消息列表
-      const extractForwardMessages = (msg) => {
-        if (Array.isArray(msg.forwardMessages)) {
-          return msg.forwardMessages;
-        }
-        const c = msg.content || '';
-        if (!c.trim()) return [];
-        try {
-          const jsonMatch = c.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
-          if (jsonMatch) {
-            const parsed = JSON.parse(jsonMatch[1]);
-            if (Array.isArray(parsed)) return parsed;
-            if (parsed.messages && Array.isArray(parsed.messages)) return parsed.messages;
-            if (parsed.content && Array.isArray(parsed.content)) return parsed.content;
-            if (parsed.xmlContent && typeof parsed.xmlContent === 'string') {
-              const titles = extractForwardXmlTitles(parsed.xmlContent);
-              return titles.slice(1).map((text, index) => ({
-                id: `forward-${msg.id}-${index}`,
-                userNickname: '',
-                content: text,
-                messageType: 'TEXT'
-              }));
-            }
-          }
-        } catch (e) {
-          // 解析失败则忽略
-        }
-        if (c.includes('<msg') && c.includes('</msg>')) {
-          const titles = extractForwardXmlTitles(c);
-          return titles.slice(1).map((text, index) => ({
-            id: `forward-${msg.id}-${index}`,
-            userNickname: '',
-            content: text,
-            messageType: 'TEXT'
-          }));
-        }
-        return [];
-      };
-
-      // 清理消息中的 CQ 码
-      const cleanMessageText = (text) => {
-        if (!text) return '[无内容]';
-        return text
-          .replace(/\[CQ:image[^\]]*\]/g, '[图片]')
-          .replace(/\[CQ:video[^\]]*\]/g, '[视频]')
-          .replace(/\[CQ:record[^\]]*\]/g, '[语音]')
-          .replace(/\[CQ:voice[^\]]*\]/g, '[语音]')
-          .replace(/\[CQ:face[^\]]*\]/g, '[表情]')
-          .replace(/\[CQ:file[^\]]*\]/g, '[文件]')
-          .replace(/\[CQ:at,qq=([^,\]]+)\]/g, (match, qq) => {
-            const nickname = qqNicknameMap.value.get(String(qq));
-            return nickname ? `@${nickname}` : `@${qq}`;
-          })
-          .replace(/\[CQ:reply[^\]]*\]/g, '')
-          .replace(/\[CQ:forward[^\]]*\]/g, '[聊天记录]')
-          .replace(/\[CQ:[^\]]+\]/g, '')
-          .trim() || '[无内容]';
-      };
-
-      // 格式化单条消息内容：媒体/转发等折叠为占位，清理 CQ 码
-      const formatMessageForAnalysis = (msg) => {
-        const type = (msg.messageType || 'TEXT').toUpperCase();
-        if (type === 'FORWARD') {
-          const children = extractForwardMessages(msg);
-          if (children.length === 0) return '[聊天记录]';
-          const lines = children.map(child => {
-            const childType = (child.messageType || 'TEXT').toUpperCase();
-            const childText = childType === 'FORWARD'
-              ? formatMessageForAnalysis(child)
-              : cleanMessageText(child.content);
-            return `${child.userNickname || child.userName || '未知用户'}: ${childText}`;
-          });
-          return `[聊天记录]\n${lines.join('\n')}`;
-        }
-        if (type === 'IMAGE') return '[图片]';
-        if (type === 'VIDEO') return '[视频]';
-        if (type === 'VOICE' || type === 'AUDIO') return '[语音]';
-        return cleanMessageText(msg.content);
-      };
-
-      // 构建选中的消息数据
       const selectedData = selectedMessagesData.value.map(msg => ({
         user: msg.userNickname || msg.userName || '未知用户',
         content: formatMessageForAnalysis(msg)
       }));
 
-      // 构建消息内容
-      const messageContents = selectedData.map(msg => `${msg.user}: ${msg.content}`).join('\n');
+      closeAnalysisPicker();
 
-      // 发送分析请求事件给父组件
+      // 发送分析请求事件给父组件（最终由 AstrBotChat 调用后端 /api/astrbot/analyze-selected 接口）
       emit('analysis-result', {
         type: 'request',
-        messages: selectedData,
-        prompt: `请分析以下群聊消息，总结主要内容、讨论话题和关键信息：\n\n${messageContents}`
+        analysisType: analysisType || 'summary',
+        messageIds: Array.from(selectedMessageIds.value),
+        groupId: groupId.value,
+        userPrompt: analysisUserPrompt.value || '',
+        messages: selectedData // 用于前端展示「已选 N 条消息」的折叠卡片（不传给 LLM）
       });
-      
+
       // 退出选择模式
       isSelectionMode.value = false;
       clearSelection();
     };
+
+    // 兼容保留：原有的 analyzeSelected 仍保留给旧调用点（如果有的话），默认走 summary
+    const analyzeSelected = () => analyzeWithType('summary');
 
     // 删除选中的消息
     const deleteSelected = async () => {
@@ -801,7 +877,15 @@ export default {
       clearSelection,
       selectRecentMessages,
       analyzeSelected,
-      deleteSelected
+      analyzeWithType,
+      deleteSelected,
+      // AI 分析类型选择弹窗
+      showAnalysisPicker,
+      openAnalysisPicker,
+      closeAnalysisPicker,
+      analysisTypeOptions,
+      groupTypeLabel,
+      analysisUserPrompt
     };
   }
 };
@@ -1326,5 +1410,177 @@ export default {
     width: 100%;
     justify-content: flex-end;
   }
+}
+
+/* ============ AI 分析类型选择弹窗 ============ */
+.analysis-picker-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(2px);
+}
+.analysis-picker {
+  width: min(680px, 92vw);
+  max-height: 85vh;
+  background: white;
+  border-radius: 14px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.22);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: ap-pop 0.22s ease-out;
+}
+@keyframes ap-pop {
+  from { opacity: 0; transform: translateY(8px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0)   scale(1);    }
+}
+.analysis-picker-header {
+  padding: 18px 22px 14px;
+  border-bottom: 1px solid #eef0f3;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  background: linear-gradient(180deg, #f8faff 0%, #ffffff 100%);
+}
+.analysis-picker-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: #1f2937;
+  margin-bottom: 4px;
+}
+.analysis-picker-sub {
+  font-size: 13px;
+  color: #6b7280;
+}
+.analysis-picker-gt {
+  color: #5b5bd6;
+  font-weight: 500;
+  margin-left: 4px;
+}
+.analysis-picker-close {
+  position: absolute;
+  right: 16px;
+  top: 16px;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  color: #6b7280;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+}
+.analysis-picker-close:hover {
+  background: #f0f1f5;
+  color: #1f2937;
+}
+.analysis-picker-grid {
+  padding: 16px 18px 22px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  overflow-y: auto;
+}
+.analysis-picker-item {
+  text-align: left;
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1.5px solid #e5e7eb;
+  background: #fafbfc;
+  cursor: pointer;
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  transition: all 0.18s ease;
+  color: inherit;
+  font: inherit;
+}
+.analysis-picker-item:hover:not(:disabled) {
+  border-color: #9ca3ff;
+  background: #f4f5ff;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(91, 91, 214, 0.12);
+}
+.analysis-picker-item:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.analysis-picker-item.recommended {
+  border-color: #c4c7ff;
+  background: #eef0ff;
+  position: relative;
+}
+.analysis-picker-item.recommended:hover:not(:disabled) {
+  border-color: #5b5bd6;
+  background: #e6e8ff;
+}
+.analysis-picker-icon {
+  font-size: 24px;
+  line-height: 1;
+  margin-top: 1px;
+  flex-shrink: 0;
+}
+.analysis-picker-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.analysis-picker-name {
+  font-size: 14.5px;
+  font-weight: 600;
+  color: #1f2937;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.recommended-tag {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 1.5px 7px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #8a8fff 0%, #5b5bd6 100%);
+  color: white;
+  letter-spacing: 0.2px;
+}
+.analysis-picker-desc {
+  font-size: 12.5px;
+  color: #6b7280;
+  line-height: 1.55;
+}
+@media (max-width: 560px) {
+  .analysis-picker-grid { grid-template-columns: 1fr; }
+}
+
+.analysis-picker-input-area {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #f0f0f0;
+}
+.analysis-picker-input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  font-size: 13px;
+  font-family: inherit;
+  resize: none;
+  outline: none;
+  transition: border-color 0.2s;
+  box-sizing: border-box;
+}
+.analysis-picker-input:focus {
+  border-color: #4f46e5;
+}
+.analysis-picker-input::placeholder {
+  color: #bbb;
 }
 </style>

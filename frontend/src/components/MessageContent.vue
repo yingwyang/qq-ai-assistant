@@ -10,6 +10,22 @@
       <span class="placeholder-label">消息已删除</span>
     </div>
 
+    <!-- 媒体加载中（mediaPending=true，后端异步下载/转码中） -->
+    <div v-else-if="message.mediaPending" class="media-loading">
+      <div class="loading-spinner"></div>
+      <span class="loading-label">{{ mediaLoadingLabel }}</span>
+    </div>
+
+    <!-- 媒体下载/转码失败（DLQ 消费者回填的失败占位符） -->
+    <div v-else-if="isMediaFailed" class="media-placeholder">
+      <svg viewBox="0 0 64 64" width="48" height="48" stroke="#e74c3c" fill="none" stroke-width="2">
+        <circle cx="32" cy="32" r="28"/>
+        <line x1="32" y1="20" x2="32" y2="38" stroke-linecap="round"/>
+        <circle cx="32" cy="46" r="2" fill="#e74c3c" stroke="none"/>
+      </svg>
+      <span class="placeholder-label">{{ mediaFailLabel }}</span>
+    </div>
+
     <!-- 回复/引用消息 -->
     <div v-else-if="isReplyMessage" class="message-reply-wrapper">
       <div class="message-reply" @click="onReplyClick">
@@ -192,6 +208,19 @@ export default {
         .replace(/&#13;/g, '\r');
     };
     const content = computed(() => decodeHtmlEntities(props.message.content || '').trim());
+
+    // 媒体下载/转码失败检测（DLQ 消费者回填的占位符）
+    const FAILURE_PLACEHOLDERS = ['[图片下载失败]', '[视频下载失败]', '[语音转码失败]', '[媒体下载失败]'];
+    const isMediaFailed = computed(() => FAILURE_PLACEHOLDERS.includes(content.value));
+    const mediaFailLabel = computed(() => content.value);
+
+    // 媒体加载中提示文案（根据消息类型）
+    const mediaLoadingLabel = computed(() => {
+      const t = props.message.messageType;
+      if (t === 'VOICE' || t === 'RECORD') return '语音转码中...';
+      if (t === 'VIDEO') return '视频下载中...';
+      return '图片下载中...';
+    });
     const imageError = ref(false);
     const videoError = ref(false);
     const isForwardExpanded = ref(false);
@@ -920,6 +949,9 @@ export default {
     return {
       isReplyMessage,
       isForwardMessage,
+      isMediaFailed,
+      mediaFailLabel,
+      mediaLoadingLabel,
       replyTarget,
       replyPreview,
       replyText,
@@ -1324,6 +1356,38 @@ export default {
 .placeholder-label {
   font-size: 12px;
   color: #999;
+}
+
+/* 媒体加载中占位符 */
+.media-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 24px;
+  background-color: #f5f5f5;
+  border-radius: 8px;
+  border: 1px dashed #ccc;
+  min-width: 160px;
+}
+
+.loading-spinner {
+  width: 28px;
+  height: 28px;
+  border: 3px solid #ddd;
+  border-top-color: #3498db;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.loading-label {
+  font-size: 12px;
+  color: #999;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 
 /* 小程序分享消息 */

@@ -1,5 +1,5 @@
 <template>
-  <div class="app" :class="layoutMode">
+  <div class="app" :class="[layoutMode, 'theme-' + (currentTheme || 'light')]">
     <!-- 聊天页面 -->
     <div class="chat-page">
       <!-- 左侧导航栏 -->
@@ -15,6 +15,8 @@
         @open-user-profile="openUserProfile"
         @open-persona-manager="showPersonaManager = true"
         @select-group="handleSelectGroup"
+        @navigate-admin="handleNavigateAdmin"
+        @navigate-docs="handleNavigateDocs"
       />
       
       <!-- 三栏布局主内容区 -->
@@ -69,6 +71,7 @@
                 <AstrBotChat
                   ref="astrBotChatRef"
                   :groupId="selectedGroup?.groupId"
+                  :groupName="selectedGroup?.groupName"
                   :userId="userInfo?.id ? String(userInfo.id) : ''"
                   :userNickname="userInfo?.nickname || userInfo?.username || ''"
                 />
@@ -90,6 +93,7 @@
                 <AstrBotChat
                   ref="astrBotChatRef"
                   :groupId="selectedGroup?.groupId"
+                  :groupName="selectedGroup?.groupName"
                   :userId="userInfo?.id ? String(userInfo.id) : ''"
                   :userNickname="userInfo?.nickname || userInfo?.username || ''"
                 />
@@ -145,6 +149,7 @@
               <AstrBotChat
                 ref="astrBotChatRef"
                 :groupId="selectedGroup?.groupId"
+                :groupName="selectedGroup?.groupName"
                 :userId="userInfo?.id ? String(userInfo.id) : ''"
                 :userNickname="userInfo?.nickname || userInfo?.username || ''"
               />
@@ -188,7 +193,7 @@
 </template>
 
 <script>
-import { ref, onMounted, computed } from 'vue';
+import { ref, onMounted, onUnmounted, computed, nextTick } from 'vue';
 import { useRouter } from 'vue-router';
 import Icon from '../components/Icon.vue';
 import Sidebar from '../components/Sidebar.vue';
@@ -201,7 +206,9 @@ import Toast from '../components/Toast.vue';
 import ConfirmDialog from '../components/ConfirmDialog.vue';
 import PersonaManager from '../components/PersonaManager.vue';
 import { useResponsive } from '../composables/useResponsive';
-import { authApi } from '../services/api';
+import { useTheme } from '../composables/useTheme';
+import { authApi, logout } from '../services/api';
+import { useAutoStartAfterLogin } from '../composables/useAutoStartAfterLogin';
 
 export default {
   name: 'HomeView',
@@ -219,6 +226,7 @@ export default {
   },
   setup() {
     const router = useRouter();
+    const { runSequence } = useAutoStartAfterLogin();
     const isLoggedIn = ref(false);
     const isAuthChecking = ref(true); // 认证检查中，防止"请先登录"闪现
     const activeTab = ref('recent');
@@ -236,6 +244,8 @@ export default {
 
     // 响应式布局
     const { isMobile, isTablet, isDesktop, layoutMode, shouldCollapseSidebar } = useResponsive();
+
+    const { theme: currentTheme } = useTheme();
 
     // 移动端标签页状态
     const activeMobileTab = ref('chat');
@@ -302,6 +312,8 @@ export default {
     };
 
     // 从 localStorage 恢复登录状态和群号
+    let _handleAuthLogout = null;
+
     onMounted(async () => {
       const savedGroupRaw = localStorage.getItem('selectedGroup');
       const savedUserInfo = localStorage.getItem('user_info');
@@ -334,13 +346,11 @@ export default {
       }
 
       // 监听 token 失效事件
-      const handleAuthLogout = () => {
-        isLoggedIn.value = false;
-        userInfo.value = null;
-        selectedGroup.value = null;
-        router.push('/login');
+      _handleAuthLogout = () => {
+        // 直接跳转，避免中间状态导致闪屏
+        router.replace('/login');
       };
-      window.addEventListener('auth:logout', handleAuthLogout);
+      window.addEventListener('auth:logout', _handleAuthLogout);
 
       // 检查用户登录状态
       if (token) {
@@ -362,17 +372,28 @@ export default {
             }
           } else {
             console.log('Token验证失败，跳转登录页');
-            isLoggedIn.value = false;
+            router.replace('/login');
+            return;
           }
         } catch (e) {
           console.log('Token验证异常:', e);
-          isLoggedIn.value = false;
+          router.replace('/login');
+          return;
         }
       } else {
-        isLoggedIn.value = false;
+        router.replace('/login');
+        return;
       }
       // 认证检查完成，无论成功失败都关闭加载状态
       isAuthChecking.value = false;
+    });
+
+    onUnmounted(() => {
+      // 清理事件监听器，防止组件卸载后仍触发路由跳转
+      if (_handleAuthLogout) {
+        window.removeEventListener('auth:logout', _handleAuthLogout);
+        _handleAuthLogout = null;
+      }
     });
 
     const handleLoginSuccess = (userData) => {
@@ -388,6 +409,9 @@ export default {
       if (userData.role) {
         localStorage.setItem('user_role', userData.role);
       }
+      nextTick(() => {
+        runSequence();
+      });
     };
 
     const handleNapCatStatusChanged = (status) => {
@@ -399,18 +423,28 @@ export default {
       activeTab.value = tab;
     };
 
-    const handleLogout = () => {
+    const handleLogout = async () => {
+      // 1. 先调用后端 logout 停止插件 + 注销 JWT（此时 token 还在，请求能通过认证）
+      try {
+        await logout();
+      } catch (e) {
+        console.warn('后端登出失败（忽略）:', e);
+      }
+
+      // 2. 清除状态和 localStorage
       isLoggedIn.value = false;
       userInfo.value = null;
       selectedGroup.value = null;
-      // 清除 localStorage
       localStorage.removeItem('auth_token');
       localStorage.removeItem('user_role');
       localStorage.removeItem('user_info');
       localStorage.removeItem('isLoggedIn');
       localStorage.removeItem('selectedGroup');
-      // 跳转到登录页
-      router.push('/login');
+      // 清除 auto_start_attempted 标记，下次登录重新启动
+      sessionStorage.removeItem('auto_start_attempted');
+
+      // 3. 最后跳转到登录页（此时 token 已清除，LoginPage 不会跳回）
+      router.replace('/login');
     };
 
     const handleSelectGroup = (group) => {
@@ -443,6 +477,23 @@ export default {
     // 打开用户个人信息页面
     const openUserProfile = () => {
       showUserProfile.value = true;
+    };
+
+    const handleNavigateAdmin = () => {
+      if (router.currentRoute.value.path === '/admin') {
+        window.dispatchEvent(new CustomEvent('app:refresh'));
+      } else {
+        router.push('/admin');
+      }
+    };
+
+    const handleNavigateDocs = () => {
+      const currentPath = router.currentRoute.value.path;
+      if (currentPath.startsWith('/docs')) {
+        window.dispatchEvent(new CustomEvent('app:refresh'));
+      } else {
+        router.push('/docs');
+      }
     };
 
     // 处理个人信息更新
@@ -483,6 +534,7 @@ export default {
       isDesktop,
       layoutMode,
       shouldCollapseSidebar,
+      currentTheme,
       activeMobileTab,
       showAIPanel,
       // 面板拖拽
@@ -500,6 +552,8 @@ export default {
       handleAnalysisResult,
       handleNewMessageArrived,
       openUserProfile,
+      handleNavigateAdmin,
+      handleNavigateDocs,
       handleProfileUpdated
     };
   }
@@ -542,7 +596,7 @@ html, body {
 
 .chat-main {
   flex: 1;
-  background-color: #f5f5f5;
+  background-color: var(--bg-primary, #f5f5f5);
   display: flex;
   height: 100vh;
   overflow: hidden;
@@ -551,7 +605,7 @@ html, body {
 /* 中间面板：群消息 - 占50% */
 .center-panel {
   flex: 0 0 50%;
-  border-right: 1px solid #e0e0e0;
+  border-right: 1px solid var(--border-color, #e0e0e0);
   overflow: hidden;
   transition: flex-basis 0.15s ease;
   position: relative;
@@ -584,7 +638,7 @@ html, body {
   width: 6px;
   flex-shrink: 0;
   cursor: col-resize;
-  background-color: #e0e0e0;
+  background-color: var(--border-color, #e0e0e0);
   transition: background-color 0.2s;
   position: relative;
   z-index: 10;
@@ -592,7 +646,7 @@ html, body {
 
 .panel-resizer:hover,
 .panel-resizer.resizing {
-  background-color: #3498db;
+  background-color: var(--accent-color, #3498db);
 }
 
 /* 右侧面板收起后显示的展开按钮 */
@@ -608,21 +662,21 @@ html, body {
   justify-content: center;
   gap: 4px;
   padding: 10px 0;
-  background-color: #fff;
-  border: 1px solid #e0e0e0;
+  background-color: var(--bg-secondary, #fff);
+  border: 1px solid var(--border-color, #e0e0e0);
   border-right: none;
   border-radius: 8px 0 0 8px;
-  box-shadow: -2px 0 8px rgba(0, 0, 0, 0.08);
+  box-shadow: -2px 0 8px var(--card-shadow, rgba(0, 0, 0, 0.08));
   cursor: pointer;
-  color: #666;
+  color: var(--text-secondary, #666);
   font-size: 12px;
   transition: background-color 0.2s, color 0.2s, width 0.2s;
   z-index: 100;
 }
 
 .panel-expand-btn:hover {
-  background-color: #e8f4fc;
-  color: #3498db;
+  background-color: var(--bg-tertiary, #e8f4fc);
+  color: var(--accent-color, #3498db);
   width: 32px;
 }
 
@@ -745,9 +799,9 @@ html, body {
 .login-prompt-content {
   text-align: center;
   padding: 40px;
-  background-color: white;
+  background-color: var(--bg-secondary, white);
   border-radius: 12px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 4px 12px var(--card-shadow, rgba(0, 0, 0, 0.1));
 }
 
 .login-icon {
@@ -756,19 +810,19 @@ html, body {
 }
 
 .login-prompt-content h2 {
-  color: #2c3e50;
+  color: var(--sidebar-bg, #2c3e50);
   margin-bottom: 10px;
   font-size: 24px;
 }
 
 .login-prompt-content p {
-  color: #7f8c8d;
+  color: var(--text-secondary, #7f8c8d);
   margin-bottom: 24px;
   font-size: 16px;
 }
 
 .login-btn {
-  background-color: #3498db;
+  background-color: var(--accent-color, #3498db);
   color: white;
   border: none;
   padding: 12px 32px;
@@ -779,7 +833,7 @@ html, body {
 }
 
 .login-btn:hover {
-  background-color: #2980b9;
+  background-color: var(--accent-hover, #2980b9);
 }
 
 /* ==================== 响应式布局样式 ==================== */
@@ -856,21 +910,21 @@ html, body {
   bottom: 20px;
   right: 20px;
   padding: 10px 20px;
-  background: #1890ff;
+  background: var(--accent-color, #1890ff);
   color: white;
   border: none;
   border-radius: 20px;
   cursor: pointer;
   font-size: 14px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 2px 8px var(--card-shadow, rgba(0, 0, 0, 0.15));
   z-index: 100;
   transition: all 0.2s;
 }
 
 .tablet-toggle:hover {
-  background: #40a9ff;
+  background: var(--accent-hover, #40a9ff);
   transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 4px 12px var(--card-shadow, rgba(0, 0, 0, 0.2));
 }
 
 /* 桌面端布局 (>= 1024px) */
@@ -915,11 +969,11 @@ html, body {
 }
 
 .persona-modal-content {
-  background-color: white;
+  background-color: var(--bg-secondary, white);
   border-radius: 8px;
   max-width: 90%;
   max-height: 90%;
   overflow: auto;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 4px 12px var(--card-shadow, rgba(0, 0, 0, 0.15));
 }
 </style>

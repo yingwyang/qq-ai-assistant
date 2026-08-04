@@ -10,11 +10,17 @@ import com.qqai.dto.auth.RegisterRequest;
 import com.qqai.dto.auth.UpdateProfileRequest;
 import com.qqai.dto.common.ApiResponse;
 import com.qqai.entity.User;
+import com.qqai.service.AstrBotService;
+import com.qqai.service.GptSovitsService;
+import com.qqai.service.NapCatService;
+import com.qqai.service.PluginEnsureService;
 import com.qqai.service.UserService;
 import com.qqai.security.JwtUtil;
 import com.qqai.security.TokenBlacklistService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -32,6 +38,8 @@ import java.util.Optional;
 @RequestMapping("/api/auth")
 @Validated
 public class AuthController {
+
+    private static final Logger log = LoggerFactory.getLogger(AuthController.class);
 
     @Autowired
     private UserService userService;
@@ -53,6 +61,18 @@ public class AuthController {
 
     @Autowired
     private RateLimiterService rateLimiterService;
+
+    @Autowired
+    private AstrBotService astrBotService;
+
+    @Autowired
+    private NapCatService napCatService;
+
+    @Autowired
+    private GptSovitsService gptSovitsService;
+
+    @Autowired
+    private PluginEnsureService pluginEnsureService;
 
     @PostMapping("/login")
     public ResponseEntity<ApiResponse<AuthResponse>> login(@RequestBody @Valid LoginRequest req) {
@@ -82,6 +102,9 @@ public class AuthController {
 
         Integer tv = user.getTokenVersion() != null ? user.getTokenVersion() : 0;
         String token = jwtUtil.generateToken(user.getId(), user.getUsername(), user.getRole(), tv);
+
+        // 异步检查并启动三个插件（延迟 3 秒，不阻塞登录响应）
+        pluginEnsureService.ensurePluginsStartedAsync();
 
         DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
@@ -272,20 +295,38 @@ public class AuthController {
     }
 
     @PostMapping("/logout")
-    public ResponseEntity<ApiResponse<Void>> logout(@RequestHeader("Authorization") String authHeader) {
-        if (authHeader == null || !authHeader.startsWith("Bearer ")) {
-            return ResponseEntity.ok(ApiResponse.success());
-        }
+    public ResponseEntity<ApiResponse<Void>> logout(@RequestHeader(value = "Authorization", required = false) String authHeader) {
+        // 1. 停止三个插件（best-effort，每个独立捕获异常）
+        stopComponentSafe("AstrBot", () -> {
+            try { astrBotService.stopAstrBot(); } catch (Exception e) { throw new RuntimeException(e); }
+        });
+        stopComponentSafe("NapCat", () -> {
+            try { napCatService.stopNapCat(); } catch (Exception e) { throw new RuntimeException(e); }
+        });
+        stopComponentSafe("GPT-SoVITS", () -> {
+            try { gptSovitsService.stopGptSovits(); } catch (Exception e) { throw new RuntimeException(e); }
+        });
 
-        String token = authHeader.substring(7);
-        try {
-            if (jwtUtil.validateToken(token)) {
-                String jti = jwtUtil.getJtiFromToken(token);
-                tokenBlacklistService.invalidateJti(jti);
+        // 2. 注销 JWT（best-effort，token 过期也不报错）
+        if (authHeader != null && authHeader.startsWith("Bearer ")) {
+            String token = authHeader.substring(7);
+            try {
+                if (jwtUtil.validateToken(token)) {
+                    String jti = jwtUtil.getJtiFromToken(token);
+                    tokenBlacklistService.invalidateJti(jti);
+                }
+            } catch (Exception ignored) {
             }
-        } catch (Exception ignored) {
         }
 
         return ResponseEntity.ok(ApiResponse.success());
+    }
+
+    private void stopComponentSafe(String name, Runnable action) {
+        try {
+            action.run();
+        } catch (Exception e) {
+            log.warn("登出时停止 {} 失败（忽略）: {}", name, e.getMessage());
+        }
     }
 }

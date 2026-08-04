@@ -12,6 +12,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
+import org.springframework.dao.DataAccessException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
@@ -56,7 +57,15 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiResponse<Void>> handleAccessDeniedException(AccessDeniedException e,
                                                                         HttpServletRequest request) {
         log.warn("Access denied: {}", e.getMessage());
-        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(ApiResponse.error(403, "访问被拒绝"));
+        String path = request.getRequestURI();
+        String errorCode = (path != null && path.startsWith("/api/credits/admin"))
+                ? com.qqai.exception.CreditErrorCode.ADMIN_REQUIRED : null;
+        String msg = errorCode != null ? "需要管理员权限" : "访问被拒绝";
+        if (errorCode != null) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(ApiResponse.error(403, errorCode, msg));
+        }
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(ApiResponse.error(403, msg));
     }
 
     @ExceptionHandler({ExpiredJwtException.class, JwtException.class})
@@ -98,10 +107,14 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(BizException.class)
     public ResponseEntity<ApiResponse<Void>> handleBizException(BizException e,
                                                                HttpServletRequest request) {
-        log.warn("Business exception [code={}]: {}", e.getCode(), e.getMessage());
+        log.warn("Business exception [code={}, errorCode={}]: {}", e.getCode(), e.getErrorCode(), e.getMessage());
         HttpStatus status = HttpStatus.resolve(e.getCode());
         if (status == null) {
             status = HttpStatus.BAD_REQUEST;
+        }
+        if (e.getErrorCode() != null) {
+            return ResponseEntity.status(status)
+                    .body(ApiResponse.error(e.getCode(), e.getErrorCode(), e.getMessage(), e.getDetails()));
         }
         return ResponseEntity.status(status).body(ApiResponse.error(e.getCode(), e.getMessage()));
     }
@@ -127,6 +140,18 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(ApiResponse.error(401, e.getMessage()));
     }
 
+    @ExceptionHandler(DataAccessException.class)
+    public ResponseEntity<ApiResponse<Void>> handleDataAccessException(DataAccessException e,
+                                                                      HttpServletRequest request) {
+        String traceId = MDC.get(TRACE_ID_KEY);
+        if (traceId == null) {
+            traceId = java.util.UUID.randomUUID().toString();
+        }
+        log.error("Data access exception [traceId={}]", traceId, e);
+        return ResponseEntity.status(HttpStatus.OK)
+                .body(ApiResponse.error(500, "INTERNAL_ERROR", "服务器内部错误", null));
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiResponse<Void>> handleGenericException(Exception e,
                                                                    HttpServletRequest request) {
@@ -135,6 +160,7 @@ public class GlobalExceptionHandler {
             traceId = java.util.UUID.randomUUID().toString();
         }
         log.error("Unhandled exception [traceId={}]", traceId, e);
-        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.error(500, "服务器内部错误"));
+        return ResponseEntity.status(HttpStatus.OK)
+                .body(ApiResponse.error(500, "INTERNAL_ERROR", "服务器内部错误", null));
     }
 }

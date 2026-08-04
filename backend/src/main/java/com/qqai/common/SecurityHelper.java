@@ -1,6 +1,8 @@
 package com.qqai.common;
 
 import com.qqai.entity.UserQqBinding;
+import com.qqai.exception.BizException;
+import com.qqai.exception.CreditErrorCode;
 import com.qqai.repository.GroupRepository;
 import com.qqai.repository.UserQqBindingRepository;
 import com.qqai.security.AuthPrincipal;
@@ -37,10 +39,18 @@ public class SecurityHelper {
         if (userId == null) {
             return Collections.emptyList();
         }
-        List<UserQqBinding> bindings = userQqBindingRepository.findByUserIdAndActiveTrue(userId);
-        return bindings.stream()
-                .map(UserQqBinding::getQqNumber)
-                .toList();
+        try {
+            List<UserQqBinding> bindings = userQqBindingRepository.findByUserIdAndActiveTrue(userId);
+            if (bindings == null || bindings.isEmpty()) {
+                return Collections.emptyList();
+            }
+            return bindings.stream()
+                    .filter(b -> b != null && b.getQqNumber() != null && !b.getQqNumber().isBlank())
+                    .map(UserQqBinding::getQqNumber)
+                    .toList();
+        } catch (Exception e) {
+            return Collections.emptyList();
+        }
     }
 
     public boolean hasGroupAccess(String groupId, List<String> userQqList) {
@@ -79,5 +89,33 @@ public class SecurityHelper {
             }
         }
         return "system";
+    }
+
+    public Long requireCurrentUserId() {
+        Long userId = getCurrentUserId();
+        if (userId == null) {
+            throw new BizException(401, "UNAUTHORIZED", "未登录或登录已过期");
+        }
+        return userId;
+    }
+
+    public void requireAdmin() {
+        String role = getCurrentUserRole();
+        if (!"ADMIN".equals(role)) {
+            throw new BizException(403, CreditErrorCode.ADMIN_REQUIRED, "需要管理员权限");
+        }
+    }
+
+    public Long requireAdminUserId() {
+        requireAdmin();
+        Long userId = getCurrentUserId();
+        if (userId == null) {
+            throw new BizException(401, "UNAUTHORIZED", "未登录");
+        }
+        return userId;
+    }
+
+    public boolean isAdmin() {
+        return "ADMIN".equals(getCurrentUserRole());
     }
 }

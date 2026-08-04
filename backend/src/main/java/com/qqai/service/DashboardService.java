@@ -9,6 +9,7 @@ import com.qqai.repository.UserRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import java.io.File;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -38,12 +39,14 @@ public class DashboardService {
     public Map<String, Object> getDashboardStats() {
         Map<String, Object> stats = new HashMap<>();
 
+        LocalDate today = LocalDate.now();
+        LocalDateTime todayStart = today.atStartOfDay();
+        LocalDateTime tomorrowStart = today.plusDays(1).atStartOfDay();
+
         long totalMessages = messageRepository.count();
         long todayMessages = 0;
         try {
-            LocalDateTime todayStart = LocalDate.now().atStartOfDay();
-            LocalDateTime todayEnd = todayStart.plusDays(1);
-            Long count = messageRepository.countBySendTimeBetween(todayStart, todayEnd);
+            Long count = messageRepository.countBySendTimeBetween(todayStart, tomorrowStart);
             todayMessages = count != null ? count : 0;
         } catch (Exception e) {
             // ignore
@@ -55,6 +58,29 @@ public class DashboardService {
         long totalConversations = conversationRepository.count();
         long activeConversations = conversationRepository.findByArchivedFalseOrderByTimeUpdatedDesc().size();
         long totalFiles = fileRecordRepository.count();
+        // 如果 file_records 为空（媒体下载流程未写入），回退统计 uploads 目录实际文件数
+        if (totalFiles == 0) {
+            totalFiles = countUploadFiles();
+        }
+
+        long todayActiveUsers = 0;
+        try {
+            Long count = messageRepository.countActiveUsersBetween(todayStart, tomorrowStart);
+            todayActiveUsers = count != null ? count : 0;
+        } catch (Exception e) {
+            // ignore
+        }
+
+        long todayAiConversations = 0;
+        try {
+            LocalDateTime weekStart = today.minusDays(6).atStartOfDay();
+            long weekAiMsgs = astrBotMessageRepository.countByTimeCreatedBetween(weekStart, tomorrowStart);
+            todayAiConversations = weekAiMsgs;
+        } catch (Exception e) {
+            // ignore
+        }
+
+        long totalAiMessages = astrBotMessageRepository.count();
 
         stats.put("totalMessages", totalMessages);
         stats.put("todayMessages", todayMessages);
@@ -64,6 +90,9 @@ public class DashboardService {
         stats.put("totalConversations", totalConversations);
         stats.put("activeConversations", activeConversations);
         stats.put("totalFiles", totalFiles);
+        stats.put("todayActiveUsers", todayActiveUsers);
+        stats.put("todayAiConversations", todayAiConversations);
+        stats.put("totalAiMessages", totalAiMessages);
 
         return stats;
     }
@@ -194,5 +223,98 @@ public class DashboardService {
         }
 
         return distribution;
+    }
+
+    /**
+     * 获取今日每小时消息分布（柱状图）
+     */
+    public List<Map<String, Object>> getHourlyDistribution() {
+        List<Map<String, Object>> result = new ArrayList<>();
+        LocalDate today = LocalDate.now();
+
+        int[] hourCounts = new int[24];
+        try {
+            List<Object[]> rows = messageRepository.countByHour(today);
+            for (Object[] row : rows) {
+                int hour = ((Number) row[0]).intValue();
+                long count = row[1] != null ? ((Number) row[1]).longValue() : 0L;
+                if (hour >= 0 && hour < 24) {
+                    hourCounts[hour] = (int) count;
+                }
+            }
+        } catch (Exception e) {
+            // ignore
+        }
+
+        int peakHour = 0;
+        for (int h = 0; h < 24; h++) {
+            Map<String, Object> item = new HashMap<>();
+            item.put("hour", String.format("%02d", h));
+            item.put("count", hourCounts[h]);
+            if (hourCounts[h] > hourCounts[peakHour]) {
+                peakHour = h;
+            }
+            result.add(item);
+        }
+        return result;
+    }
+
+    /**
+     * 获取近 7 天 AI 对话消息趋势
+     */
+    public List<Map<String, Object>> getAiTrend() {
+        List<Map<String, Object>> result = new ArrayList<>();
+        LocalDate today = LocalDate.now();
+        LocalDateTime start = today.minusDays(6).atStartOfDay();
+        LocalDateTime end = today.plusDays(1).atStartOfDay();
+
+        Map<String, Long> dayMap = new HashMap<>();
+        try {
+            List<Object[]> rows = astrBotMessageRepository.countDailyBetween(start, end);
+            for (Object[] row : rows) {
+                java.sql.Date day = (java.sql.Date) row[0];
+                long count = row[1] != null ? ((Number) row[1]).longValue() : 0L;
+                dayMap.put(day.toString(), count);
+            }
+        } catch (Exception e) {
+            // ignore
+        }
+
+        DateTimeFormatter fmt = DateTimeFormatter.ofPattern("MM-dd");
+        for (int i = 6; i >= 0; i--) {
+            LocalDate date = today.minusDays(i);
+            String key = date.toString();
+            Map<String, Object> item = new HashMap<>();
+            item.put("date", date.format(fmt));
+            item.put("count", dayMap.getOrDefault(key, 0L));
+            result.add(item);
+        }
+        return result;
+    }
+
+    /**
+     * 统计 uploads 目录下的实际文件数（回退方案，当 file_records 表为空时使用）。
+     */
+    private long countUploadFiles() {
+        String projectRoot = System.getProperty("user.dir");
+        File uploadsDir = new File(projectRoot, "uploads");
+        if (!uploadsDir.exists() || !uploadsDir.isDirectory()) {
+            return 0;
+        }
+        return countFilesRecursive(uploadsDir);
+    }
+
+    private long countFilesRecursive(File dir) {
+        long count = 0;
+        File[] files = dir.listFiles();
+        if (files == null) return 0;
+        for (File file : files) {
+            if (file.isDirectory()) {
+                count += countFilesRecursive(file);
+            } else {
+                count++;
+            }
+        }
+        return count;
     }
 }

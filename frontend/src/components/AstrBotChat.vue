@@ -25,14 +25,24 @@
         </svg>
       </div>
       <div class="header-actions">
-        <button class="action-btn" @click="showConversationList = !showConversationList" title="对话历史">
+        <!-- TTS 角色选择器 -->
+        <div v-if="ttsCharacters.length > 0" class="tts-character-selector">
+          <select
+            v-model="selectedTtsCharacter"
+            @change="onTtsCharacterChange"
+            class="tts-character-select"
+            title="语音合成角色"
+          >
+            <option v-for="c in ttsCharacters" :key="c.name" :value="c.name">
+              {{ c.label || c.name }}
+            </option>
+          </select>
+        </div>
+        <button class="action-btn" @click="toggleConversationList" title="对话历史">
           <Icon name="list" :size="16" />
         </button>
         <button class="action-btn" @click="createNewConversation" title="新对话">
           <Icon name="add" :size="16" />
-        </button>
-        <button class="action-btn" @click="showSettings = true" title="设置">
-          <Icon name="settings" :size="16" />
         </button>
       </div>
     </div>
@@ -41,30 +51,80 @@
     <div v-if="showConversationList" class="conversation-panel">
       <div class="panel-header">
         <h4>对话历史 ({{ conversations.length }})</h4>
-        <button class="close-btn" @click="showConversationList = false"><Icon name="close" :size="16" /></button>
+        <div class="panel-header-actions">
+          <button
+            class="toggle-group-btn"
+            :class="{ active: showGrouping }"
+            @click="toggleGrouping"
+            :title="showGrouping ? '取消分组' : '按群分组'"
+          >
+            <Icon name="group" :size="14" />
+          </button>
+          <button class="close-btn" @click="showConversationList = false"><Icon name="close" :size="16" /></button>
+        </div>
       </div>
       <div class="conversation-list">
-        <div
-          v-for="conv in conversations"
-          :key="conv.conversationId"
-          class="conversation-item"
-          :class="{ 'active': currentConversationId === conv.conversationId }"
-        >
-          <div class="conv-content" @click="loadConversation(conv.conversationId)">
-            <div class="conv-title">{{ conv.title || '新对话' }}</div>
-            <div class="conv-meta">
-              <span>{{ conv.messageCount || 0 }} 条消息</span>
-              <span>{{ formatDate(conv.timeUpdated) }}</span>
+        <!-- 分组模式 -->
+        <template v-if="showGrouping">
+          <div
+            v-for="group in groupedConversations"
+            :key="group.key"
+            class="conv-group"
+          >
+            <div class="conv-group-header" @click="toggleGroup(group.key)">
+              <Icon :name="collapsedGroups[group.key] ? 'arrow-right' : 'expand'" :size="14" />
+              <span class="conv-group-title">{{ group.label }}</span>
+              <span class="conv-group-count">{{ group.conversations.length }}</span>
+            </div>
+            <div v-show="!collapsedGroups[group.key]" class="conv-group-items">
+              <div
+                v-for="conv in group.conversations"
+                :key="conv.conversationId"
+                class="conversation-item"
+                :class="{ 'active': currentConversationId === conv.conversationId }"
+              >
+                <div class="conv-content" @click="loadConversation(conv.conversationId)">
+                  <div class="conv-title">{{ conv.title || '新对话' }}</div>
+                  <div class="conv-meta">
+                    <span>{{ conv.messageCount || 0 }} 条消息</span>
+                    <span>{{ formatDate(conv.timeUpdated) }}</span>
+                  </div>
+                </div>
+                <button
+                  class="delete-btn"
+                  @click="(e) => { e.preventDefault(); e.stopPropagation(); showDeleteConfirm(conv.conversationId); }"
+                  title="删除"
+                >
+                  <Icon name="delete" :size="14" />
+                </button>
+              </div>
             </div>
           </div>
-          <button
-            class="delete-btn"
-            @click="(e) => { e.preventDefault(); e.stopPropagation(); showDeleteConfirm(conv.conversationId); }"
-            title="删除"
+        </template>
+        <!-- 扁平模式 -->
+        <template v-else>
+          <div
+            v-for="conv in conversations"
+            :key="conv.conversationId"
+            class="conversation-item"
+            :class="{ 'active': currentConversationId === conv.conversationId }"
           >
-            <Icon name="delete" :size="14" />
-          </button>
-        </div>
+            <div class="conv-content" @click="loadConversation(conv.conversationId)">
+              <div class="conv-title">{{ conv.title || '新对话' }}</div>
+              <div class="conv-meta">
+                <span>{{ conv.messageCount || 0 }} 条消息</span>
+                <span>{{ formatDate(conv.timeUpdated) }}</span>
+              </div>
+            </div>
+            <button
+              class="delete-btn"
+              @click="(e) => { e.preventDefault(); e.stopPropagation(); showDeleteConfirm(conv.conversationId); }"
+              title="删除"
+            >
+              <Icon name="delete" :size="14" />
+            </button>
+          </div>
+        </template>
         <div v-if="conversations.length === 0" class="empty-conversations">
           暂无对话历史
         </div>
@@ -304,6 +364,7 @@
               :class="{ 'message-system-text': message.isSystem }"
               :content="message.text"
               :section-mode="!message.isSelf && !message.isSystem"
+              :scroll-container="messagesContainer"
             />
             <!-- AI 回复操作按钮 -->
             <div v-if="!message.isSelf && !message.isSystem" class="message-actions">
@@ -353,7 +414,73 @@
       </div>
     </div>
 
+    <!-- 积分不足提示条 -->
+    <div v-if="showInsufficientCredits" class="credits-banner insufficient-banner">
+      <div class="credits-banner-icon">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"></circle>
+          <line x1="12" y1="8" x2="12" y2="12"></line>
+          <line x1="12" y1="16" x2="12.01" y2="16"></line>
+        </svg>
+      </div>
+      <div class="credits-banner-body">
+        <div class="credits-banner-title">积分不足（需 {{ insufficientNeed }} 积分，当前 {{ insufficientBalance }}），请升级权益或完成签到</div>
+        <div class="credits-banner-actions">
+          <button class="banner-btn banner-btn-primary" @click="goToSignIn">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M9 11l3 3L22 4"></path>
+              <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path>
+            </svg>
+            去签到
+          </button>
+          <button class="banner-btn banner-btn-upgrade" @click="goToUpgrade">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+            </svg>
+            升级权益
+          </button>
+          <button class="banner-btn banner-btn-close" @click="showInsufficientCredits = false" title="关闭">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 扣费成功轻量提示 -->
+    <Transition name="credit-hint">
+      <div v-if="showCreditHint" class="credit-hint-toast">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
+        </svg>
+        <span>本次消耗 {{ lastCost }} 积分，剩余 {{ lastBalance }}</span>
+      </div>
+    </Transition>
+
     <div class="chat-input-area">
+      <div class="model-selector-bar">
+        <div class="model-selector">
+          <Icon name="bot" :size="14" />
+          <select v-model="currentModel" @change="onCurrentModelChange" :disabled="isLoading || modelLoading">
+            <option value="">默认模型</option>
+            <option v-for="m in availableModels" :key="m.id" :value="m.id">{{ m.label }}</option>
+          </select>
+          <span v-if="modelLoading" class="model-loading">加载中...</span>
+          <span v-else-if="modelError" class="model-error" :title="modelError">⚠️</span>
+          <button v-if="!modelLoading" class="model-refresh-btn" @click="refreshAvailableModels" title="刷新模型列表">
+            <Icon name="refresh" :size="12" />
+          </button>
+        </div>
+        <div class="model-tip" v-if="currentModel">
+          当前会话使用：<b>{{ currentModelLabel }}</b>
+        </div>
+        <div class="model-tip model-empty-tip" v-else-if="!modelLoading && availableModels.length === 0">
+          <span v-if="modelError">模型加载失败，请检查 AstrBot 或点击 🔄 重试</span>
+          <span v-else>暂无可用模型，请在 AstrBot 中配置后刷新</span>
+        </div>
+      </div>
       <div class="input-wrapper">
         <input
           ref="inputRef"
@@ -375,7 +502,7 @@
 </template>
 
 <script>
-import { ref, computed, onMounted, nextTick, watch } from 'vue';
+import { ref, computed, onMounted, onUnmounted, nextTick, watch, getCurrentInstance } from 'vue';
 import Icon from './Icon.vue';
 import RichTextRenderer from './RichTextRenderer.vue';
 import { astrBotApi, userApi, systemApi } from '../services/api';
@@ -387,6 +514,7 @@ export default {
   components: { Icon, RichTextRenderer, PersonaManager },
   props: {
     groupId: { type: String, default: null },
+    groupName: { type: String, default: null },
     userId: { type: String, default: null },
     userNickname: { type: String, default: null }
   },
@@ -399,6 +527,47 @@ export default {
     const isOnline = ref(true);
     const botAvatarInput = ref(null);
 
+    // 积分提示相关状态
+    const showInsufficientCredits = ref(false);
+    const insufficientNeed = ref(0);
+    const insufficientBalance = ref(0);
+    const showCreditHint = ref(false);
+    const lastCost = ref(0);
+    const lastBalance = ref(0);
+    let _creditHintTimer = null;
+
+    // 路由跳转
+    const instance = getCurrentInstance();
+    const router = instance?.proxy?.$router;
+
+    const goToSignIn = () => {
+      showInsufficientCredits.value = false;
+      if (router) {
+        router.push({ path: '/user-center', query: { tab: 'credits', focus: 'signIn' } });
+      } else {
+        window.location.href = '/user-center?tab=credits&focus=signIn';
+      }
+    };
+
+    const goToUpgrade = () => {
+      showInsufficientCredits.value = false;
+      if (router) {
+        router.push({ path: '/user-center', query: { tab: 'subscription', openUpgrade: '1' } });
+      } else {
+        window.location.href = '/user-center?tab=subscription&openUpgrade=1';
+      }
+    };
+
+    const showCreditHintBriefly = (cost, balance) => {
+      lastCost.value = cost;
+      lastBalance.value = balance;
+      showCreditHint.value = true;
+      if (_creditHintTimer) clearTimeout(_creditHintTimer);
+      _creditHintTimer = setTimeout(() => {
+        showCreditHint.value = false;
+      }, 3000);
+    };
+
     // 使用独立的过滤模块 - 导入自 ../utils/messageFilter
 
     // 对话管理
@@ -406,6 +575,70 @@ export default {
     const currentConversationId = ref(null);
     const currentConversationTitle = ref('');
     const showConversationList = ref(false);
+
+    // 分组相关状态
+    const showGrouping = ref(true);
+    const collapsedGroups = ref({});
+
+    // 分组计算属性
+    const groupedConversations = computed(() => {
+      const groups = {};
+      for (const conv of conversations.value) {
+        const key = conv.groupId || '__nogroup__';
+        if (!groups[key]) {
+          // 从 title 中提取群名（格式："类型 - 群名"）
+          let label = '';
+          if (key === '__nogroup__') {
+            label = '💬 通用对话';
+          } else {
+            // 如果标题包含 "- "，提取群名部分
+            if (conv.title && conv.title.includes(' - ')) {
+              label = '📁 ' + conv.title.split(' - ').slice(1).join(' - ');
+            } else {
+              label = '👥 群 ' + key;
+            }
+          }
+          groups[key] = {
+            key,
+            label,
+            conversations: []
+          };
+        }
+        groups[key].conversations.push(conv);
+      }
+      // 按更新时间排序
+      for (const key in groups) {
+        groups[key].conversations.sort((a, b) => {
+          const ta = a.timeUpdated ? new Date(a.timeUpdated).getTime() : 0;
+          const tb = b.timeUpdated ? new Date(b.timeUpdated).getTime() : 0;
+          return tb - ta;
+        });
+      }
+      // 分组排序：通用对话放最后
+      const result = Object.values(groups);
+      result.sort((a, b) => {
+        if (a.key === '__nogroup__') return 1;
+        if (b.key === '__nogroup__') return -1;
+        return b.conversations.length - a.conversations.length;
+      });
+      return result;
+    });
+
+    const toggleGrouping = () => {
+      showGrouping.value = !showGrouping.value;
+    };
+
+    const toggleGroup = (key) => {
+      collapsedGroups.value[key] = !collapsedGroups.value[key];
+    };
+
+    // 切换对话列表面板，每次打开都重新加载列表
+    const toggleConversationList = () => {
+      showConversationList.value = !showConversationList.value;
+      if (showConversationList.value) {
+        loadConversations();
+      }
+    };
 
     // 删除确认弹窗
     const showConfirmDialog = ref(false);
@@ -427,8 +660,31 @@ export default {
     const showCustomModel = ref(false);
     const modelSearch = ref('');
 
+    // 聊天界面模型选择器（本次会话覆盖用）
+    const currentModel = ref('');
+    const availableModels = ref([]); // 数组元素: { id: '完整ID', label: '短名显示' }
+    const modelLoading = ref(false);
+    const modelError = ref(''); // 加载错误信息
+
+    // 根据当前选中的 model id 找到显示用的短名
+    const currentModelLabel = computed(() => {
+      if (!currentModel.value) return '';
+      const found = availableModels.value.find(m => m.id === currentModel.value);
+      if (found) return found.label;
+      // 找不到时截取最后一段
+      if (currentModel.value.includes('/')) {
+        const parts = currentModel.value.split('/');
+        return parts[parts.length - 1];
+      }
+      return currentModel.value;
+    });
+
     // 设置弹窗
     const showSettings = ref(false);
+
+    // TTS 角色选择
+    const ttsCharacters = ref([]);
+    const selectedTtsCharacter = ref(localStorage.getItem('tts_character') || '');
     
     // 提供商配置
     const providers = ref([{
@@ -484,7 +740,134 @@ export default {
       }
     };
 
-    // 获取模型列表（模拟从API获取）
+    // 合并 AstrBot API 和用户设置面板中已配置的模型
+    const mergeModels = (apiModels, configuredModels) => {
+      const set = new Set();
+      for (const m of apiModels) {
+        if (m) set.add(m);
+      }
+      for (const m of configuredModels) {
+        if (m) set.add(m);
+      }
+      return Array.from(set);
+    };
+
+    // 从后端 /api/astrbot/models 获取模型列表（后端优先读 cmd_config.json）
+    const loadAvailableModels = async () => {
+      modelLoading.value = true;
+      modelError.value = '';
+      try {
+        // 后端返回: { status, models, count, source?, message? }
+        //   models 元素: { id(完整provider_id), name(友好显示名), enabled, provider, modalities?, maxContextTokens? }
+        let astrbotModels = [];
+        try {
+          const res = await astrBotApi.getModels();
+          if (res && res.status === 'error') {
+            const msg = res.message || 'AstrBot 返回错误';
+            throw new Error(msg);
+          }
+          const models = res && Array.isArray(res.models) ? res.models : [];
+
+          // 只取 enabled=true 的模型，和 AstrBot WebUI 表现一致
+          const enabledModels = models.filter(m => m.enabled !== false);
+
+          // 转成前端下拉框需要的 { id, label, modalities, maxContextTokens } 格式
+          astrbotModels = enabledModels.map(m => {
+            if (!m && !m.id) return null;
+            const label = m.name || m.id;
+            return {
+              id: m.id,
+              label,
+              fullName: m.fullName || m.id,
+              modalities: m.modalities || [],
+              maxContextTokens: m.maxContextTokens || 0,
+              provider: m.provider || ''
+            };
+          }).filter(Boolean);
+
+          if (astrbotModels.length === 0) {
+            modelError.value = 'AstrBot 中未启用任何模型，请先在 AstrBot WebUI 开启模型';
+          } else {
+            // ========== 默认选中策略 ==========
+            // 优先级：1) 已恢复的 currentModel（必须在可用列表中才有效）
+            //         2) 用户已保存的 llmModel（必须在可用列表中才有效）
+            //         3) 第一个已启用的模型
+
+            const currentInList = currentModel.value && astrbotModels.find(m => m.id === currentModel.value);
+
+            if (currentInList) {
+              // 情况1：已恢复的模型在可用列表中 → 保持不变
+              // 无需操作
+            } else {
+              // 情况2：没有恢复的选择，或恢复的模型已被禁用/删除
+              // → 优先用 llmModel（如果它还在列表中），否则取第一个启用模型
+              const preferred = (llmModel.value && astrbotModels.find(m => m.id === llmModel.value))
+                ? llmModel.value
+                : (astrbotModels[0] ? astrbotModels[0].id : '');
+              if (preferred && currentModel.value !== preferred) {
+                console.info('模型回退:', currentModel.value || '(空', '→', preferred);
+                currentModel.value = preferred;
+                // 同步更新 localStorage，避免下次又恢复到已禁用的模型
+                localStorage.setItem('astrbot_current_model', preferred);
+                if (currentConversationId.value) {
+                  localStorage.setItem(`astrbot_current_model_${currentConversationId.value}`, preferred);
+                }
+              }
+            }
+          }
+        } catch (e) {
+          console.warn('AstrBot 模型接口请求失败:', e.message);
+          const raw = (e.message || '未知错误').toString();
+          let tip = raw;
+          if (/401|403|未授权|Unauthorized/i.test(raw)) {
+            tip = 'AstrBot API Key 无效，请在「设置」→「AstrBot API Key」填写正确的 Key';
+          } else if (/Connection refused|ECONNREFUSED|无法连接|Not Found|404/i.test(raw)) {
+            tip = 'AstrBot 未启动或端口 6185 不可达，请先启动 AstrBot';
+          } else if (/timeout|超时/i.test(raw)) {
+            tip = 'AstrBot 请求超时，请检查 AstrBot 是否正常运行';
+          } else {
+            tip = raw.replace(/^获取模型列表失败:\s*/, '');
+          }
+          modelError.value = tip;
+        }
+
+        availableModels.value = astrbotModels;
+      } finally {
+        modelLoading.value = false;
+      }
+    };
+
+    // 刷新模型：仅重新调 AstrBot API
+    const refreshAvailableModels = async () => {
+      await loadAvailableModels();
+    };
+
+    // 切换当前模型：同步保存到后端作为默认模型（持久化）
+    const onCurrentModelChange = async () => {
+      const m = currentModel.value;
+      try {
+        // 保存当前选择到 localStorage（带当前会话 ID 作为作用域，避免跨会话污染）
+        const scopeKey = `astrbot_current_model_${currentConversationId.value || 'global'}`;
+        if (m) {
+          localStorage.setItem(scopeKey, m);
+          localStorage.setItem('astrbot_current_model', m);
+        } else {
+          localStorage.removeItem(scopeKey);
+          localStorage.removeItem('astrbot_current_model');
+        }
+
+        // 仅当非空且不是"默认模型"时，同步到后端作为用户默认模型
+        if (m) {
+          await astrBotApi.setModel(m);
+          llmModel.value = m;
+          localStorage.setItem('llm_model', m);
+        }
+      } catch (e) {
+        console.warn('保存模型选择失败:', e);
+      }
+    };
+
+    // 加载模型列表：仅显示在设置面板里，不再持久化到 llmModels
     const fetchModels = async () => {
       const provider = currentProvider.value;
       if (!provider || !provider.apiKey || !provider.baseUrl) {
@@ -499,12 +882,29 @@ export default {
         if (response.ok) {
           const data = await response.json();
           const newModels = (data.data || []).map(m => m.id || m.name);
-          newModels.forEach(model => {
-            if (!llmModels.value.includes(model)) {
-              llmModels.value.push(model);
+          // 仅写入 llmModels 变量用于设置面板展示，不再保存到后端
+          llmModels.value = newModels;
+          // 同步到聊天界面的下拉框（{id, label} 格式）
+          const toModelObj = (fullId) => {
+            if (!fullId) return null;
+            let label = fullId;
+            if (fullId.includes('/')) {
+              const parts = fullId.split('/');
+              label = parts[parts.length - 1];
             }
-          });
-          showToast(`成功获取 ${newModels.length} 个模型`, 'success');
+            return { id: fullId, label };
+          };
+          const fromProvider = newModels.map(toModelObj).filter(Boolean);
+          const seen = new Set(availableModels.value.map(m => m.id));
+          for (const m of fromProvider) {
+            if (!seen.has(m.id)) {
+              availableModels.value.push(m);
+              seen.add(m.id);
+            }
+          }
+          // 清空本地缓存中 llmModels 字段
+          localStorage.removeItem('llm_models');
+          showToast(`成功获取 ${newModels.length} 个模型（未持久化）`, 'success');
         } else {
           showToast('获取模型列表失败', 'error');
         }
@@ -545,8 +945,12 @@ export default {
         try { providers.value = JSON.parse(savedProviders); } catch (e) {}
       }
       if (savedLlmModel) llmModel.value = savedLlmModel;
-      if (savedLlmModels) {
-        try { llmModels.value = JSON.parse(savedLlmModels); } catch (e) { llmModels.value = []; }
+      // 废弃 llmModels：不再从 localStorage 加载
+      llmModels.value = [];
+      localStorage.removeItem('llm_models');
+      // 同步到聊天界面的默认模型选择
+      if (llmModel.value && !currentModel.value) {
+        currentModel.value = llmModel.value;
       }
 
       // 确保至少有一个提供商
@@ -558,15 +962,19 @@ export default {
       try {
         const response = await userApi.getSettings(props.userId);
         if (response) {
-          botName.value = response.botName || botName.value;
-          astrbotApiKey.value = response.astrbotApiKey || astrbotApiKey.value;
-          llmModel.value = response.llmModel || llmModel.value;
-          if (response.llmModels && Array.isArray(response.llmModels) && response.llmModels.length > 0) {
-            llmModels.value = response.llmModels;
+          // 后端返回格式: { status, data: { ... } }
+          // parseResponse 对非标格式返回整个对象，所以需要取 .data
+          const data = response.data || response;
+          botName.value = data.botName || botName.value;
+          astrbotApiKey.value = data.astrbotApiKey || astrbotApiKey.value;
+          llmModel.value = data.llmModel || llmModel.value;
+          // 不再从后端读取 llmModels（唯一数据源改为 AstrBot API），同时清空数据库旧值
+          if (data.llmModels && Array.isArray(data.llmModels) && data.llmModels.length > 0) {
+            llmModels.value = [];
           }
           // 从后端恢复 providers
-          if (response.providers && Array.isArray(response.providers) && response.providers.length > 0) {
-            providers.value = response.providers.map(p => ({
+          if (data.providers && Array.isArray(data.providers) && data.providers.length > 0) {
+            providers.value = data.providers.map(p => ({
               name: p.name || 'default',
               apiKey: p.apiKey || '',
               baseUrl: p.baseUrl || '',
@@ -579,7 +987,8 @@ export default {
           localStorage.setItem('astrbot_api_key', astrbotApiKey.value);
           localStorage.setItem('providers', JSON.stringify(providers.value));
           localStorage.setItem('llm_model', llmModel.value);
-          localStorage.setItem('llm_models', JSON.stringify(llmModels.value));
+          // 废弃 llmModels：清空本地缓存
+          localStorage.removeItem('llm_models');
         }
       } catch (error) {
         console.error('加载用户设置失败:', error);
@@ -589,12 +998,16 @@ export default {
     // 保存设置 - 保存到后端
     const saveSettings = async () => {
       const provider = currentProvider.value;
-      // 保存到 localStorage
+      // 如果当前模型已选中，同步到 llmModel
+      if (currentModel.value) {
+        llmModel.value = currentModel.value;
+      }
+      // 保存到 localStorage（llmModels 不保存）
       localStorage.setItem('astrbot_bot_name', botName.value);
       localStorage.setItem('astrbot_api_key', astrbotApiKey.value);
       localStorage.setItem('providers', JSON.stringify(providers.value));
       localStorage.setItem('llm_model', llmModel.value);
-      localStorage.setItem('llm_models', JSON.stringify(llmModels.value));
+      localStorage.removeItem('llm_models');
 
       // 保存到后端（无论是否有 userId）
       try {
@@ -605,7 +1018,7 @@ export default {
           llmApiKey: provider?.apiKey || '',
           llmBaseUrl: provider?.baseUrl || '',
           llmModel: llmModel.value,
-          llmModels: llmModels.value,
+          llmModels: [], // 废弃 llmModels 存储，清空数据库
           providers: providers.value.map(p => ({
             name: p.name,
             apiKey: p.apiKey,
@@ -698,60 +1111,109 @@ export default {
     // 加载对话列表
     const loadConversations = async () => {
       try {
-        const data = await astrBotApi.getConversations({});
-        if (Array.isArray(data)) {
-          conversations.value = data;
-        }
+        const response = await astrBotApi.getConversations({});
+        // 兼容多种响应结构：直接数组、{ data: [...] }、{ status: 'ok', data: [...] }
+        const list = response?.data !== undefined ? response.data : (response || []);
+        conversations.value = Array.isArray(list) ? list : [];
       } catch (error) {
         console.error('加载对话列表失败:', error);
+        conversations.value = [];
       }
     };
 
     // 加载特定对话的消息
     const loadConversation = async (conversationId) => {
-      if (!conversationId) return;
+      if (!conversationId || conversationId === 'null' || conversationId === 'undefined') {
+        currentConversationId.value = null;
+        currentConversationTitle.value = '';
+        messages.value = [];
+        localStorage.removeItem('astrbot_current_conversation');
+        showToast('请选择或新建一个对话', 'warning');
+        return;
+      }
       try {
         isLoading.value = true;
-        currentConversationId.value = conversationId;
-        showConversationList.value = false;
 
         const convData = await astrBotApi.getConversation(conversationId);
-        if (convData) {
-          currentConversationTitle.value = convData.title || '新对话';
+        const conv = convData && convData.status === 'ok' ? convData.data : convData;
+        if (conv) {
+          currentConversationTitle.value = conv.title || '新对话';
         }
 
         const msgData = await astrBotApi.getConversationMessages(conversationId);
-        if (msgData) {
-          messages.value = (Array.isArray(msgData) ? msgData : []).map(msg => ({
-            text: msg.content,
-            sender: msg.role === 'USER' ? (props.userNickname || '我') : 'AstrBot',
-            isSelf: msg.role === 'USER',
-            time: new Date(msg.timeCreated)
-          }));
+        const msgList = msgData && msgData.status === 'ok'
+          ? msgData.data
+          : (Array.isArray(msgData) ? msgData : []);
+        messages.value = msgList.map(msg => ({
+          text: msg.content,
+          sender: msg.role === 'USER' ? (props.userNickname || '我') : 'AstrBot',
+          isSelf: msg.role === 'USER',
+          time: new Date(msg.timeCreated)
+        }));
+
+        currentConversationId.value = conversationId;
+        localStorage.setItem('astrbot_current_conversation', conversationId);
+        showConversationList.value = false;
+
+        // ========== 会话级模型恢复 ==========
+        // 切换会话时，恢复该会话上次使用的模型
+        const sessionSavedModel = localStorage.getItem(`astrbot_current_model_${conversationId}`);
+        const globalSavedModel = localStorage.getItem('astrbot_current_model');
+        const candidateModel = sessionSavedModel || globalSavedModel || localStorage.getItem('llm_model');
+
+        if (candidateModel) {
+          // 检查候选模型是否在可用列表中（避免恢复到已禁用的模型）
+          const inList = availableModels.value.length > 0
+            ? availableModels.value.find(m => m.id === candidateModel)
+            : true; // 列表还没加载完，先恢复，等 loadAvailableModels 再校验
+          if (inList || availableModels.value.length === 0) {
+            currentModel.value = candidateModel;
+          } else {
+            // 模型已被禁用，回退到第一个可用模型
+            const fallback = availableModels.value[0];
+            if (fallback) {
+              currentModel.value = fallback.id;
+              localStorage.setItem(`astrbot_current_model_${conversationId}`, fallback.id);
+              localStorage.setItem('astrbot_current_model', fallback.id);
+              console.info('会话模型已禁用，回退:', candidateModel, '→', fallback.id);
+            }
+          }
         }
 
-        localStorage.setItem('astrbot_current_conversation', conversationId);
         nextTick(() => scrollToBottom());
       } catch (error) {
-        console.error('加载对话失败:', error);
+        const msg = error?.message || '';
+        if (msg.includes('对话不存在') || msg.includes('不存在')) {
+          // 对话已失效，清空当前对话并提示用户新建
+          console.warn('当前对话已失效:', conversationId);
+          currentConversationId.value = null;
+          currentConversationTitle.value = '';
+          messages.value = [];
+          localStorage.removeItem('astrbot_current_conversation');
+          showToast('当前对话已失效，请新建对话', 'warning');
+        } else {
+          console.error('加载对话失败:', error);
+        }
       } finally {
         isLoading.value = false;
       }
     };
 
-    // 创建新对话
-    const createNewConversation = async () => {
+    // 创建新对话（可选传入自定义标题，用于 AI 分析场景带群名）
+    const createNewConversation = async (titleOverride = null) => {
       try {
         const request = {};
         if (props.groupId) request.groupId = props.groupId;
         if (props.userId) request.userId = props.userId;
         if (props.userNickname) request.userNickname = props.userNickname;
+        if (titleOverride) request.title = titleOverride;
 
-        const newConv = await astrBotApi.createConversation(request);
+        const response = await astrBotApi.createConversation(request);
+        const newConv = response && response.status === 'ok' ? response.data : response;
         if (newConv) {
           conversations.value.unshift(newConv);
           currentConversationId.value = newConv.conversationId;
-          currentConversationTitle.value = newConv.title || '新对话';
+          currentConversationTitle.value = newConv.title || (titleOverride || '新对话');
           messages.value = [];
           localStorage.setItem('astrbot_current_conversation', newConv.conversationId);
         }
@@ -788,7 +1250,7 @@ export default {
         const response = await astrBotApi.deleteConversation(conversationId);
         console.log('API 响应:', response);
         
-        if (response && response.deleted) {
+        if (!response || response.status === 'ok' || response.deleted) {
           // 从列表中移除
           const index = conversations.value.findIndex(c => c.conversationId === conversationId);
           console.log('找到对话在列表中的索引:', index);
@@ -838,6 +1300,8 @@ export default {
         if (props.groupId) request.groupId = props.groupId;
         if (props.userId) request.userId = props.userId;
         if (props.userNickname) request.userNickname = props.userNickname;
+        // 模型选择：本次会话显式选择 -> 使用该模型；否则传 'default' 由后端按用户默认模型处理
+        request.model = currentModel.value || 'default';
 
         const response = await astrBotApi.sendMessage(request);
         if (response) {
@@ -853,15 +1317,37 @@ export default {
             isSelf: false,
             time: new Date()
           });
+          // 扣费成功：轻量提示
+          if (typeof response.cost === 'number' && typeof response.balance === 'number') {
+            showCreditHintBriefly(response.cost, response.balance);
+          }
         }
       } catch (error) {
         console.error('发送消息失败:', error);
-        messages.value.push({
-          text: '抱歉，网络错误，请稍后重试。',
-          sender: 'AstrBot',
-          isSelf: false,
-          time: new Date()
-        });
+        // 积分不足：自定义提示条
+        if (error && error.errorCode === 'INSUFFICIENT_CREDITS') {
+          const need = (error.details && error.details.need) || 0;
+          const balance = (error.details && error.details.balance) || 0;
+          insufficientNeed.value = need;
+          insufficientBalance.value = balance;
+          showInsufficientCredits.value = true;
+          // 替换最后一条用户消息为系统说明（保留用户消息，增加系统提示）
+          messages.value.push({
+            text: `⚠️ 消息发送失败：${error.message || '积分不足'}`,
+            sender: '系统',
+            isSelf: false,
+            isSystem: true,
+            time: new Date()
+          });
+        } else {
+          showToast(error?.message || '发送失败，请稍后重试', 'error');
+          messages.value.push({
+            text: '抱歉，网络错误，请稍后重试。',
+            sender: 'AstrBot',
+            isSelf: false,
+            time: new Date()
+          });
+        }
       } finally {
         isLoading.value = false;
         nextTick(() => scrollToBottom());
@@ -972,7 +1458,7 @@ export default {
           showToast('没有可合成的文本内容', 'warning');
           return;
         }
-        const result = await systemApi.generateVoice(plainText);
+        const result = await systemApi.generateVoice(plainText, selectedTtsCharacter.value || null);
         if (result && result.audioUrl) {
           message.audioUrl = result.audioUrl;
           message.showAudioPlayer = true;
@@ -1037,6 +1523,8 @@ export default {
     };
 
     // 处理分析请求
+    // — 新链路（有 messageIds）：调用 /api/astrbot/analyze-selected 接口（后端按 messageIds 查 DB + 渲染 prompts.yml 模板）
+    // — 旧链路（无 messageIds 但有 prompt）：fallback 到 sendMessage，保持向后兼容
     const handleAnalysisRequest = async (data) => {
       // 简单的 HTML 转义，防止消息内容污染渲染
       const escapeHtml = (text) => {
@@ -1054,18 +1542,33 @@ export default {
         return text.replace(/@(\S+)/g, '<span class="at-mention">@$1</span>');
       };
 
-      // 创建新对话用于分析
-      await createNewConversation();
+      const analysisTypeLabel = ({
+        'summary': '群聊速览',
+        'social-graph': '社交图谱',
+        'topic-trend': '话题趋势',
+        'integration-guide': '融入指南',
+        'meme-dictionary': '梗词典',
+        'persona-match': '人设匹配'
+      })[data.analysisType] || 'AI分析';
+
+      // 创建新对话用于分析（标题带上群名称，便于在会话列表中区分来源）
+      const analysisTitle = props.groupName
+        ? `${analysisTypeLabel} - ${props.groupName}`
+        : `${analysisTypeLabel} - 群聊消息`;
+      await createNewConversation(analysisTitle);
 
       // 添加系统提示消息，将转发的聊天记录折叠在 <details> 中
-      const detailsHtml = `<details><summary>已选择 ${data.messages.length} 条消息</summary>\n\n${data.messages.map(m => {
-        const user = escapeHtml(m.user || '未知用户');
-        const content = formatAtMention(escapeHtml(m.content || '[无内容]'));
-        return `<p><strong>${user}:</strong> ${content}</p>`;
-      }).join('\n')}\n</details>`;
+      const msgCount = Array.isArray(data.messages) ? data.messages.length : 0;
+      const detailsHtml = msgCount > 0
+        ? `<details><summary>已选择 ${msgCount} 条消息（点击展开）</summary>\n\n${data.messages.map(m => {
+            const user = escapeHtml(m.user || '未知用户');
+            const content = formatAtMention(escapeHtml(m.content || '[无内容]'));
+            return `<p><strong>${user}:</strong> ${content}</p>`;
+          }).join('\n')}\n</details>`
+        : '';
 
       messages.value.push({
-        text: `[分析] 已转发 ${data.messages.length} 条聊天记录给 AstrBot\n\n${detailsHtml}`,
+        text: `[${analysisTypeLabel}] 已转发 ${msgCount} 条聊天记录\n\n${detailsHtml}`,
         sender: '系统',
         isSelf: false,
         time: new Date(),
@@ -1077,67 +1580,208 @@ export default {
       nextTick(() => scrollToBottom());
       
       try {
-        const request = { 
-          message: data.prompt,
-          type: 'analysis'
-        };
-        if (currentConversationId.value) request.conversationId = currentConversationId.value;
-        if (props.groupId) request.groupId = props.groupId;
-        if (props.userId) request.userId = props.userId;
-        if (props.userNickname) request.userNickname = props.userNickname;
+        let result = null;
 
-        console.log('发送分析请求:', request);
-        const response = await astrBotApi.sendMessage(request);
-        console.log('收到分析响应:', response);
-        
-        if (response) {
-          if (response.conversationId) {
+        // ============ 新链路：传了 messageIds 就走 analyze-selected 接口 ============
+        if (Array.isArray(data.messageIds) && data.messageIds.length > 0) {
+          const params = {
+            messageIds: data.messageIds,
+            analysisType: data.analysisType || 'summary',
+            model: currentModel.value || 'default',
+            userPrompt: data.userPrompt || ''
+          };
+          // groupId 优先用请求传的（ChatInterface 已经从 props 带了），fallback 到组件 props
+          if (data.groupId || props.groupId) {
+            params.groupId = data.groupId || props.groupId;
+          }
+          // 传递 conversationId 以便后端保存消息
+          if (currentConversationId.value) {
+            params.conversationId = currentConversationId.value;
+          }
+
+          console.log('[analyze-selected] 请求参数:', params);
+          const raw = await astrBotApi.analyzeSelected(params);
+          // 兼容两种返回包装：{status, analysis, ...} 或直接返回对象
+          result = (raw && raw.status === 'ok') ? raw : (raw || {});
+          console.log('[analyze-selected] 响应:', result);
+
+        // ============ 旧链路：没传 messageIds（老版本 ChatInterface）时 fallback 走 sendMessage ============
+        } else if (data.prompt) {
+          const request = { 
+            message: data.prompt,
+            type: 'analysis'
+          };
+          if (currentConversationId.value) request.conversationId = currentConversationId.value;
+          if (props.groupId) request.groupId = props.groupId;
+          if (props.userId) request.userId = props.userId;
+          if (props.userNickname) request.userNickname = props.userNickname;
+          console.log('[fallback sendMessage] 分析请求:', request);
+          const response = await astrBotApi.sendMessage(request);
+          result = response || {};
+          if (response && response.conversationId) {
             currentConversationId.value = response.conversationId;
             localStorage.setItem('astrbot_current_conversation', response.conversationId);
           }
-          // 使用独立的过滤模块处理响应
-          const replyText = processAstrBotResponse(response);
+        } else {
+          throw new Error('缺少分析参数（messageIds 或 prompt 至少一个）');
+        }
+
+        // 从结果中提取回复文本（新接口在 analysis 字段，sendMessage 走 processAstrBotResponse 过滤）
+        let replyText = '';
+        if (result && typeof result.analysis === 'string' && result.analysis.trim()) {
+          replyText = result.analysis;
+        } else {
+          replyText = processAstrBotResponse(result);
+        }
+
+        if (!replyText || !replyText.trim()) {
+          replyText = '抱歉，未收到分析结果。';
+        }
+
+        // 将后端返回的推荐分析类型/群类型以小字形式追加到 reply 上方（系统提示）
+        let extraHint = '';
+        if (result && Array.isArray(result.recommendedAnalysisTypes) && result.recommendedAnalysisTypes.length > 0) {
+          const LABELS = {
+            'summary': '群聊速览',
+            'social-graph': '社交图谱',
+            'topic-trend': '话题趋势',
+            'integration-guide': '融入指南',
+            'meme-dictionary': '梗词典',
+            'persona-match': '人设匹配'
+          };
+          const labels = result.recommendedAnalysisTypes
+            .filter(t => t !== data.analysisType)
+            .map(t => LABELS[t] || t)
+            .filter(Boolean)
+            .slice(0, 3);
+          if (labels.length > 0) {
+            const gtLabel = result.groupTypeLabel ? `（当前群：${result.groupTypeLabel}）` : '';
+            extraHint = `<div class="analysis-extra-hint">💡 同类群还推荐尝试：<b>${labels.join(' / ')}</b> ${gtLabel}</div>\n\n`;
+          }
+        }
+
+        messages.value.push({
+          text: extraHint + replyText,
+          sender: 'AstrBot',
+          isSelf: false,
+          time: new Date()
+        });
+
+        // 扣费成功：轻量提示
+        const cost = typeof result.cost === 'number' ? result.cost : null;
+        const balance = typeof result.balance === 'number' ? result.balance : null;
+        if (cost !== null && balance !== null) {
+          showCreditHintBriefly(cost, balance);
+        }
+      } catch (error) {
+        console.error('分析失败:', error);
+        if (error && error.errorCode === 'INSUFFICIENT_CREDITS') {
+          const need = (error.details && error.details.need) || 0;
+          const balance = (error.details && error.details.balance) || 0;
+          insufficientNeed.value = need;
+          insufficientBalance.value = balance;
+          showInsufficientCredits.value = true;
           messages.value.push({
-            text: replyText,
-            sender: 'AstrBot',
+            text: `⚠️ 分析失败：${error.message || '积分不足'}`,
+            sender: '系统',
             isSelf: false,
+            isSystem: true,
             time: new Date()
           });
         } else {
-          console.error('响应为空');
+          showToast(error?.message || '分析失败，请稍后重试', 'error');
           messages.value.push({
-            text: '抱歉，未收到分析结果。',
+            text: '抱歉，分析过程中出现错误，请稍后重试。',
             sender: 'AstrBot',
             isSelf: false,
             time: new Date()
           });
         }
-      } catch (error) {
-        console.error('分析失败:', error);
-        messages.value.push({
-          text: '抱歉，分析过程中出现错误，请稍后重试。',
-          sender: 'AstrBot',
-          isSelf: false,
-          time: new Date()
-        });
       } finally {
         isLoading.value = false;
         nextTick(() => scrollToBottom());
       }
     };
 
-    onMounted(() => {
-      loadSettings();
+    let _statusInterval = null;
+
+    onMounted(async () => {
+      await loadSettings();
       checkStatus();
       loadConversations();
       restoreConversation();
-      setInterval(checkStatus, 30000);
+      _statusInterval = setInterval(checkStatus, 30000);
+
+      // ========== 先从 localStorage 恢复当前会话的模型选择 ==========
+      // 优先读取会话级别的选择，其次是全局选择
+      const sessionScopedModel = currentConversationId.value
+        ? localStorage.getItem(`astrbot_current_model_${currentConversationId.value}`)
+        : null;
+      const globalSavedModel = localStorage.getItem('astrbot_current_model');
+      const savedModel = sessionScopedModel || globalSavedModel || localStorage.getItem('llm_model');
+      if (savedModel) {
+        currentModel.value = savedModel;
+      }
+
+      // 加载用户已配置的模型 + AstrBot 模型
+      await loadAvailableModels();
+
+      // 加载 TTS 角色列表
+      try {
+        const charData = await systemApi.getTtsCharacters();
+        if (charData && charData.characters) {
+          ttsCharacters.value = charData.characters;
+          // 恢复选择：localStorage > 后端当前角色 > 第一个角色
+          if (charData.current) {
+            selectedTtsCharacter.value = charData.current;
+            localStorage.setItem('tts_character', charData.current);
+          } else if (!selectedTtsCharacter.value && charData.characters.length > 0) {
+            selectedTtsCharacter.value = charData.characters[0].name;
+          }
+        }
+      } catch (e) {
+        console.warn('加载 TTS 角色列表失败:', e);
+      }
     });
 
-    // 监听 userId 变化，重新加载设置
-    watch(() => props.userId, (newUserId) => {
-      if (newUserId) {
+    // TTS 角色切换
+    const onTtsCharacterChange = async () => {
+      try {
+        await systemApi.switchTtsCharacter(selectedTtsCharacter.value);
+        localStorage.setItem('tts_character', selectedTtsCharacter.value);
+        showToast(`已切换到 ${selectedTtsCharacter.value}`, 'success');
+      } catch (e) {
+        console.error('切换 TTS 角色失败:', e);
+        showToast('切换角色失败: ' + (e.message || '未知错误'), 'error');
+      }
+    };
+
+    onUnmounted(() => {
+      // 清理定时器，防止组件卸载后继续发 API 请求导致 401 闪屏
+      if (_statusInterval) {
+        clearInterval(_statusInterval);
+        _statusInterval = null;
+      }
+      if (_creditHintTimer) {
+        clearTimeout(_creditHintTimer);
+        _creditHintTimer = null;
+      }
+    });
+
+    // llmModels 已废弃（唯一模型数据源为 AstrBot API），不再 watch 同步到聊天选择器
+
+    // 监听 userId 变化，重新加载设置和会话（用户切换账号时）
+    watch(() => props.userId, async (newUserId, oldUserId) => {
+      if (newUserId && newUserId !== oldUserId) {
+        // 清除旧用户的会话数据
+        localStorage.removeItem('astrbot_current_conversation');
+        currentConversationId.value = null;
+        currentConversationTitle.value = '';
+        messages.value = [];
+        conversations.value = [];
+        // 重新加载当前用户的数据
         loadSettings();
+        await loadConversations();
       }
     });
 
@@ -1153,6 +1797,12 @@ export default {
       currentConversationId,
       currentConversationTitle,
       showConversationList,
+      showGrouping,
+      groupedConversations,
+      collapsedGroups,
+      toggleGrouping,
+      toggleGroup,
+      toggleConversationList,
       showConfirmDialog,
       userAvatar,
       botAvatar,
@@ -1171,6 +1821,14 @@ export default {
       newProviderName,
       currentProvider,
       filteredModels,
+      showInsufficientCredits,
+      insufficientNeed,
+      insufficientBalance,
+      showCreditHint,
+      lastCost,
+      lastBalance,
+      goToSignIn,
+      goToUpgrade,
       sendMessage,
       formatTime,
       formatDate,
@@ -1186,13 +1844,24 @@ export default {
       handleBotAvatarUpload,
       copyMessageText,
       handleVoiceAction,
+      ttsCharacters,
+      selectedTtsCharacter,
+      onTtsCharacterChange,
       addModel,
       removeModel,
       addProvider,
       removeProvider,
       fetchModels,
       copyModelName,
-      setAsCurrentModel
+      setAsCurrentModel,
+      currentModel,
+      currentModelLabel,
+      availableModels,
+      modelLoading,
+      modelError,
+      loadAvailableModels,
+      refreshAvailableModels,
+      onCurrentModelChange
     };
   }
 };
@@ -1268,6 +1937,29 @@ export default {
 .header-actions {
   display: flex;
   gap: 8px;
+  align-items: center;
+}
+
+.tts-character-selector {
+  margin-right: 4px;
+}
+.tts-character-select {
+  padding: 4px 8px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 12px;
+  background: #fff;
+  color: #333;
+  cursor: pointer;
+  outline: none;
+  transition: border-color 0.2s;
+  max-width: 140px;
+}
+.tts-character-select:hover {
+  border-color: #4f46e5;
+}
+.tts-character-select:focus {
+  border-color: #4f46e5;
 }
 
 .action-btn {
@@ -2122,6 +2814,94 @@ export default {
   font-size: 14px;
 }
 
+/* 对话分组样式 */
+.panel-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.toggle-group-btn {
+  background: transparent;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  padding: 4px 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: #666;
+  font-size: 12px;
+  transition: all 0.2s;
+}
+
+.toggle-group-btn:hover {
+  background: #f0f0f0;
+  color: #333;
+}
+
+.toggle-group-btn.active {
+  background: #5b5bd6;
+  border-color: #5b5bd6;
+  color: white;
+}
+
+.conv-group {
+  margin-bottom: 4px;
+}
+
+.conv-group-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 12px;
+  background: #f8f9fa;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  color: #333;
+  transition: background 0.2s;
+}
+
+.conv-group-header:hover {
+  background: #e9ecef;
+}
+
+.conv-group-title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conv-group-count {
+  background: #e0e0e0;
+  color: #666;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-weight: 500;
+}
+
+.conv-group-items {
+  padding-left: 8px;
+  border-left: 2px solid #e0e0e0;
+  margin-left: 12px;
+}
+
+.conv-group-items .conversation-item {
+  border-radius: 6px;
+}
+
+.conv-group-items .conversation-item:hover {
+  background-color: #f0f4ff;
+}
+
+.conv-group-items .conv-content {
+  padding: 8px 10px;
+}
+
 .chat-messages {
   flex: 1;
   overflow-y: auto;
@@ -2346,9 +3126,117 @@ export default {
 }
 
 .chat-input-area {
-  padding: 15px 20px;
+  padding: 12px 20px 15px;
   background-color: white;
   border-top: 1px solid #e0e0e0;
+}
+
+.model-selector-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+  padding: 8px 12px;
+  background: linear-gradient(135deg, #f8fbff 0%, #f1f5fb 100%);
+  border: 1px solid #e3ebf5;
+  border-radius: 10px;
+}
+
+.model-selector {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #4a5568;
+  font-size: 13px;
+}
+
+.model-selector select {
+  padding: 5px 10px 5px 28px;
+  border: 1px solid #cbd5e0;
+  border-radius: 6px;
+  background-color: white;
+  font-size: 13px;
+  color: #2d3748;
+  cursor: pointer;
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  max-width: 220px;
+}
+
+.model-selector select:hover:not(:disabled) {
+  border-color: #3498db;
+}
+
+.model-selector select:focus {
+  border-color: #3498db;
+  box-shadow: 0 0 0 2px rgba(52, 152, 219, 0.15);
+}
+
+.model-selector select:disabled {
+  background-color: #f5f5f5;
+  cursor: not-allowed;
+}
+
+.model-selector svg {
+  color: #7f8c8d;
+  flex-shrink: 0;
+}
+
+.model-loading {
+  font-size: 12px;
+  color: #95a5a6;
+  font-style: italic;
+}
+
+.model-error {
+  font-size: 14px;
+  color: #e74c3c;
+  cursor: help;
+  padding: 0 4px;
+}
+
+.model-empty-tip {
+  color: #e67e22 !important;
+  background: rgba(230, 126, 34, 0.08) !important;
+  border-color: rgba(230, 126, 34, 0.25) !important;
+  font-size: 12px !important;
+}
+
+.model-refresh-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid #cbd5e0;
+  background-color: white;
+  border-radius: 6px;
+  color: #7f8c8d;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.model-refresh-btn:hover {
+  border-color: #3498db;
+  color: #3498db;
+  background-color: #f0f7ff;
+}
+
+.model-tip {
+  font-size: 12px;
+  color: #5b5bd6;
+  background: rgba(91, 91, 214, 0.08);
+  padding: 3px 10px;
+  border-radius: 10px;
+  white-space: nowrap;
+  max-width: 50%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.model-tip b {
+  font-weight: 600;
 }
 
 .input-wrapper {
@@ -2400,5 +3288,144 @@ export default {
   color: #7f8c8d;
   margin-top: 8px;
   text-align: center;
+}
+
+/* 积分不足提示条 */
+.credits-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 18px;
+  margin: 0 16px 12px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #fff8e6 0%, #fff3cd 100%);
+  border: 1px solid #ffc107;
+  box-shadow: 0 2px 8px rgba(255, 193, 7, 0.15);
+  animation: bannerIn 0.3s ease;
+}
+
+@keyframes bannerIn {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.credits-banner-icon {
+  flex-shrink: 0;
+  color: #f39c12;
+  margin-top: 1px;
+}
+
+.credits-banner-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.credits-banner-title {
+  font-size: 14px;
+  color: #856404;
+  font-weight: 600;
+  margin-bottom: 10px;
+  line-height: 1.5;
+}
+
+.credits-banner-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.banner-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  border: none;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.banner-btn-primary {
+  background: linear-gradient(135deg, #27ae60 0%, #2ecc71 100%);
+  color: white;
+  box-shadow: 0 2px 6px rgba(39, 174, 96, 0.25);
+}
+
+.banner-btn-primary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 10px rgba(39, 174, 96, 0.35);
+}
+
+.banner-btn-upgrade {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  box-shadow: 0 2px 6px rgba(102, 126, 234, 0.25);
+}
+
+.banner-btn-upgrade:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 10px rgba(102, 126, 234, 0.35);
+}
+
+.banner-btn-close {
+  background: rgba(0,0,0,0.05);
+  color: #856404;
+  padding: 6px 8px;
+}
+
+.banner-btn-close:hover {
+  background: rgba(0,0,0,0.1);
+}
+
+/* 扣费成功轻量提示 */
+.credit-hint-toast {
+  position: absolute;
+  bottom: 88px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: rgba(39, 174, 96, 0.95);
+  color: white;
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: 20px;
+  box-shadow: 0 4px 12px rgba(39, 174, 96, 0.3);
+  z-index: 50;
+  backdrop-filter: blur(6px);
+  white-space: nowrap;
+}
+
+.credit-hint-enter-active,
+.credit-hint-leave-active {
+  transition: all 0.35s ease;
+}
+
+.credit-hint-enter-from,
+.credit-hint-leave-to {
+  opacity: 0;
+  transform: translate(-50%, 12px);
+}
+
+/* AI 分析结果的推荐提示 */
+.analysis-extra-hint {
+  padding: 8px 12px;
+  margin-bottom: 10px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #f0f1ff 0%, #eef6ff 100%);
+  color: #4b4fa3;
+  font-size: 12.5px;
+  line-height: 1.55;
+  border: 1px solid #d9dcff;
+}
+.analysis-extra-hint b {
+  color: #5b5bd6;
+  font-weight: 600;
 }
 </style>

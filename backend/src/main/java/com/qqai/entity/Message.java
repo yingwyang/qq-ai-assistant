@@ -92,6 +92,8 @@ public class Message {
     private Long deletedBy;  // 删除者用户ID（users.id）
 
     private boolean processed = false;  // 是否已处理
+
+    private boolean mediaPending = false;  // 媒体是否待异步下载/转码（true=前端应显示加载占位符）
     
     @Column(nullable = false)
     private boolean isSelfMessage = false;  // 是否是登录账号发送的消息
@@ -221,6 +223,9 @@ public class Message {
     
     public boolean isProcessed() { return processed; }
     public void setProcessed(boolean processed) { this.processed = processed; }
+
+    public boolean isMediaPending() { return mediaPending; }
+    public void setMediaPending(boolean mediaPending) { this.mediaPending = mediaPending; }
     
     public boolean isSelfMessage() { return isSelfMessage; }
     public void setSelfMessage(boolean selfMessage) { isSelfMessage = selfMessage; }

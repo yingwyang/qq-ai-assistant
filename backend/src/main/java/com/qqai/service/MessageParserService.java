@@ -2,6 +2,7 @@ package com.qqai.service;
 
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.qqai.dto.webhook.MediaTaskPayload;
 import com.qqai.dto.webhook.MessageParseResult;
 import com.qqai.entity.Message;
 import com.qqai.util.CqCodeUtils;
@@ -29,9 +30,52 @@ public class MessageParserService {
     @Autowired
     private MessageService messageService;
 
+    /**
+     * 完整解析（含同步媒体下载/转码）。保留向后兼容，新链路请用 {@link #parseLightweight}。
+     */
     public MessageParseResult parse(ObjectNode json) {
         MessageParseResult result = new MessageParseResult();
+        extractBasicFields(json, result);
 
+        if (result.getRawMessage() != null && result.getRawMessage().contains("[CQ:")) {
+            log.info("解析 CQ 码 - rawMessage长度={}, 包含CQ码", result.getRawMessage().length());
+            if (result.getRawMessage().contains("[CQ:json")) {
+                log.info("检测到 [CQ:json] 类型消息");
+            }
+            parseCqCodes(result, json);
+        } else {
+            log.info("未检测到 CQ 码 - rawMessage={}", result.getRawMessage());
+        }
+
+        return result;
+    }
+
+    /**
+     * 轻量解析：仅提取字段 + 识别消息类型 + 收集媒体任务，不执行任何 HTTP 下载或子进程转码。
+     * 媒体任务以 {@link MediaTaskPayload} 形式收集到 {@link MessageParseResult#getMediaTasks()}，
+     * 由 RootWebhookController 入库后投递到 RabbitMQ 异步处理。
+     *
+     * 注意：合并转发 [CQ:forward] 仍同步拉取（涉及 NapCat API，逻辑复杂，暂不异步化）。
+     */
+    public MessageParseResult parseLightweight(ObjectNode json) {
+        MessageParseResult result = new MessageParseResult();
+        extractBasicFields(json, result);
+
+        if (result.getRawMessage() != null && result.getRawMessage().contains("[CQ:")) {
+            log.info("轻量解析 CQ 码 - rawMessage长度={}, 包含CQ码", result.getRawMessage().length());
+            parseCqCodesLightweight(result, json);
+        } else {
+            log.info("未检测到 CQ 码 - rawMessage={}", result.getRawMessage());
+        }
+
+        return result;
+    }
+
+    /**
+     * 提取基本字段（标准 OneBot 11 + NapCat fallback + elements 数组 + message 数组小程序解析）。
+     * 不含任何 IO 操作，parse 与 parseLightweight 共用。
+     */
+    private void extractBasicFields(ObjectNode json, MessageParseResult result) {
         // 尝试标准 OneBot 11 格式
         result.setGroupId(json.has("group_id") ? json.get("group_id").asLong() : null);
         result.setGroupName(json.has("group_name") ? json.get("group_name").asText() : null);
@@ -72,7 +116,7 @@ public class MessageParserService {
             log.info("尝试从 elements 数组解析消息");
             parseElements(json, result);
         }
-        
+
         if (json.has("message")) {
             Object messageField = json.get("message");
             log.info("检测到 message 字段, type={}", messageField.getClass().getSimpleName());
@@ -105,19 +149,6 @@ public class MessageParserService {
                 }
             }
         }
-
-        // 如果 raw_message 中有 CQ 码，解析消息类型并下载到本地
-        if (result.getRawMessage() != null && result.getRawMessage().contains("[CQ:")) {
-            log.info("解析 CQ 码 - rawMessage长度={}, 包含CQ码", result.getRawMessage().length());
-            if (result.getRawMessage().contains("[CQ:json")) {
-                log.info("检测到 [CQ:json] 类型消息");
-            }
-            parseCqCodes(result, json);
-        } else {
-            log.info("未检测到 CQ 码 - rawMessage={}", result.getRawMessage());
-        }
-
-        return result;
     }
 
     private void parseElements(ObjectNode json, MessageParseResult result) {
@@ -219,6 +250,9 @@ public class MessageParserService {
         }
     }
 
+    /**
+     * 原始 CQ 码解析（含同步媒体下载/转码）。保留供 {@link #parse} 使用。
+     */
     private void parseCqCodes(MessageParseResult result, ObjectNode json) {
         String rawMessage = result.getRawMessage();
         String groupId = String.valueOf(result.getGroupId());
@@ -244,48 +278,97 @@ public class MessageParserService {
         } else if (rawMessage.contains("[CQ:file")) {
             result.setMsgType(Message.MessageType.FILE);
         } else if (rawMessage.contains("[CQ:forward")) {
-            result.setMsgType(Message.MessageType.FORWARD);
-            ArrayNode parsedForwardMessages = napCatService.extractForwardMessagesFromPayload(json);
-            if (parsedForwardMessages != null && !parsedForwardMessages.isEmpty()) {
-                napCatService.downloadForwardMediaToLocal(parsedForwardMessages, groupId);
-                result.setForwardContent(parsedForwardMessages.toString());
-                log.info("从 message 数组解析到合并转发消息详情, 共 {} 条子消息", parsedForwardMessages.size());
-            } else {
-                String forwardId = cqCodeUtils.extractForwardId(rawMessage);
-                if (forwardId != null && !forwardId.isEmpty()) {
-                    try {
-                        ArrayNode forwardMessages = napCatService.getForwardMsg(forwardId);
-                        if (forwardMessages != null && !forwardMessages.isEmpty()) {
-                            napCatService.downloadForwardMediaToLocal(forwardMessages, groupId);
-                            result.setForwardContent(forwardMessages.toString());
-                            log.info("合并转发消息详情已拉取, forwardId={}, 共 {} 条子消息", forwardId, forwardMessages.size());
-                        }
-                    } catch (Exception e) {
-                        log.error("拉取合并转发消息详情失败, forwardId={}: {}", forwardId, e.getMessage());
-                    }
-                }
-            }
+            handleForward(result, json, rawMessage, groupId);
         } else if (rawMessage.contains("[CQ:reply")) {
-            result.setMsgType(Message.MessageType.REPLY);
-            Long replyQqMessageId = cqCodeUtils.extractReplyMessageId(rawMessage);
-            if (replyQqMessageId != null) {
-                Optional<Message> replied = messageService.findByMessageId(String.valueOf(replyQqMessageId));
-                if (replied.isPresent()) {
-                    Message target = replied.get();
-                    result.setReplyToMessageId(target.getId());
-                    result.setReplyToNickname(target.getUserNickname());
-                    result.setReplyToContent(buildReplyToContent(target));
+            handleReply(result, rawMessage);
+        } else if (rawMessage.contains("[CQ:json")) {
+            handleJson(result, rawMessage);
+        }
+    }
+
+    /**
+     * 轻量 CQ 码解析：识别类型 + 收集媒体任务（不下载）。
+     * 图片/语音/视频 → 收集到 mediaTasks；合并转发/回复/JSON → 同步处理（轻量或保留原逻辑）。
+     */
+    private void parseCqCodesLightweight(MessageParseResult result, ObjectNode json) {
+        String rawMessage = result.getRawMessage();
+        String groupId = String.valueOf(result.getGroupId());
+
+        if (rawMessage.contains("[CQ:image")) {
+            result.setMsgType(Message.MessageType.IMAGE);
+            addMediaTask(result, rawMessage, groupId, "images", ".jpg");
+        } else if (rawMessage.contains("[CQ:record") || rawMessage.contains("[CQ:voice")) {
+            result.setMsgType(Message.MessageType.VOICE);
+            addMediaTask(result, rawMessage, groupId, "voice", ".amr");
+        } else if (rawMessage.contains("[CQ:video")) {
+            result.setMsgType(Message.MessageType.VIDEO);
+            addMediaTask(result, rawMessage, groupId, "video", ".mp4");
+        } else if (rawMessage.contains("[CQ:file")) {
+            result.setMsgType(Message.MessageType.FILE);
+        } else if (rawMessage.contains("[CQ:forward")) {
+            // 合并转发仍同步拉取（涉及 NapCat API，逻辑复杂，暂不异步化）
+            handleForward(result, json, rawMessage, groupId);
+        } else if (rawMessage.contains("[CQ:reply")) {
+            handleReply(result, rawMessage);
+        } else if (rawMessage.contains("[CQ:json")) {
+            handleJson(result, rawMessage);
+        }
+    }
+
+    /** 收集媒体任务到 result.mediaTasks（不执行下载） */
+    private void addMediaTask(MessageParseResult result, String rawMessage, String groupId,
+                              String mediaType, String extension) {
+        String url = mediaDownloadService.extractUrlFromCQ(rawMessage);
+        result.getMediaTasks().add(new MediaTaskPayload(rawMessage, url, groupId, mediaType, extension));
+        log.info("收集媒体任务: type={}, ext={}, groupId={}, url={}", mediaType, extension, groupId, url);
+    }
+
+    private void handleForward(MessageParseResult result, ObjectNode json, String rawMessage, String groupId) {
+        result.setMsgType(Message.MessageType.FORWARD);
+        ArrayNode parsedForwardMessages = napCatService.extractForwardMessagesFromPayload(json);
+        if (parsedForwardMessages != null && !parsedForwardMessages.isEmpty()) {
+            napCatService.downloadForwardMediaToLocal(parsedForwardMessages, groupId);
+            result.setForwardContent(parsedForwardMessages.toString());
+            log.info("从 message 数组解析到合并转发消息详情, 共 {} 条子消息", parsedForwardMessages.size());
+        } else {
+            String forwardId = cqCodeUtils.extractForwardId(rawMessage);
+            if (forwardId != null && !forwardId.isEmpty()) {
+                try {
+                    ArrayNode forwardMessages = napCatService.getForwardMsg(forwardId);
+                    if (forwardMessages != null && !forwardMessages.isEmpty()) {
+                        napCatService.downloadForwardMediaToLocal(forwardMessages, groupId);
+                        result.setForwardContent(forwardMessages.toString());
+                        log.info("合并转发消息详情已拉取, forwardId={}, 共 {} 条子消息", forwardId, forwardMessages.size());
+                    }
+                } catch (Exception e) {
+                    log.error("拉取合并转发消息详情失败, forwardId={}: {}", forwardId, e.getMessage());
                 }
             }
-        } else if (rawMessage.contains("[CQ:json")) {
-            result.setMsgType(Message.MessageType.APP);
-            String jsonData = cqCodeUtils.extractJsonData(rawMessage);
-            if (jsonData != null && !jsonData.isEmpty()) {
-                result.setMiniAppContent(jsonData);
-                log.info("解析小程序分享消息, jsonData长度={}", jsonData.length());
-            } else if (result.getMiniAppContent() == null || result.getMiniAppContent().isEmpty()) {
-                log.info("CQ:json 解析为空，但未从 message 数组获取到小程序数据");
+        }
+    }
+
+    private void handleReply(MessageParseResult result, String rawMessage) {
+        result.setMsgType(Message.MessageType.REPLY);
+        Long replyQqMessageId = cqCodeUtils.extractReplyMessageId(rawMessage);
+        if (replyQqMessageId != null) {
+            Optional<Message> replied = messageService.findByMessageId(String.valueOf(replyQqMessageId));
+            if (replied.isPresent()) {
+                Message target = replied.get();
+                result.setReplyToMessageId(target.getId());
+                result.setReplyToNickname(target.getUserNickname());
+                result.setReplyToContent(buildReplyToContent(target));
             }
+        }
+    }
+
+    private void handleJson(MessageParseResult result, String rawMessage) {
+        result.setMsgType(Message.MessageType.APP);
+        String jsonData = cqCodeUtils.extractJsonData(rawMessage);
+        if (jsonData != null && !jsonData.isEmpty()) {
+            result.setMiniAppContent(jsonData);
+            log.info("解析小程序分享消息, jsonData长度={}", jsonData.length());
+        } else if (result.getMiniAppContent() == null || result.getMiniAppContent().isEmpty()) {
+            log.info("CQ:json 解析为空，但未从 message 数组获取到小程序数据");
         }
     }
 

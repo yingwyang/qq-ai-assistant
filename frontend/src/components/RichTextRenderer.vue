@@ -1,9 +1,11 @@
 <template>
-  <div class="rich-text" :class="className" v-html="renderedHtml"></div>
+  <div class="rich-text" :class="className" @click="handleClick">
+    <div ref="contentRef" v-html="renderedHtml"></div>
+  </div>
 </template>
 
 <script setup>
-import { computed } from 'vue';
+import { computed, ref, onMounted, watch } from 'vue';
 import MarkdownIt from 'markdown-it';
 import DOMPurify from 'dompurify';
 
@@ -23,8 +25,14 @@ const props = defineProps({
   sectionMode: {
     type: Boolean,
     default: false
+  },
+  scrollContainer: {
+    type: Object,
+    default: null
   }
 });
+
+const contentRef = ref(null);
 
 const md = new MarkdownIt({
   html: true,
@@ -33,7 +41,6 @@ const md = new MarkdownIt({
   breaks: true
 });
 
-// 用于判断内容是否包含 Markdown 语法或需要保留的 HTML 标签的简单正则
 const markdownPattern = /[#*`[\]<!]|^\s*[-+]\s|^\s*\d+\.\s|^\s*>\s|\|.*\||<[^>]+>/m;
 
 function escapeHtml(text) {
@@ -46,6 +53,67 @@ function escapeHtml(text) {
 }
 
 /**
+ * 处理目录点击事件，在滚动容器内平滑滚动到目标位置
+ */
+const handleClick = (e) => {
+  const target = e.target.closest('a');
+  if (!target) return;
+
+  const href = target.getAttribute('href');
+  if (!href || !href.startsWith('#')) return;
+
+  const targetId = href.substring(1);
+  if (!targetId) return;
+
+  // 检查是否是目录链接
+  const isTocLink = target.closest('.toc, .rt-section-toc');
+  if (!isTocLink) return;
+
+  e.preventDefault();
+
+  // 查找目标元素
+  const el = contentRef.value?.querySelector(`[id="${targetId}"]`);
+  if (!el) return;
+
+  // 找到滚动容器
+  let container = props.scrollContainer;
+  if (!container) {
+    // 尝试向上查找滚动容器
+    let parent = contentRef.value?.parentElement;
+    while (parent) {
+      const style = window.getComputedStyle(parent);
+      const overflow = style.overflowY;
+      if ((overflow === 'auto' || overflow === 'scroll') && parent.scrollHeight > parent.clientHeight) {
+        container = parent;
+        break;
+      }
+      parent = parent.parentElement;
+    }
+  }
+
+  if (container) {
+    // 计算目标位置相对于滚动容器的偏移
+    const elRect = el.getBoundingClientRect();
+    const containerRect = container.getBoundingClientRect();
+    const offset = elRect.top - containerRect.top + container.scrollTop - 20;
+
+    container.scrollTo({
+      top: offset,
+      behavior: 'smooth'
+    });
+
+    // 添加高亮效果
+    el.classList.add('rt-highlight');
+    setTimeout(() => el.classList.remove('rt-highlight'), 2000);
+  } else {
+    // 回退到默认锚点跳转
+    el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    el.classList.add('rt-highlight');
+    setTimeout(() => el.classList.remove('rt-highlight'), 2000);
+  }
+};
+
+/**
  * 检测以 <p><strong>标题</strong></p> 形式呈现的章节，并：
  * 1. 为每个章节包裹 <section class="rt-section"> 卡片
  * 2. 在顶部生成可点击跳转的章节导航目录
@@ -53,7 +121,6 @@ function escapeHtml(text) {
  */
 function processSections(html) {
   if (!html) return html;
-  // 同时支持加粗段落、<b> 标签以及 Markdown h2-h4 标题
   const hasCandidate = /<(?:strong|b|h[2-4])\b/i.test(html);
   if (!hasCandidate) return html;
 
@@ -66,10 +133,8 @@ function processSections(html) {
     const text = (el.textContent || '').trim();
     if (!text || text.length > 80) return false;
 
-    // 1. Markdown 标题 h2-h4
     if (/^H[2-4]$/.test(el.tagName)) return true;
 
-    // 2. <p><strong>标题</strong></p> 或 <p><b>标题</b></p>
     if (el.tagName === 'P' && el.childNodes.length === 1) {
       const child = el.firstElementChild;
       if (child && (child.tagName === 'STRONG' || child.tagName === 'B')) {
@@ -77,14 +142,9 @@ function processSections(html) {
       }
     }
 
-    // 3. 中文数字章节：一、二、三… 或（一）（二）
     if (/^[（(][一二三四五六七八九十]+[）)]\s*[^\n]+$/.test(text)) return true;
     if (/^[一二三四五六七八九十]+[、.．:]\s*[^\n]+$/.test(text)) return true;
-
-    // 4. 阿拉伯数字章节：1. 2. 3. 或 1、2、
     if (/^\d+[、.．:]\s*[^\n]+$/.test(text)) return true;
-
-    // 5. 以“：”或“:”结尾的短句，通常是小节标题
     if (/[:：]$/.test(text)) return true;
 
     return false;
@@ -94,7 +154,6 @@ function processSections(html) {
   const firstTitleIndex = children.findIndex(isSectionTitle);
   if (firstTitleIndex === -1) return html;
 
-  // 第一个标题前的内容作为前言保留
   const preamble = children.slice(0, firstTitleIndex);
   const rest = children.slice(firstTitleIndex);
 
@@ -108,16 +167,13 @@ function processSections(html) {
     } else if (current) {
       current.contentEls.push(el);
     } else {
-      // 极少出现：被判定为标题前仍有余留元素，归到前言
       preamble.push(el);
     }
   });
   if (current) sections.push(current);
 
-  // 章节数量不足或根本没有章节标题时不处理，保持原样
   if (sections.length < 2) return html;
 
-  // 构建目录
   const toc = doc.createElement('div');
   toc.className = 'rt-section-toc';
   const tocTitle = doc.createElement('div');
@@ -127,7 +183,6 @@ function processSections(html) {
   const tocList = doc.createElement('ul');
   toc.appendChild(tocList);
 
-  // 使用文档片段一次性重建 body，避免 insertBefore 导致的顺序/嵌套问题
   const fragment = doc.createDocumentFragment();
   preamble.forEach((el) => fragment.appendChild(el));
   fragment.appendChild(toc);
@@ -138,11 +193,9 @@ function processSections(html) {
     sectionWrap.className = 'rt-section';
     sectionWrap.id = id;
 
-    // 标题样式
     section.titleEl.className = 'rt-section-title';
     sectionWrap.appendChild(section.titleEl);
 
-    // 内容区
     const contentWrap = doc.createElement('div');
     contentWrap.className = 'rt-section-content';
     section.contentEls.forEach((contentEl) => contentWrap.appendChild(contentEl));
@@ -150,7 +203,6 @@ function processSections(html) {
 
     fragment.appendChild(sectionWrap);
 
-    // 目录项
     const li = doc.createElement('li');
     const a = doc.createElement('a');
     a.href = `#${id}`;
@@ -214,14 +266,10 @@ const renderedHtml = computed(() => {
   let html;
   if (props.enableMarkdown && markdownPattern.test(props.content)) {
     html = md.render(props.content);
-    // 让所有链接在新标签页打开
     html = html.replace(/<a /g, '<a target="_blank" rel="noopener noreferrer" ');
-    // 如果包含 [TOC] 标记，生成目录
     if (html.includes('[TOC]')) {
       html = renderToc(html);
     }
-    // 为 AI 回复的段落式章节生成卡片与目录
-    // 若已通过 [TOC] 生成目录，则不再重复处理
     if (props.sectionMode && !html.includes('rt-section') && !html.includes('class="toc"')) {
       html = processSections(html);
     }
@@ -368,6 +416,16 @@ const renderedHtml = computed(() => {
   margin: 0.2em 0;
 }
 
+.rich-text :deep(.toc a) {
+  cursor: pointer;
+  color: #0366d6;
+  font-size: 0.9em;
+}
+
+.rich-text :deep(.toc a:hover) {
+  text-decoration: underline;
+}
+
 .rich-text :deep(.at-mention) {
   display: inline-block;
   color: #0366d6;
@@ -405,6 +463,7 @@ const renderedHtml = computed(() => {
 }
 
 .rich-text :deep(.rt-section-toc a) {
+  cursor: pointer;
   color: #0366d6;
   font-size: 0.9em;
   text-decoration: none;
@@ -466,5 +525,21 @@ const renderedHtml = computed(() => {
 
 .rich-text :deep(.rt-section-content > *:last-child) {
   margin-bottom: 0;
+}
+
+/* 目录跳转高亮效果 */
+.rich-text :deep(.rt-highlight) {
+  animation: highlight 2s ease-out;
+}
+
+@keyframes highlight {
+  0% {
+    background-color: rgba(3, 102, 214, 0.2);
+    box-shadow: 0 0 0 3px rgba(3, 102, 214, 0.3);
+  }
+  100% {
+    background-color: transparent;
+    box-shadow: none;
+  }
 }
 </style>

@@ -27,6 +27,12 @@ const routes = [
     name: 'Admin',
     component: () => import('../views/AdminView.vue'),
     meta: { requiresAuth: true, requiresAdmin: true }
+  },
+  {
+    path: '/docs/:pathMatch(.*)*',
+    name: 'Docs',
+    component: () => import('../views/DocView.vue'),
+    meta: { requiresAuth: true }
   }
 ];
 

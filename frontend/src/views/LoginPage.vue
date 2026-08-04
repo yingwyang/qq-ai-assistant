@@ -210,10 +210,15 @@
 </template>
 
 <script>
-import { ref, reactive, onMounted } from 'vue';
+import { ref, reactive, onMounted, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import Icon from '../components/Icon.vue';
 import { authApi } from '../services/api';
+
+// 表单持久化 key（sessionStorage：刷新不丢失，关闭标签页清除）
+const LOGIN_FORM_KEY = 'login_form_draft';
+const REGISTER_FORM_KEY = 'register_form_draft';
+const ACTIVE_TAB_KEY = 'login_active_tab';
 
 export default {
   name: 'LoginPage',
@@ -226,16 +231,58 @@ export default {
     const showLoginPassword = ref(false);
     const showRegisterPassword = ref(false);
 
-    const loginForm = reactive({
+    // 从 sessionStorage 恢复表单草稿
+    const loadDraft = (key, fallback) => {
+      try {
+        const raw = sessionStorage.getItem(key);
+        return raw ? { ...fallback, ...JSON.parse(raw) } : { ...fallback };
+      } catch (e) {
+        return { ...fallback };
+      }
+    };
+
+    const loginForm = reactive(loadDraft(LOGIN_FORM_KEY, {
       username: '',
       password: ''
-    });
+    }));
 
-    const registerForm = reactive({
+    const registerForm = reactive(loadDraft(REGISTER_FORM_KEY, {
       username: '',
       nickname: '',
       password: '',
       confirmPassword: ''
+    }));
+
+    // 恢复上次的登录/注册标签页
+    try {
+      isRegistering.value = sessionStorage.getItem(ACTIVE_TAB_KEY) === 'register';
+    } catch (e) {
+      // ignore
+    }
+
+    // 监听表单变化，自动持久化到 sessionStorage
+    watch(loginForm, (val) => {
+      try {
+        sessionStorage.setItem(LOGIN_FORM_KEY, JSON.stringify(val));
+      } catch (e) {
+        // ignore
+      }
+    }, { deep: true });
+
+    watch(registerForm, (val) => {
+      try {
+        sessionStorage.setItem(REGISTER_FORM_KEY, JSON.stringify(val));
+      } catch (e) {
+        // ignore
+      }
+    }, { deep: true });
+
+    watch(isRegistering, (val) => {
+      try {
+        sessionStorage.setItem(ACTIVE_TAB_KEY, val ? 'register' : 'login');
+      } catch (e) {
+        // ignore
+      }
     });
 
     // 如果已登录，自动跳转到首页
@@ -271,7 +318,12 @@ export default {
         }));
         localStorage.setItem('isLoggedIn', 'true');
 
-        // 登录成功后根据角色跳转
+        // 登录成功后清除表单草稿
+        sessionStorage.removeItem(LOGIN_FORM_KEY);
+        sessionStorage.removeItem(REGISTER_FORM_KEY);
+        sessionStorage.removeItem(ACTIVE_TAB_KEY);
+
+        // 登录成功后根据角色跳转（插件启动由后端 PluginEnsureService 异步处理）
         if (data.role === 'ADMIN') {
           router.push('/admin');
         } else {
@@ -325,7 +377,12 @@ export default {
         }));
         localStorage.setItem('isLoggedIn', 'true');
 
-        // 注册并登录成功后根据角色跳转
+        // 注册并登录成功后清除表单草稿
+        sessionStorage.removeItem(LOGIN_FORM_KEY);
+        sessionStorage.removeItem(REGISTER_FORM_KEY);
+        sessionStorage.removeItem(ACTIVE_TAB_KEY);
+
+        // 注册并登录成功后根据角色跳转（插件启动由后端 PluginEnsureService 异步处理）
         if (data.role === 'ADMIN') {
           router.push('/admin');
         } else {

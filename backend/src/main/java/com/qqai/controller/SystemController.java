@@ -23,6 +23,7 @@ import java.net.Socket;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 @RestController
@@ -37,17 +38,69 @@ public class SystemController {
                     .body(ApiResponse.error(400, "合成文本不能为空"));
         }
         String text = textObj.toString();
-        
+        // 可选角色参数
+        String character = request.get("character") != null ? request.get("character").toString() : null;
+
         Long userId = null;
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         if (auth != null && auth.getPrincipal() instanceof AuthPrincipal) {
             userId = ((AuthPrincipal) auth.getPrincipal()).userId();
         }
-        
-        String audioUrl = gptSovitsService.generateVoice(text, userId);
+
+        String audioUrl = gptSovitsService.generateVoice(text, userId, character);
         Map<String, Object> data = new HashMap<>();
         data.put("audioUrl", audioUrl);
+        data.put("character", gptSovitsService.getUserCharacter(userId));
         return ResponseEntity.ok(ApiResponse.success(data));
+    }
+
+    /**
+     * 获取可用 TTS 角色列表
+     */
+    @GetMapping("/tts/characters")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> listTtsCharacters() {
+        List<Map<String, String>> characters = gptSovitsService.listCharacters();
+        Long userId = null;
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth != null && auth.getPrincipal() instanceof AuthPrincipal) {
+            userId = ((AuthPrincipal) auth.getPrincipal()).userId();
+        }
+        Map<String, Object> data = new HashMap<>();
+        data.put("characters", characters);
+        data.put("current", gptSovitsService.getUserCharacter(userId));
+        return ResponseEntity.ok(ApiResponse.success(data));
+    }
+
+    /**
+     * 切换 TTS 角色（为当前用户设置偏好）
+     */
+    @PostMapping("/tts/switch-character")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> switchTtsCharacter(@RequestBody Map<String, Object> request) {
+        Object charObj = request.get("character");
+        if (charObj == null || charObj.toString().trim().isEmpty()) {
+            return ResponseEntity.badRequest()
+                    .body(ApiResponse.error(400, "角色名不能为空"));
+        }
+        String character = charObj.toString();
+
+        Long userId = null;
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth != null && auth.getPrincipal() instanceof AuthPrincipal) {
+            userId = ((AuthPrincipal) auth.getPrincipal()).userId();
+        }
+
+        try {
+            gptSovitsService.setCharacterForUser(userId, character);
+            Map<String, Object> data = new HashMap<>();
+            data.put("character", character);
+            return ResponseEntity.ok(ApiResponse.success(data));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest()
+                    .body(ApiResponse.error(400, e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(ApiResponse.error(500, "切换角色失败: " + e.getMessage()));
+        }
     }
     @Autowired
     private AstrBotService astrBotService;
@@ -367,10 +420,9 @@ public class SystemController {
     @GetMapping("/disk-usage")
     public ResponseEntity<ApiResponse<Map<String, Object>>> getDiskUsage() throws Exception {
         Map<String, Object> result = new HashMap<>();
-        // uploads 目录大小
+        // uploads 目录大小（backend/uploads/，相对于 user.dir）
         String projectRoot = System.getProperty("user.dir");
-        String uploadsPath = projectRoot + File.separator + ".." + File.separator + ".." + File.separator + "qq-ai-assistant" + File.separator + "uploads";
-        File uploadsDir = new File(uploadsPath).getCanonicalFile();
+        File uploadsDir = new File(projectRoot, "uploads").getCanonicalFile();
         long uploadsSize = 0;
         if (uploadsDir.exists() && uploadsDir.isDirectory()) {
             uploadsSize = calculateDirectorySize(uploadsDir);
