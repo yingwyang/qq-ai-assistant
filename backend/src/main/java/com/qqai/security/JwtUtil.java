@@ -24,6 +24,10 @@ public class JwtUtil {
     private long jwtExpiration;
     
     private SecretKey getSigningKey() {
+        if (jwtSecret == null || jwtSecret.isBlank()) {
+            throw new IllegalStateException(
+                "jwt.secret 未配置。请通过环境变量 JWT_SECRET 提供至少 32 字符的密钥。");
+        }
         return Keys.hmacShaKeyFor(jwtSecret.getBytes(StandardCharsets.UTF_8));
     }
 

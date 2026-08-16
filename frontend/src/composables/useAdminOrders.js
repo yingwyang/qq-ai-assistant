@@ -2,22 +2,27 @@ import { ref, reactive, computed } from 'vue';
 import { adminOrdersApi } from '../services/api';
 
 // 订单管理 Tab：筛选 + 分页 + 补单 + 取消/退款 + 详情抽屉 + 导出
-// 后端 OrderStatus: PENDING, PAID, REFUNDED, CANCELLED, EXPIRED
-// 后端 SubscriptionTier: FREE, LITE, PRO, PROPLUS, ULTRA
-// manualCreate planCode 接受: LITE / PRO / PROPLUS / ULTRA（priceCents 以分为单位）
+// 后端 OrderStatus: PENDING, PAID, PENDING_REFUND, DISPUTED, REFUNDED, CANCELLED, EXPIRED
+// 后端 SubscriptionTier: FREE, LITE, PRO, PROPLUS, ULTRA, MEGA, SMALL_MONTH_CARD, LARGE_MONTH_CARD
+// manualCreate planCode 接受: LITE / PRO / PROPLUS / ULTRA / MEGA / SMALL_MONTH_CARD / LARGE_MONTH_CARD
 export const ORDER_STATUS_OPTIONS = [
   { value: 'PENDING', label: '待支付' },
   { value: 'PAID', label: '已支付' },
+  { value: 'PENDING_REFUND', label: '退款审批中' },
+  { value: 'DISPUTED', label: '纠纷中' },
   { value: 'REFUNDED', label: '已退款' },
   { value: 'CANCELLED', label: '已取消' },
   { value: 'EXPIRED', label: '已过期' },
 ];
 
 export const ORDER_PLAN_OPTIONS = [
-  { value: 'LITE', label: '轻享版 Lite' },
-  { value: 'PRO', label: '专业版 Pro' },
-  { value: 'PROPLUS', label: '旗舰版 ProPlus' },
-  { value: 'ULTRA', label: '至尊版 Ultra' },
+  { value: 'LITE', label: '直购积分·600' },
+  { value: 'PRO', label: '直购积分·3500' },
+  { value: 'PROPLUS', label: '直购积分·16000' },
+  { value: 'ULTRA', label: '直购积分·45000' },
+  { value: 'MEGA', label: '直购积分·100000' },
+  { value: 'SMALL_MONTH_CARD', label: '小月卡' },
+  { value: 'LARGE_MONTH_CARD', label: '大月卡' },
 ];
 
 export function orderStatusText(s) {
@@ -79,6 +84,15 @@ export function useAdminOrders({ showSystemMsg } = {}) {
     visible: false,
     orderNo: '',
     reason: '',
+    submitting: false,
+  });
+
+  // 纠纷处理弹窗
+  const disputeModal = reactive({
+    visible: false,
+    orderNo: '',
+    reason: '',
+    agree: true, // true=同意退款, false=驳回
     submitting: false,
   });
 
@@ -228,6 +242,46 @@ export function useAdminOrders({ showSystemMsg } = {}) {
   function closeCancelModal() {
     cancelModal.visible = false;
   }
+  // 纠纷处理
+  function openDisputeModal(orderNo) {
+    disputeModal.visible = true;
+    disputeModal.orderNo = orderNo;
+    disputeModal.reason = '';
+    disputeModal.agree = true;
+    disputeModal.submitting = false;
+  }
+
+  function closeDisputeModal() {
+    disputeModal.visible = false;
+  }
+
+  async function submitResolveDispute() {
+    if (!disputeModal.orderNo) return;
+    if (!disputeModal.reason.trim()) {
+      if (showSystemMsg) showSystemMsg('请填写处理说明', 'error');
+      return;
+    }
+    disputeModal.submitting = true;
+    try {
+      const res = await adminOrdersApi.resolveDispute(disputeModal.orderNo, {
+        agree: disputeModal.agree,
+        reason: disputeModal.reason.trim(),
+      });
+      if (showSystemMsg) {
+        const rp = res?.refundPoints != null ? `，扣减 ${res.refundPoints} 积分` : '';
+        showSystemMsg(`纠纷处理完成：订单 ${disputeModal.orderNo} ${action}${rp}`);
+      }
+      closeDisputeModal();
+      await loadOrders(ordersPage.value);
+      if (detailDrawer.visible && detailDrawer.orderNo === disputeModal.orderNo) {
+        openOrderDetail(disputeModal.orderNo);
+      }
+    } catch (error) {
+      if (showSystemMsg) showSystemMsg('纠纷处理失败: ' + error.message, 'error');
+    } finally {
+      disputeModal.submitting = false;
+    }
+  }
 
   async function submitCancel() {
     if (!cancelModal.orderNo) return;
@@ -354,15 +408,31 @@ export function useAdminOrders({ showSystemMsg } = {}) {
     return evts;
   });
 
+  // 确认收款（PENDING → PAID）
+  async function submitApprovePayment(orderNo) {
+    if (!orderNo) return;
+    try {
+      const res = await adminOrdersApi.approvePayment(orderNo);
+      if (showSystemMsg) showSystemMsg(`订单 ${orderNo} 已确认收款，状态更新为已支付`);
+      await loadOrders(ordersPage.value);
+    } catch (error) {
+      if (showSystemMsg) showSystemMsg('确认收款失败: ' + error.message, 'error');
+    }
+  }
+
   return {
     orders, ordersLoading, ordersPage, ordersSize, ordersTotalElements, ordersTotalPages,
     ordersExporting, filters, statusMultiText,
-    manualModal, refundModal, cancelModal, detailDrawer, timelineEvents,
+    manualModal, refundModal, cancelModal, disputeModal, detailDrawer, timelineEvents,
     loadOrders, searchOrders, resetOrderFilters, goToOrdersPage,
     openManualModal, closeManualModal, submitManualCreate,
     openCancelModal, closeCancelModal, submitCancel,
+    openDisputeModal, closeDisputeModal, submitResolveDispute,
     openRefundModal, closeRefundModal, submitRefund,
     exportSingleOrder, exportOrders,
     openOrderDetail, closeOrderDetail,
+    submitApprovePayment,
   };
 }
+
+

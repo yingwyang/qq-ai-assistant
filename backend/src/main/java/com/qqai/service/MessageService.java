@@ -86,8 +86,19 @@ public class MessageService {
         return savedMessage;
     }
 
+    /**
+     * @deprecated QQ message_id 仅在群内唯一,跨群会重复,请使用 {@link #existsByMessageIdAndGroupId(String, String)}
+     */
+    @Deprecated
     public boolean existsByMessageId(String messageId) {
         return messageRepository.existsByMessageId(messageId);
+    }
+
+    /**
+     * 按 (群, QQ消息ID) 判断消息是否已存在(去重基准)
+     */
+    public boolean existsByMessageIdAndGroupId(String messageId, String groupId) {
+        return messageRepository.existsByMessageIdAndGroupId(messageId, groupId);
     }
 
     public Optional<Message> findByMessageId(String messageId) {
@@ -416,10 +427,15 @@ public class MessageService {
      * 保留 archived 原值（后台归档与用户删除两套独立语义）。
      */
     @Transactional
-    public void deleteMessage(Long id, Long userId) {
+    public void deleteMessage(Long id, Long userId, List<String> selfQqList) {
         Optional<Message> messageOpt = messageRepository.findById(id);
         if (messageOpt.isPresent()) {
             Message message = messageOpt.get();
+            // 属主校验：只有 selfQq 属于当前用户绑定列表才能删除
+            if (message.getSelfQq() == null || !selfQqList.contains(message.getSelfQq())) {
+                log.warn("user {} attempted to delete message {} with selfQq={} not in bindings", userId, id, message.getSelfQq());
+                return;
+            }
             message.setDeleted(true);
             message.setDeletedAt(java.time.LocalDateTime.now());
             message.setDeletedBy(userId);
@@ -515,6 +531,99 @@ public class MessageService {
     }
 
     /**
+     * 删除群聊会话（硬删除）：彻底删除指定 QQ 下该群的所有消息、媒体文件、群记录和已读状态。
+     * 适用于已退出群聊的清理，操作不可恢复。
+     *
+     * @param groupId   群号
+     * @param ownerQq   登录者QQ号（只删除该QQ接收的消息和群记录）
+     * @param userId    当前用户ID（用于清理已读状态）
+     * @return 删除统计信息：messageCount / mediaCount / groupDeleted / readStateDeleted
+     */
+    @Transactional
+    public Map<String, Object> deleteGroupConversation(String groupId, String ownerQq, Long userId) {
+        Map<String, Object> result = new HashMap<>();
+        if (groupId == null || groupId.isEmpty()
+                || ownerQq == null || ownerQq.isEmpty()
+                || userId == null) {
+            result.put("success", false);
+            result.put("message", "参数无效");
+            return result;
+        }
+
+        // 1. 查找该QQ在此群的所有消息（包括已软删除的，彻底清理）
+        List<Message> messages = messageRepository.findByGroupIdAndSelfQqOrderBySendTimeDesc(groupId, ownerQq);
+        int messageCount = messages == null ? 0 : messages.size();
+        int mediaCount = 0;
+
+        // 2. 删除关联的本地媒体文件（图片/视频/音频/语音）
+        if (messages != null && !messages.isEmpty()) {
+            for (Message message : messages) {
+                Message.MessageType type = message.getMessageType();
+                if (type != null
+                        && (type == Message.MessageType.IMAGE
+                            || type == Message.MessageType.VIDEO
+                            || type == Message.MessageType.AUDIO
+                            || type == Message.MessageType.VOICE)) {
+                    try {
+                        File media = extractFileFromMessage(message);
+                        if (media != null && media.exists()) {
+                            if (media.delete()) {
+                                mediaCount++;
+                                log.info("user {} deleted media file on group-delete: {}", userId, media.getAbsolutePath());
+                            } else {
+                                log.warn("failed to delete media file on group-delete: {}", media.getAbsolutePath());
+                            }
+                        }
+                    } catch (Exception ex) {
+                        log.warn("extract file from message {} failed on group-delete: {}", message.getId(), ex.getMessage());
+                    }
+                }
+            }
+            // 3. 硬删除所有消息记录
+            messageRepository.deleteAll(messages);
+            messageRepository.flush();
+        }
+
+        // 4. 删除群记录（chat_groups 中 groupId + ownerQq 对应的记录）
+        int groupDeleted = 0;
+        try {
+            Optional<Group> groupOpt = groupRepository.findByGroupIdAndOwnerQq(groupId, ownerQq);
+            if (groupOpt.isPresent()) {
+                groupRepository.delete(groupOpt.get());
+                groupRepository.flush();
+                groupDeleted = 1;
+            }
+        } catch (Exception e) {
+            log.warn("删除群记录失败 groupId={}, ownerQq={}: {}", groupId, ownerQq, e.getMessage());
+        }
+
+        // 5. 删除该用户对此群的已读状态
+        int readStateDeleted = 0;
+        try {
+            Optional<com.qqai.entity.GroupReadState> rsOpt =
+                    groupReadStateRepository.findByUserIdAndGroupId(userId, groupId);
+            if (rsOpt.isPresent()) {
+                groupReadStateRepository.delete(rsOpt.get());
+                groupReadStateRepository.flush();
+                readStateDeleted = 1;
+            }
+        } catch (Exception e) {
+            log.warn("删除群已读状态失败 groupId={}, userId={}: {}", groupId, userId, e.getMessage());
+        }
+
+        log.info("user {} deleted group conversation: groupId={}, ownerQq={}, messages={}, media={}, group={}, readState={}",
+                userId, groupId, ownerQq, messageCount, mediaCount, groupDeleted, readStateDeleted);
+
+        result.put("success", true);
+        result.put("messageCount", messageCount);
+        result.put("mediaCount", mediaCount);
+        result.put("groupDeleted", groupDeleted);
+        result.put("readStateDeleted", readStateDeleted);
+        result.put("message", String.format("已删除 %d 条消息、%d 个媒体文件", messageCount, mediaCount));
+        return result;
+    }
+
+    /**
      * 从消息 content / fileId 中尝试解析本地文件（以 /images/ 开头的相对路径或绝对路径）。
      * 找不到本地文件时返回 null（避免上层代码 NPE）。
      */
@@ -523,7 +632,13 @@ public class MessageService {
         if (content != null && content.startsWith("/images/")) {
             String relative = content.startsWith("/") ? content.substring(1) : content;
             String relativePath = relative.startsWith("images/") ? relative.substring("images/".length()) : relative;
-            java.nio.file.Path path = java.nio.file.Paths.get(localStoragePath).resolve(relativePath);
+            java.nio.file.Path basePath = java.nio.file.Paths.get(localStoragePath).toAbsolutePath().normalize();
+            java.nio.file.Path path = basePath.resolve(relativePath).normalize();
+            // 路径穿越防护：解析后的路径必须以 localStoragePath 为根
+            if (!path.startsWith(basePath)) {
+                log.warn("路径穿越攻击检测: content={}, resolved={}", content, path);
+                return null;
+            }
             return path.toFile();
         }
         return null;

@@ -388,6 +388,7 @@ public class AstrBotController {
         try {
             // 1. 从数据库获取最近的消息
             // 首先尝试用 groupId 查询，如果为空，再尝试用 group_name 查询
+            String resolvedGroupId = groupId;
             List<Message> messages = messageService.getMessagesByGroupId(groupId);
             
             // 如果 groupId 查询为空，尝试用 group_name 查询
@@ -402,11 +403,18 @@ public class AstrBotController {
                     if (result != null) {
                         String actualGroupId = result.toString();
                         log.debug("找到群号: {}", actualGroupId);
+                        resolvedGroupId = actualGroupId;
                         messages = messageService.getMessagesByGroupId(actualGroupId);
                     }
                 } catch (Exception e) {
                     log.warn("群名查询失败: {}", e.getMessage());
                 }
+            }
+
+            // 权限:仅允许分析自己绑定 QQ 拥有的群(管理员豁免)
+            if (!securityHelper.isAdmin() && !securityHelper.hasGroupAccess(resolvedGroupId)) {
+                return ResponseEntity.status(403)
+                        .body(Map.of("status", "error", "message", "无权分析该群聊"));
             }
             
             // 2. 构造富媒体消息内容 + 分析提示词
@@ -670,10 +678,28 @@ public class AstrBotController {
         }
 
         try {
+            // 权限:分析指定群时需要该群访问权限(管理员豁免)
+            if (groupId != null && !groupId.isBlank()
+                    && !securityHelper.isAdmin() && !securityHelper.hasGroupAccess(groupId)) {
+                return ResponseEntity.status(403).body(Map.of(
+                        "status", "error", "message", "无权分析该群聊"));
+            }
+
             // 2. 按 ID 查消息（逐个查询，保证兼容）
             List<Message> messages = new ArrayList<>();
+            List<String> userQqBindings = securityHelper.getCurrentUserQqBindings();
+            boolean isAdminUser = securityHelper.isAdmin();
             for (Long mid : messageIds) {
-                messageService.getMessageById(mid).ifPresent(messages::add);
+                messageService.getMessageById(mid).ifPresent(m -> {
+                    // 归属校验:消息必须属于当前用户绑定的 QQ(或管理员),且与 groupId 一致
+                    if (groupId != null && !groupId.isBlank() && !groupId.equals(m.getGroupId())) {
+                        return;
+                    }
+                    if (!isAdminUser && (m.getSelfQq() == null || !userQqBindings.contains(m.getSelfQq()))) {
+                        return;
+                    }
+                    messages.add(m);
+                });
             }
             if (messages.isEmpty()) {
                 return ResponseEntity.ok(Map.of("status", "error", "message", "未找到匹配的消息"));
@@ -980,6 +1006,14 @@ public class AstrBotController {
         String currentConversationId = null;
         try {
             Long userId = securityHelper.getCurrentUserId();
+
+            // 权限:带群上下文聊天时需要该群访问权限(管理员豁免)
+            if (groupId != null && !groupId.isBlank()
+                    && !securityHelper.isAdmin() && !securityHelper.hasGroupAccess(groupId)) {
+                return ResponseEntity.status(403).body(Map.of(
+                        "status", "error", "message", "无权在该群聊使用 AI 对话"));
+            }
+
             AstrBotConversation conversation = conversationService.getOrCreateConversation(
                     conversationId, userId, groupId, userQq, userNickname, model);
             currentConversationId = conversation.getConversationId();

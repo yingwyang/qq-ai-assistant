@@ -6,7 +6,7 @@
 |------|------|------|
 | 前端 | Vue 3 + Vite | SPA 单页应用 |
 | 图表 | ECharts (vue-echarts) | 数据可视化 |
-| 后端 | Spring Boot 3 + Java 21 | RESTful API |
+| 后端 | Spring Boot 3 + Java 17 | RESTful API |
 | 数据库 | MySQL 8.0 | 数据持久化 |
 | 消息队列 | RabbitMQ | 异步消息处理 |
 | ORM | Spring Data JPA | 数据访问层 |

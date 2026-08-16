@@ -245,16 +245,20 @@ class CreditControllerIntegrationTest {
     }
 
     @Test
-    void testGetPlans_Returns4Items() {
+    void testGetPlans_ReturnsPlans() {
         loginAs(userA);
-        ResponseEntity<ApiResponse<List<Map<String, Object>>>> resp =
+        ResponseEntity<ApiResponse<Map<String, Object>>> resp =
                 transactionTemplate.execute(s -> subscriptionsController.getPlans());
         assertNotNull(resp);
         assertNotNull(resp.getBody());
         assertEquals(200, resp.getBody().getCode());
-        List<Map<String, Object>> plans = resp.getBody().getData();
+        Map<String, Object> data = resp.getBody().getData();
+        assertNotNull(data);
+        // 新结构: { plans, directPlans, monthlyCards, groups }
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> plans = (List<Map<String, Object>>) data.get("plans");
         assertNotNull(plans);
-        assertEquals(4, plans.size(), "应返回4档套餐，实际: " + plans.size());
+        assertTrue(plans.size() >= 4, "应至少返回4档套餐，实际: " + plans.size());
         for (Map<String, Object> p : plans) {
             assertTrue(p.containsKey("planCode"));
             assertTrue(p.containsKey("pointsGranted"));
@@ -266,7 +270,7 @@ class CreditControllerIntegrationTest {
     }
 
     @Test
-    void testPurchase_ReturnsOrderAndBalance() {
+    void testPurchase_CreatesPendingOrderOnly() {
         loginAs(userB);
         transactionTemplate.executeWithoutResult(s -> creditService.ensureAccount(userB.getId()));
 
@@ -281,14 +285,12 @@ class CreditControllerIntegrationTest {
         Map<String, Object> data = resp.getBody().getData();
         assertNotNull(data);
         assertNotNull(data.get("orderNo"));
-        assertEquals("PAID", data.get("status"));
-        assertTrue(((Integer) data.get("newBalance")) >= 2000,
-                "LITE套餐到账后余额应>=2000，实际: " + data.get("newBalance"));
-        assertTrue(((Integer) data.get("pointsGranted")) >= 1,
-                "pointsGranted 应 >= 1");
-        assertNotNull(data.get("expiresAt"));
-        System.out.println("purchase接口通过: orderNo=" + data.get("orderNo")
-                + " pointsGranted=" + data.get("pointsGranted") + " newBalance=" + data.get("newBalance"));
+        // 安全整改:购买只创建 PENDING 订单,权益由管理员确认到账后发放,不允许自付自过
+        assertEquals("PENDING", data.get("status"));
+        assertNotNull(data.get("price"));
+        assertNotNull(data.get("creditAmount"));
+        assertNotNull(data.get("message"));
+        System.out.println("purchase接口通过(待确认): orderNo=" + data.get("orderNo"));
         logout();
     }
 }

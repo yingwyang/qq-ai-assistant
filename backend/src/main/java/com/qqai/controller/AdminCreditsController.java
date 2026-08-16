@@ -274,6 +274,8 @@ public class AdminCreditsController {
         pageData.put("size", txPage.getSize());
         pageData.put("first", txPage.isFirst());
         pageData.put("last", txPage.isLast());
+        pageData.put("summary", creditService.summaryTransactionsAdmin(
+                userId, txType, dir, startDt, endDt, min, max, relatedId));
 
         ApiResponse<Map<String, Object>> resp = ApiResponse.success(pageData);
         response.setContentType(MediaType.APPLICATION_JSON_VALUE + ";charset=UTF-8");

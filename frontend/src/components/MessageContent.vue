@@ -173,7 +173,9 @@
 import { computed, ref } from 'vue';
 import { showToast } from './Toast.vue';
 import RichTextRenderer from './RichTextRenderer.vue';
-import { systemApi } from '../services/api';
+import { systemApi, formatFileSize } from '../services/api';
+import { useImagePreview } from '../composables/useImagePreview';
+import { extractForwardXmlTitles, extractForwardMessages } from '../utils/messageParser';
 
 export default {
   name: 'MessageContent',
@@ -190,6 +192,7 @@ export default {
   },
   emits: ['navigate-to-message'],
   setup(props, { emit }) {
+    const { open: openImage } = useImagePreview();
     const isPlaying = ref(false);
     const voiceDuration = ref(0);
     const decodeHtmlEntities = (text) => {
@@ -339,68 +342,9 @@ export default {
       }
     };
 
-    // 从 XML 字符串中提取所有 <item> 下的 <title> 文本
-    const extractForwardXmlTitles = (xmlStr) => {
-      if (!xmlStr || !xmlStr.includes('<msg')) return [];
-      const msgMatch = xmlStr.match(/<msg[\s\S]*?<\/msg>/);
-      if (!msgMatch) return [];
-      let xml = msgMatch[0]
-        .replace(/&lt;/g, '<')
-        .replace(/&gt;/g, '>')
-        .replace(/&amp;/g, '&')
-        .replace(/&quot;/g, '"')
-        .replace(/&#39;/g, "'");
-      try {
-        const parser = new DOMParser();
-        const doc = parser.parseFromString(xml, 'text/xml');
-        return Array.from(doc.querySelectorAll('item title')).map(t => t.textContent || '');
-      } catch (e) {
-        return [];
-      }
-    };
+    // extractForwardXmlTitles / extractForwardMessages 从 utils/messageParser.js 导入
 
-    // 解析嵌套的转发消息列表
-    const extractForwardMessages = () => {
-      if (Array.isArray(props.message.forwardMessages)) {
-        return props.message.forwardMessages;
-      }
-      const c = content.value;
-      if (!c || c.trim() === '') return [];
-      // 尝试从内容中解析 JSON 数组或对象
-      try {
-        const jsonMatch = c.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
-        if (jsonMatch) {
-          const parsed = JSON.parse(jsonMatch[1]);
-          if (Array.isArray(parsed)) return parsed;
-          if (parsed.messages && Array.isArray(parsed.messages)) return parsed.messages;
-          if (parsed.content && Array.isArray(parsed.content)) return parsed.content;
-          if (parsed.xmlContent && typeof parsed.xmlContent === 'string') {
-            const titles = extractForwardXmlTitles(parsed.xmlContent);
-            return titles.slice(1).map((text, index) => ({
-              id: `forward-${props.message.id}-${index}`,
-              userNickname: '',
-              content: text,
-              messageType: 'TEXT'
-            }));
-          }
-        }
-      } catch (e) {
-        // 解析失败则忽略
-      }
-      // 尝试直接解析 XML 内容
-      if (c.includes('<msg') && c.includes('</msg>')) {
-        const titles = extractForwardXmlTitles(c);
-        return titles.slice(1).map((text, index) => ({
-          id: `forward-${props.message.id}-${index}`,
-          userNickname: '',
-          content: text,
-          messageType: 'TEXT'
-        }));
-      }
-      return [];
-    };
-
-    const forwardMessages = computed(() => extractForwardMessages());
+    const forwardMessages = computed(() => extractForwardMessages(props.message));
 
     // 聊天记录摘要
     const forwardSummary = computed(() => {
@@ -828,21 +772,7 @@ export default {
       return text || '[不支持的消息类型]';
     });
     
-    // 格式化文件大小
-    const formatFileSize = (bytes) => {
-      if (bytes === 0) return '0 B';
-      const k = 1024;
-      const sizes = ['B', 'KB', 'MB', 'GB'];
-      const i = Math.floor(Math.log(bytes) / Math.log(k));
-      return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-    };
-    
-    // 打开图片预览
-    const openImage = (url) => {
-      if (url) {
-        window.open(url, '_blank');
-      }
-    };
+    // formatFileSize 从 services/api 导入
     
     // 语音播放控制（使用 new Audio 避免进入聊天时自动加载触发错误提示）
     const isConverting = ref(false);

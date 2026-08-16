@@ -2,16 +2,22 @@ package com.qqai.websocket;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.qqai.dto.webhook.MediaTaskPayload;
+import com.qqai.dto.webhook.MessageParseResult;
 import com.qqai.entity.Message;
-import com.qqai.service.MessageService;
-import com.qqai.service.NapCatService;
+import com.qqai.entity.UserQqBinding;
 import com.qqai.repository.MessageRepository;
+import com.qqai.repository.UserQqBindingRepository;
+import com.qqai.service.GroupService;
+import com.qqai.service.MessageParserService;
+import com.qqai.service.MessageQueueService;
+import com.qqai.service.MessageService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
@@ -23,10 +29,16 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * NapCat WebSocket处理器 - 接收QQ消息
+ * NapCat WebSocket处理器 - 接收QQ消息(OneBot 11 正向 WS)。
+ *
+ * 与 HTTP Webhook 通道(RootWebhookController)保持同一套入库逻辑:
+ * - 去重按 (groupId, messageId) 组合,避免跨群 message_id 重复导致误丢消息;
+ * - 使用 MessageParserService.parseLightweight 解析,媒体任务统一投递 RabbitMQ;
+ * - 绑定系统 user_id(QQ 绑定关系)。
  */
 @Component
 public class NapCatWebSocketHandler extends TextWebSocketHandler {
@@ -40,7 +52,16 @@ public class NapCatWebSocketHandler extends TextWebSocketHandler {
     private MessageRepository messageRepository;
 
     @Autowired
-    private NapCatService napCatService;
+    private MessageParserService messageParserService;
+
+    @Autowired
+    private MessageQueueService messageQueueService;
+
+    @Autowired
+    private GroupService groupService;
+
+    @Autowired
+    private UserQqBindingRepository userQqBindingRepository;
 
     @Value("${napcat.self-qq:}")
     private String fallbackSelfQq;
@@ -53,7 +74,7 @@ public class NapCatWebSocketHandler extends TextWebSocketHandler {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Override
-    public void afterConnectionEstablished(WebSocketSession session) throws Exception {
+    public void afterConnectionEstablished(WebSocketSession session) {
         String sessionId = session.getId();
         sessions.put(sessionId, session);
         log.info("NapCat WebSocket连接已建立: {}", sessionId);
@@ -61,12 +82,11 @@ public class NapCatWebSocketHandler extends TextWebSocketHandler {
     }
 
     @Override
-    protected void handleTextMessage(WebSocketSession session, TextMessage message) throws Exception {
+    protected void handleTextMessage(WebSocketSession session, TextMessage message) {
         String payload = message.getPayload();
         log.debug("收到NapCat消息: {}", payload);
 
         try {
-            // 解析OneBot 11协议消息
             ObjectNode json = (ObjectNode) objectMapper.readTree(payload);
             String postType = json.has("post_type") ? json.get("post_type").asText() : null;
 
@@ -84,210 +104,113 @@ public class NapCatWebSocketHandler extends TextWebSocketHandler {
     }
 
     /**
-     * 处理消息事件
+     * 处理消息事件(与 HTTP Webhook 通道保持逻辑一致)
      */
     private void handleMessageEvent(ObjectNode json) {
-        String messageType = json.has("message_type") ? json.get("message_type").asText() : null;
+        try {
+            MessageParseResult parsed = messageParserService.parseLightweight(json);
 
-        // 只处理群聊消息
-        if (!"group".equals(messageType)) {
-            return;
-        }
+            // 只处理群聊消息
+            if (parsed.getGroupId() == null) {
+                return;
+            }
+            if (parsed.getUserId() == null) {
+                log.warn("消息缺少必要字段: groupId={}", parsed.getGroupId());
+                return;
+            }
 
-        // 提取消息信息
-        Long groupId = json.has("group_id") ? json.get("group_id").asLong() : null;
-        ObjectNode sender = (ObjectNode) json.get("sender");
-        Long userId = (sender != null && sender.has("user_id")) ? sender.get("user_id").asLong() : null;
-        String nickname = (sender != null && sender.has("nickname")) ? sender.get("nickname").asText() : null;
-        String rawMessage = json.has("raw_message") ? json.get("raw_message").asText() : null;
-        Integer messageId = json.has("message_id") ? json.get("message_id").asInt() : null;
-        Long rawMsgTime = json.has("time") ? json.get("time").asLong() : null;
-        Integer msgSeq = json.has("message_seq") ? json.get("message_seq").asInt() : null;
+            String finalMessageId = parsed.getMessageId() != null ? String.valueOf(parsed.getMessageId()) : null;
+            String groupIdStr = String.valueOf(parsed.getGroupId());
+            if (finalMessageId != null && messageRepository.existsByMessageIdAndGroupId(finalMessageId, groupIdStr)) {
+                log.debug("消息已存在，跳过: messageId={}, groupId={}", finalMessageId, groupIdStr);
+                return;
+            }
 
-        // 动态获取当前登录QQ：优先使用上报的 self_id，否则使用配置兜底
-        Long selfIdLong = json.has("self_id") ? json.get("self_id").asLong() : null;
-        String currentSelfQq = selfIdLong != null ? String.valueOf(selfIdLong)
-                : (fallbackSelfQq != null && !fallbackSelfQq.isEmpty() ? fallbackSelfQq : null);
+            String nickname = parsed.getNickname() != null && !parsed.getNickname().isEmpty()
+                    ? parsed.getNickname() : String.valueOf(parsed.getUserId());
+            String groupName = parsed.getGroupName() != null && !parsed.getGroupName().isEmpty()
+                    ? parsed.getGroupName() : groupIdStr;
 
-        if (groupId == null || userId == null) {
-            log.warn("消息缺少必要字段");
-            return;
-        }
+            // 当前登录 QQ
+            Long selfIdLong = json.has("self_id") ? json.get("self_id").asLong() : null;
+            String currentSelfQq = selfIdLong != null ? String.valueOf(selfIdLong)
+                    : (fallbackSelfQq != null && !fallbackSelfQq.isEmpty() ? fallbackSelfQq : null);
+            boolean isSelfMessage = currentSelfQq != null && currentSelfQq.equals(String.valueOf(parsed.getUserId()));
 
-        String finalMessageId = messageId != null ? String.valueOf(messageId) : null;
-        if (finalMessageId != null && messageRepository.existsByMessageId(finalMessageId)) {
-            log.debug("消息已存在，跳过: messageId={}", finalMessageId);
-            return;
-        }
+            log.info("收到群聊消息: 群{} 用户{}: {}", groupIdStr, parsed.getUserId(), parsed.getRawMessage());
 
-        log.info("收到群聊消息: 群{} 用户{}: {}", groupId, userId, rawMessage);
+            // 创建消息实体
+            Message message = new Message();
+            message.setMessageId(finalMessageId != null ? finalMessageId : String.valueOf(System.currentTimeMillis()));
+            message.setGroupId(groupIdStr);
+            message.setGroupName(groupName);
+            message.setUserQq(String.valueOf(parsed.getUserId()));
+            message.setUserNickname(nickname);
+            message.setMessageType(parsed.getMsgType() != null ? parsed.getMsgType() : Message.MessageType.TEXT);
+            message.setContent(parsed.getRawMessage() != null ? parsed.getRawMessage() : "");
+            message.setReplyToMessageId(parsed.getReplyToMessageId());
+            message.setReplyToNickname(parsed.getReplyToNickname());
+            message.setReplyToContent(parsed.getReplyToContent());
+            message.setForwardContent(parsed.getForwardContent());
+            message.setMiniAppContent(parsed.getMiniAppContent());
+            message.setRawMsgTime(parsed.getRawMsgTime());
+            message.setMsgSeq(parsed.getMsgSeq());
+            message.setServerRecvMs(System.currentTimeMillis());
+            message.setSendTime(parsed.getRawMsgTime() != null
+                    ? LocalDateTime.ofInstant(Instant.ofEpochSecond(parsed.getRawMsgTime()), ZONE_SHANGHAI)
+                    : LocalDateTime.now());
+            message.setSelfQq(currentSelfQq);
+            message.setSelfMessage(isSelfMessage);
 
-        // 创建消息实体
-        Message message = new Message();
-        message.setMessageId(finalMessageId);
-        message.setGroupId(String.valueOf(groupId));
-        message.setGroupName(String.valueOf(groupId)); // 暂时使用群号作为名称
-        message.setUserQq(String.valueOf(userId));
-        message.setUserNickname(nickname != null ? nickname : String.valueOf(userId));
-        Message.MessageType msgType = resolveMessageType(rawMessage);
-        message.setMessageType(msgType);
-        message.setContent(rawMessage);
-        if (msgType == Message.MessageType.FORWARD) {
-            // 优先从 NapCat 解析后的 message 数组中提取子消息（需要 parseMultMsg=true）
-            ArrayNode parsedForwardMessages = napCatService.extractForwardMessagesFromPayload(json);
-            if (parsedForwardMessages != null && !parsedForwardMessages.isEmpty()) {
-                napCatService.downloadForwardMediaToLocal(parsedForwardMessages, String.valueOf(groupId));
-                message.setForwardContent(parsedForwardMessages.toString());
-                log.info("WebSocket 从 message 数组解析到合并转发消息详情, 共 {} 条子消息", parsedForwardMessages.size());
-            } else {
-                // Fallback：尝试通过 API 拉取（需要 NapCat 本地缓存该消息）
-                String forwardId = extractForwardId(rawMessage);
-                if (forwardId != null && !forwardId.isEmpty()) {
-                    try {
-                        ArrayNode forwardMessages = napCatService.getForwardMsg(forwardId);
-                        if (forwardMessages != null && !forwardMessages.isEmpty()) {
-                            napCatService.downloadForwardMediaToLocal(forwardMessages, String.valueOf(groupId));
-                            message.setForwardContent(forwardMessages.toString());
-                            log.info("WebSocket 合并转发消息详情已拉取, forwardId={}, 共 {} 条子消息", forwardId, forwardMessages.size());
-                        }
-                    } catch (Exception e) {
-                        log.error("WebSocket 拉取合并转发消息详情失败, forwardId={}: {}", forwardId, e.getMessage());
+            Long userId = resolveUserIdByQq(String.valueOf(parsed.getUserId()));
+            message.setUserId(userId);
+
+            // 若含媒体任务,标记 mediaPending=true(消费者完成后回填并推送 message_update)
+            boolean hasMediaTasks = parsed.getMediaTasks() != null && !parsed.getMediaTasks().isEmpty();
+            message.setMediaPending(hasMediaTasks);
+
+            // 保存到数据库
+            Message savedMessage;
+            try {
+                savedMessage = messageService.saveMessage(message);
+            } catch (DataIntegrityViolationException e) {
+                log.debug("消息已存在(数据库唯一约束冲突): messageId={}", finalMessageId);
+                return;
+            }
+            log.info("消息已保存到数据库, ID: {}, mediaPending={}", savedMessage.getId(), hasMediaTasks);
+
+            // 投递媒体任务到 RabbitMQ(与 HTTP Webhook 通道一致)
+            if (hasMediaTasks) {
+                for (MediaTaskPayload task : parsed.getMediaTasks()) {
+                    task.setMessageId(savedMessage.getId());
+                    if ("voice".equals(task.getMediaType())) {
+                        messageQueueService.sendVoiceTranscode(task);
+                    } else {
+                        messageQueueService.sendMediaDownload(task);
                     }
                 }
+                log.info("已投递 {} 个媒体任务, dbId={}", parsed.getMediaTasks().size(), savedMessage.getId());
             }
-        }
-        if (msgType == Message.MessageType.REPLY) {
-            Long replyQqMessageId = extractReplyMessageId(rawMessage);
-            if (replyQqMessageId != null) {
-                java.util.Optional<Message> replied = messageRepository.findByMessageId(String.valueOf(replyQqMessageId));
-                if (replied.isPresent()) {
-                    Message target = replied.get();
-                    message.setReplyToMessageId(target.getId());
-                    message.setReplyToNickname(target.getUserNickname());
-                    message.setReplyToContent(buildReplyToContent(target));
-                }
-            }
-        }
-        message.setRawMsgTime(rawMsgTime);
-        message.setMsgSeq(msgSeq);
-        message.setServerRecvMs(System.currentTimeMillis());
-        message.setSendTime(rawMsgTime != null
-                ? LocalDateTime.ofInstant(Instant.ofEpochSecond(rawMsgTime), ZONE_SHANGHAI)
-                : LocalDateTime.now());
-        message.setSelfQq(currentSelfQq);
-        message.setSelfMessage(currentSelfQq != null && currentSelfQq.equals(String.valueOf(userId)));
 
-        // 保存到数据库
-        try {
-            Message savedMessage = messageService.saveMessage(message);
-            log.info("消息已保存到数据库, ID: {}", savedMessage.getId());
-        } catch (Exception e) {
-            log.error("保存消息失败: {}", e.getMessage(), e);
-        }
-    }
-
-    /**
-     * 根据 raw_message 中的 CQ 码解析消息类型。
-     * 只处理转发和回复类型，其他保持 TEXT（具体文件类型由 Webhook 控制器处理）。
-     */
-    private Message.MessageType resolveMessageType(String rawMessage) {
-        if (rawMessage == null || !rawMessage.contains("[CQ:")) {
-            return Message.MessageType.TEXT;
-        }
-        if (rawMessage.contains("[CQ:forward")) {
-            return Message.MessageType.FORWARD;
-        }
-        if (rawMessage.contains("[CQ:reply")) {
-            return Message.MessageType.REPLY;
-        }
-        return Message.MessageType.TEXT;
-    }
-
-    /**
-     * 从 raw_message 中提取 [CQ:forward,id=...] 的转发消息 ID。
-     */
-    private String extractForwardId(String rawMessage) {
-        if (rawMessage == null) {
-            return null;
-        }
-        try {
-            int start = rawMessage.indexOf("[CQ:forward");
-            if (start < 0) {
-                return null;
-            }
-            int end = rawMessage.indexOf(']', start);
-            if (end < 0) {
-                return null;
-            }
-            String cq = rawMessage.substring(start, end + 1);
-            java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("id=([^,\\]]+)");
-            java.util.regex.Matcher matcher = pattern.matcher(cq);
-            if (matcher.find()) {
-                return matcher.group(1).trim();
+            // 保存群聊信息(与 HTTP Webhook 通道一致)
+            String ownerQq = isSelfMessage ? String.valueOf(parsed.getUserId())
+                    : (currentSelfQq != null ? currentSelfQq : String.valueOf(parsed.getUserId()));
+            try {
+                groupService.saveGroupInfo(ownerQq, groupIdStr, groupName);
+            } catch (Exception e) {
+                log.warn("保存群聊信息失败 groupId={}: {}", groupIdStr, e.getMessage());
             }
         } catch (Exception e) {
-            log.error("解析 forward CQ 码失败: {}", e.getMessage());
+            log.error("处理消息事件失败: {}", e.getMessage(), e);
         }
-        return null;
     }
 
-    /**
-     * 从 raw_message 中提取 [CQ:reply,id=...] 的被引用消息 ID。
-     * 如果 id 不是数字字符串则返回 null。
-     */
-    private Long extractReplyMessageId(String rawMessage) {
-        if (rawMessage == null) {
+    private Long resolveUserIdByQq(String qqNumber) {
+        if (qqNumber == null || qqNumber.isEmpty()) {
             return null;
         }
-        try {
-            int start = rawMessage.indexOf("[CQ:reply");
-            if (start < 0) {
-                return null;
-            }
-            int end = rawMessage.indexOf(']', start);
-            if (end < 0) {
-                return null;
-            }
-            String cq = rawMessage.substring(start, end + 1);
-            java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("id=([^,\\]]+)");
-            java.util.regex.Matcher matcher = pattern.matcher(cq);
-            if (matcher.find()) {
-                String idStr = matcher.group(1).trim();
-                return Long.parseLong(idStr);
-            }
-        } catch (NumberFormatException e) {
-            // id 不是数字，忽略
-        } catch (Exception e) {
-            log.error("解析 reply CQ 码失败: {}", e.getMessage());
-        }
-        return null;
-    }
-
-    /**
-     * 构造被引用消息的内容摘要。
-     * 优先使用目标消息自身内容（移除 CQ:reply 码后）；
-     * 如果目标消息本身也是一条引用且没有额外文本，则回退到目标所引用的内容，
-     * 避免"引用的引用"在预览中显示为空或错误索引。
-     */
-    private String buildReplyToContent(Message target) {
-        if (target == null) {
-            return null;
-        }
-        String content = target.getContent();
-        if (content != null) {
-            content = content.replaceAll("\\[CQ:reply[^\\]]*\\]", "").trim();
-            if (!content.isEmpty()) {
-                return content;
-            }
-        }
-        String innerReplyContent = target.getReplyToContent();
-        if (innerReplyContent != null) {
-            innerReplyContent = innerReplyContent.replaceAll("\\[CQ:reply[^\\]]*\\]", "").trim();
-            if (!innerReplyContent.isEmpty()) {
-                return innerReplyContent;
-            }
-        }
-        return null;
+        Optional<UserQqBinding> binding = userQqBindingRepository.findByQqNumber(qqNumber);
+        return binding.map(UserQqBinding::getUserId).orElse(null);
     }
 
     /**
@@ -309,7 +232,7 @@ public class NapCatWebSocketHandler extends TextWebSocketHandler {
     }
 
     @Override
-    public void afterConnectionClosed(WebSocketSession session, CloseStatus status) throws Exception {
+    public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {
         String sessionId = session.getId();
         sessions.remove(sessionId);
         log.info("NapCat WebSocket连接已关闭: {}", sessionId);
@@ -317,7 +240,7 @@ public class NapCatWebSocketHandler extends TextWebSocketHandler {
     }
 
     @Override
-    public void handleTransportError(WebSocketSession session, Throwable exception) throws Exception {
+    public void handleTransportError(WebSocketSession session, Throwable exception) {
         log.error("WebSocket传输错误: {}", exception.getMessage());
         sessions.remove(session.getId());
     }

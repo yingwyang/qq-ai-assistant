@@ -53,23 +53,57 @@ public class SubscriptionsController {
     private AuditLogService auditLogService;
 
     @GetMapping("/plans")
-    public ResponseEntity<ApiResponse<List<Map<String, Object>>>> getPlans() {
+    public ResponseEntity<ApiResponse<Map<String, Object>>> getPlans() {
         Long userId = securityHelper.requireCurrentUserId();
         CreditRule rule = creditRuleService.getRule();
-        List<Map<String, Object>> plans = new ArrayList<>();
-        plans.add(planToMap("LITE", "轻享版", rule.getPlanLitePrice(), rule.getPlanLiteCredit(),
-                rule.getPlanDurationDays(), SubscriptionTier.LITE,
-                Arrays.asList("2000积分/月", "基础模型支持", "标准响应速度")));
-        plans.add(planToMap("PRO", "专业版", rule.getPlanProPrice(), rule.getPlanProCredit(),
-                rule.getPlanDurationDays(), SubscriptionTier.PRO,
-                Arrays.asList("4000积分/月", "全模型支持", "优先响应", "历史消息记忆增强")));
-        plans.add(planToMap("PROPLUS", "旗舰版", rule.getPlanProPlusPrice(), rule.getPlanProPlusCredit(),
-                rule.getPlanDurationDays(), SubscriptionTier.PROPLUS,
-                Arrays.asList("12000积分/月", "全模型支持", "高优先级队列", "高级分析功能", "群消息AI总结")));
-        plans.add(planToMap("ULTRA", "至尊版", rule.getPlanUltraPrice(), rule.getPlanUltraCredit(),
-                rule.getPlanDurationDays(), SubscriptionTier.ULTRA,
-                Arrays.asList("40000积分/月", "全模型支持", "最高优先级", "全部高级功能", "专属客服支持")));
-        return ResponseEntity.ok(ApiResponse.success(plans));
+        Integer durationDays = rule.getPlanDurationDays();
+
+        List<Map<String, Object>> directPlans = new ArrayList<>();
+        // LITE/PRO/PROPLUS/ULTRA 从 creditRuleService 读取价格和积分
+        directPlans.add(planToMap("LITE", "直购积分·" + rule.getPlanLiteCredit(), rule.getPlanLitePrice(), rule.getPlanLiteCredit(),
+                durationDays, SubscriptionTier.LITE, "DIRECT",
+                Arrays.asList(rule.getPlanLiteCredit() + " 积分", "基础模型支持", "标准响应速度")));
+        directPlans.add(planToMap("PRO", "直购积分·" + rule.getPlanProCredit(), rule.getPlanProPrice(), rule.getPlanProCredit(),
+                durationDays, SubscriptionTier.PRO, "DIRECT",
+                Arrays.asList(rule.getPlanProCredit() + " 积分", "全模型支持", "优先响应", "30 天文件存储")));
+        directPlans.add(planToMap("PROPLUS", "直购积分·" + rule.getPlanProPlusCredit(), rule.getPlanProPlusPrice(), rule.getPlanProPlusCredit(),
+                durationDays, SubscriptionTier.PROPLUS, "DIRECT",
+                Arrays.asList(rule.getPlanProPlusCredit() + " 积分", "全模型支持", "高优先级队列", "高级分析功能", "90 天文件存储")));
+        directPlans.add(planToMap("ULTRA", "直购积分·" + rule.getPlanUltraCredit(), rule.getPlanUltraPrice(), rule.getPlanUltraCredit(),
+                durationDays, SubscriptionTier.ULTRA, "DIRECT",
+                Arrays.asList(rule.getPlanUltraCredit() + " 积分", "全模型支持", "最高优先级", "全部高级功能", "永久文件存储")));
+        // MEGA 在 CreditRule 中没有对应字段，保留硬编码
+        directPlans.add(planToMap("MEGA", "直购积分·100000", new BigDecimal("648"), 100000,
+                30, SubscriptionTier.MEGA, "DIRECT",
+                Arrays.asList("100000 积分", "全模型支持", "最高优先级", "全部高级功能", "永久文件存储", "专属客服支持")));
+
+        List<Map<String, Object>> cardPlans = new ArrayList<>();
+        // 月卡档位（SMALL_MONTH_CARD/LARGE_MONTH_CARD）在 CreditRule 中没有对应字段，保留硬编码
+        cardPlans.add(planToMap("SMALL_MONTH_CARD", "小月卡", new BigDecimal("30"), 3000,
+                30, SubscriptionTier.SMALL_MONTH_CARD, "MONTHLY_CARD",
+                Arrays.asList("3000 积分基础", "每日登录 +100 积分", "基础模型支持", "专属折扣 9 折", "30 天有效")));
+        cardPlans.add(planToMap("LARGE_MONTH_CARD", "大月卡", new BigDecimal("68"), 8000,
+                30, SubscriptionTier.LARGE_MONTH_CARD, "MONTHLY_CARD",
+                Arrays.asList("8000 积分基础", "每日登录 +300 积分", "全模型支持", "专属折扣 8 折", "优先响应队列", "30 天有效")));
+
+        Map<String, Object> data = new HashMap<>();
+        data.put("plans", directPlans);
+        data.put("directPlans", directPlans);
+        data.put("monthlyCards", cardPlans);
+        data.put("groups", Arrays.asList(
+                groupMap("DIRECT", "直购积分", "按档购买，立即到账", directPlans),
+                groupMap("MONTHLY_CARD", "会员月卡", "30 天权益，超值更省", cardPlans)
+        ));
+        return ResponseEntity.ok(ApiResponse.success(data));
+    }
+
+    private Map<String, Object> groupMap(String key, String title, String subtitle, List<Map<String, Object>> items) {
+        Map<String, Object> g = new HashMap<>();
+        g.put("key", key);
+        g.put("title", title);
+        g.put("subtitle", subtitle);
+        g.put("plans", items);
+        return g;
     }
 
     @PostMapping("/purchase")
@@ -86,21 +120,18 @@ public class SubscriptionsController {
         if (userAgent == null) userAgent = "Unknown-UA";
 
         SubscriptionOrder order = subscriptionService.createOrder(userId, tier, clientIp, userAgent);
-        SubscriptionOrder paid = subscriptionService.markPaid(order.getOrderNo(), paymentMethod,
-                "MANUAL-" + userId + "-" + System.currentTimeMillis());
 
-        UserCredit after = creditService.getBalanceWithTier(userId);
         Map<String, Object> data = new HashMap<>();
-        data.put("orderNo", paid.getOrderNo());
-        data.put("status", paid.getStatus() != null ? paid.getStatus().name() : null);
-        data.put("newBalance", after.getBalance());
-        data.put("expiresAt", paid.getExpiresAt());
-        data.put("pointsGranted", paid.getCreditAmount());
+        data.put("orderNo", order.getOrderNo());
+        data.put("status", order.getStatus() != null ? order.getStatus().name() : "PENDING");
+        data.put("price", order.getPrice());
+        data.put("creditAmount", order.getCreditAmount());
+        data.put("message", "订单已创建，待管理员确认到账后发放权益");
 
         if (auditLogService != null) {
             auditLogService.log(securityHelper.getCurrentUsername(), "SUBSCRIPTION_PURCHASE",
-                    "order:" + paid.getOrderNo(), "SUCCESS",
-                    "plan=" + tier + " points=" + paid.getCreditAmount() + " price=" + paid.getPrice());
+                    "order:" + order.getOrderNo(), "SUCCESS",
+                    "创建订单待确认 plan=" + tier + " points=" + order.getCreditAmount() + " price=" + order.getPrice());
         }
         return ResponseEntity.ok(ApiResponse.success(data));
     }
@@ -194,38 +225,41 @@ public class SubscriptionsController {
     public ResponseEntity<ApiResponse<Map<String, Object>>> requestRefund(@PathVariable String orderNo,
                                                                           @RequestBody(required = false) Map<String, Object> body) {
         Long userId = securityHelper.requireCurrentUserId();
-        SubscriptionOrder order = subscriptionService.findByOrderNo(orderNo)
-                .orElseThrow(() -> new BizException(404, CreditErrorCode.ORDER_NOT_FOUND, "订单不存在: " + orderNo));
-        if (!order.getUserId().equals(userId)) {
-            throw new BizException(403, CreditErrorCode.FORBIDDEN_ORDER, "无权操作该订单");
-        }
         String reason = body != null ? (String) body.get("reason") : null;
         if (reason == null || reason.isBlank()) reason = "用户申请退款";
         log.info("用户{} 申请订单退款 orderNo={} reason={}", userId, orderNo, reason);
 
-        SubscriptionOrder refunded = subscriptionService.refundOrder(orderNo,
-                "用户申请: " + reason, null);
-
-        int refundPoints = subscriptionService.refundedPointsLastRefund(order, 1.0);
-        UserCredit after = creditService.getBalanceWithTier(userId);
+        SubscriptionOrder pending = subscriptionService.requestRefund(orderNo, reason, userId);
 
         Map<String, Object> data = new HashMap<>();
-        data.put("orderNo", refunded.getOrderNo());
-        data.put("status", refunded.getStatus() != null ? refunded.getStatus().name() : null);
-        data.put("refundPoints", refundPoints);
-        data.put("newBalance", after.getBalance());
+        data.put("orderNo", pending.getOrderNo());
+        data.put("status", pending.getStatus() != null ? pending.getStatus().name() : null);
 
         if (auditLogService != null) {
             auditLogService.log(securityHelper.getCurrentUsername(), "USER_REFUND_REQUEST",
-                    "order:" + orderNo, "SUCCESS",
-                    "refundPoints=" + refundPoints + " reason=" + reason);
+                    "order:" + orderNo, "SUCCESS", "reason=" + reason);
+        }
+        return ResponseEntity.ok(ApiResponse.success(data));
+    }
+
+    @PostMapping("/orders/{orderNo}/dispute")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> disputeOrder(@PathVariable String orderNo,
+                                                                         @RequestBody(required = false) Map<String, Object> body) {
+        Long userId = securityHelper.requireCurrentUserId();
+        String reason = body != null ? (String) body.get("reason") : null;
+        if (reason == null || reason.isBlank()) reason = "用户申请纠纷处理";
+        SubscriptionOrder disputed = subscriptionService.disputeOrder(orderNo, reason, userId);
+        Map<String, Object> data = orderToMap(disputed);
+        if (auditLogService != null) {
+            auditLogService.log(securityHelper.getCurrentUsername(), "USER_DISPUTE",
+                    "order:" + orderNo, "SUCCESS", reason);
         }
         return ResponseEntity.ok(ApiResponse.success(data));
     }
 
     private Map<String, Object> planToMap(String planCode, String planName, BigDecimal price,
                                           Integer credits, Integer durationDays, SubscriptionTier tier,
-                                          List<String> benefits) {
+                                          String category, List<String> benefits) {
         Map<String, Object> m = new HashMap<>();
         m.put("planCode", planCode);
         m.put("planName", planName);
@@ -234,7 +268,9 @@ public class SubscriptionsController {
         m.put("pointsGranted", credits);
         m.put("durationDays", durationDays);
         m.put("tier", tier.name());
+        m.put("category", category);
         m.put("benefits", benefits);
+        m.put("features", benefits);
         return m;
     }
 
@@ -244,22 +280,56 @@ public class SubscriptionsController {
         m.put("orderNo", o.getOrderNo());
         m.put("userId", o.getUserId());
         m.put("planTier", o.getPlanTier() != null ? o.getPlanTier().name() : null);
+        // 前端兼容字段
+        m.put("planName", planTierToName(o.getPlanTier()));
         m.put("price", o.getPrice());
+        m.put("amount", o.getPrice());
+        m.put("paidAmount", o.getPrice());
         m.put("creditAmount", o.getCreditAmount());
+        m.put("credits", o.getCreditAmount());
         m.put("durationDays", o.getDurationDays());
+        m.put("planDurationDays", o.getDurationDays());
         m.put("status", o.getStatus() != null ? o.getStatus().name() : null);
         m.put("paymentMethod", o.getPaymentMethod());
         m.put("paymentTransactionId", o.getPaymentTransactionId());
         m.put("paidAt", o.getPaidAt());
+        m.put("validFrom", o.getPaidAt());
         m.put("expiresAt", o.getExpiresAt());
         m.put("refundedAt", o.getRefundedAt());
         m.put("refundAmount", o.getRefundAmount());
         m.put("refundReason", o.getRefundReason());
+        m.put("refundStatus", refundStatusName(o.getStatus()));
         m.put("refundAdminUserId", o.getRefundAdminUserId());
         m.put("metadata", o.getMetadata());
         m.put("createdAt", o.getCreatedAt());
         m.put("updatedAt", o.getUpdatedAt());
+        m.put("autoRenew", false);
+        m.put("source", "WEB");
         return m;
+    }
+
+    private String planTierToName(SubscriptionTier tier) {
+        if (tier == null) return "免费版";
+        return switch (tier) {
+            case FREE -> "免费版";
+            case LITE -> "直购积分·600";
+            case PRO -> "直购积分·3500";
+            case PROPLUS -> "直购积分·16000";
+            case ULTRA -> "直购积分·45000";
+            case MEGA -> "直购积分·100000";
+            case SMALL_MONTH_CARD -> "小月卡";
+            case LARGE_MONTH_CARD -> "大月卡";
+            case ALL -> "全功能版";
+        };
+    }
+
+    private String refundStatusName(OrderStatus status) {
+        if (status == null) return "";
+        return switch (status) {
+            case REFUNDED -> "已退款";
+            case PENDING_REFUND -> "退款审批中";
+            default -> "";
+        };
     }
 
     private String getClientIp(HttpServletRequest request) {

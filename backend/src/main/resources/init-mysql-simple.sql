@@ -49,7 +49,17 @@ CREATE TABLE IF NOT EXISTS messages (
     INDEX idx_user_time (user_qq, send_time),
     INDEX idx_file_id (file_id),
     INDEX idx_send_time (send_time),
-    INDEX idx_archived (archived)
+    INDEX idx_archived (archived),
+    KEY idx_group_msgid (group_id, message_id)
+);
+
+-- 月卡每日奖励记录表（幂等防重）
+CREATE TABLE IF NOT EXISTS monthly_bonus_record (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    bonus_date DATE NOT NULL,
+    created_at DATETIME(6),
+    UNIQUE KEY uk_bonus_user_date (user_id, bonus_date)
 );
 
 -- 查看创建的表

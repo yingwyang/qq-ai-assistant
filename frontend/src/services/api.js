@@ -1,7 +1,6 @@
 // API 服务层 — 统一 fetch 封装
+import { showToast } from '../components/Toast.vue';
 const API_BASE_URL = '/api';
-
-const getToken = () => localStorage.getItem('auth_token');
 
 // 防止短时间内多个 401 响应重复触发登出事件导致闪屏
 let _unauthorizedHandled = false;
@@ -11,18 +10,13 @@ function handleUnauthorized() {
   if (_unauthorizedHandled) return;
   _unauthorizedHandled = true;
 
-  // 通知后端停止插件（fire-and-forget，不 await，不重试，防止 401 递归）
-  const token = localStorage.getItem('auth_token');
-  if (token) {
-    fetch('/api/auth/logout', {
-      method: 'POST',
-      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
-      body: '{}',
-      keepalive: true,
-    }).catch(() => {});
-  }
-  localStorage.removeItem('auth_token');
-  localStorage.removeItem('isLoggedIn');
+  // 通知后端清除 HttpOnly Cookie（fire-and-forget，不 await，不重试）
+  fetch('/api/auth/logout', {
+    method: 'POST',
+    keepalive: true,
+  }).catch(() => {});
+
+  // 只清理 localStorage 中的非敏感缓存（auth_token 已不再使用 HttpOnly Cookie 方案）
   localStorage.removeItem('user_role');
   localStorage.removeItem('user_info');
   window.dispatchEvent(new CustomEvent('auth:logout'));
@@ -90,13 +84,11 @@ async function parseResponse(response, skipUnauthorizedHandling = false) {
 
 async function request(endpoint, options = {}) {
   const url = `${API_BASE_URL}${endpoint}`;
-  const token = getToken();
   const { skipUnauthorizedHandling, ...restOptions } = options;
 
   const headers = {
     'Content-Type': 'application/json; charset=UTF-8',
     'Accept': 'application/json; charset=UTF-8',
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
     ...restOptions.headers,
   };
 
@@ -117,7 +109,7 @@ async function request(endpoint, options = {}) {
       throw new Error('服务暂时不可用，请稍后重试');
     }
     if (error.message !== '登录已过期，请重新登录') {
-      console.error('API request failed:', error);
+      showToast(error.message || '请求失败', 'error');
     }
     throw error;
   }
@@ -125,17 +117,15 @@ async function request(endpoint, options = {}) {
 
 async function uploadRequest(endpoint, formData) {
   const url = `${API_BASE_URL}${endpoint}`;
-  const token = getToken();
 
   try {
     const response = await fetch(url, {
       method: 'POST',
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
       body: formData,
     });
     return await parseResponse(response);
   } catch (error) {
-    console.error('Upload request failed:', error);
+    showToast(error.message || '上传失败', 'error');
     if (error.name === 'TypeError' && error.message === 'Failed to fetch') {
       throw new Error('无法连接到服务器，请检查后端服务是否运行');
     }
@@ -147,10 +137,8 @@ async function uploadRequest(endpoint, formData) {
 // endpoint 已包含 query string；fallbackName 用于响应头无 Content-Disposition 时
 async function downloadWithAuth(endpoint, fallbackName = 'download.json') {
   const url = `${API_BASE_URL}${endpoint}`;
-  const token = getToken();
   const headers = {
     'Accept': 'application/json, text/plain, */*',
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
   };
   let response;
   try {
@@ -259,6 +247,11 @@ export const messageApi = {
     request(`/messages/group/${encodeURIComponent(groupId)}/delete-by-types`, {
       method: 'POST',
       body: JSON.stringify({ types, deleteMedia: !!deleteMedia }),
+    }),
+  deleteGroupConversation: (groupId, ownerQq) =>
+    request(`/messages/group/${encodeURIComponent(groupId)}/delete-conversation`, {
+      method: 'POST',
+      body: JSON.stringify({ ownerQq }),
     }),
   purgeMedia: (types) => request('/messages/purge-media', {
     method: 'POST',
@@ -528,8 +521,7 @@ export const adminApi = {
   triggerBackup: () => request('/admin/backup', { method: 'POST' }),
   getBackupList: () => request('/admin/backup/list'),
   downloadBackupUrl: (fileName) => {
-    const token = getToken();
-    return `${API_BASE_URL}/admin/backup/${encodeURIComponent(fileName)}/download${token ? '?token=' + token : ''}`;
+    return `${API_BASE_URL}/admin/backup/${encodeURIComponent(fileName)}/download`;
   },
   triggerArchive: (days) => request(`/admin/archive?days=${days}`, { method: 'POST' }),
   getLogs: (params = {}) => {
@@ -596,6 +588,11 @@ export const subscriptionApi = {
     body: JSON.stringify(reason ? { reason } : {}),
   }),
   /** POST /api/subscriptions/orders/{orderNo}/refund-request，body { reason } */
+  /** POST /api/subscriptions/orders/{orderNo}/dispute，body { reason } — 用户申诉 */
+  disputeOrder: (orderNo, reason) => request(`/subscriptions/orders/${orderNo}/dispute`, {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+    }),
   refundRequest: (orderNo, reason) => request(`/subscriptions/orders/${orderNo}/refund-request`, {
     method: 'POST',
     body: JSON.stringify({ reason }),
@@ -719,6 +716,12 @@ export const adminOrdersApi = {
     method: 'POST',
     body: JSON.stringify(reason ? { reason } : {}),
   }),
+  /** POST /api/credits/admin/orders/{orderNo}/resolve-dispute { agree, reason } — 处理纠纷 */
+  resolveDispute: (orderNo, { agree, reason } = {}) =>
+    request(`/credits/admin/orders/${encodeURIComponent(orderNo)}/resolve-dispute`, {
+      method: "POST",
+      body: JSON.stringify({ agree, reason }),
+    }),
   /** POST /api/credits/admin/orders/{orderNo}/refund { reason, refundRatio } */
   refund: (orderNo, { reason, refundRatio } = {}) =>
     request(`/credits/admin/orders/${encodeURIComponent(orderNo)}/refund`, {
@@ -728,6 +731,22 @@ export const adminOrdersApi = {
         refundRatio: typeof refundRatio === 'number' ? refundRatio : 1.0,
       }),
     }),
+  // POST /api/credits/admin/orders/{orderNo}/approve-refund
+  approveRefund: (orderNo, reason = '') => request(`/credits/admin/orders/${encodeURIComponent(orderNo)}/approve-refund`, {
+    method: 'POST',
+    body: JSON.stringify({ reason }),
+  }),
+  // POST /api/credits/admin/orders/{orderNo}/reject-refund
+  rejectRefund: (orderNo, reason = '') => request(`/credits/admin/orders/${encodeURIComponent(orderNo)}/reject-refund`, {
+    method: 'POST',
+    body: JSON.stringify({ reason }),
+  }),
+  // POST /api/credits/admin/orders/{orderNo}/approve-payment
+  approvePayment: (orderNo) => request(`/credits/admin/orders/${encodeURIComponent(orderNo)}/approve-payment`, {
+    method: 'POST',
+  }),
+  // GET /api/credits/admin/orders/pending-count
+  getPendingCount: () => request('/credits/admin/orders/pending-count'),
 };
 
 export async function logout() {
@@ -754,4 +773,4 @@ export const formatFileSize = (bytes) => {
   return `${parseFloat((bytes / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`;
 };
 
-export { getToken };
+export { handleUnauthorized };

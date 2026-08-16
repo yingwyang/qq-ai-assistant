@@ -46,16 +46,3 @@ export const chartColors = {
 
 export { VChart }
 
-export const chartResizeMixin = {
-  mounted() {
-    this._resizeHandler = () => {
-      if (this.$refs.chartRef) {
-        this.$refs.chartRef.resize()
-      }
-    }
-    window.addEventListener('resize', this._resizeHandler)
-  },
-  beforeUnmount() {
-    window.removeEventListener('resize', this._resizeHandler)
-  },
-}

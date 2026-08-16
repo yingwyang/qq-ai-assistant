@@ -119,7 +119,8 @@ CREATE TABLE IF NOT EXISTS messages (
     INDEX idx_archived (archived),
     INDEX idx_deleted (deleted),
     INDEX idx_self_qq (self_qq),
-    INDEX idx_self_deleted (self_qq, deleted)
+    INDEX idx_self_deleted (self_qq, deleted),
+    KEY idx_group_msgid (group_id, message_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='消息表';
 
 -- =====================================================================
@@ -198,15 +199,12 @@ CREATE TABLE IF NOT EXISTS group_read_state (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='群聊阅读进度表';
 
 -- =====================================================================
--- 10. 初始化数据（可选）
+-- 10. 月卡每日奖励记录表 (monthly_bonus_record) - 幂等防重
 -- =====================================================================
--- 默认管理员账号密码为 admin123 （BCrypt 加密值）
-INSERT IGNORE INTO users (username, nickname, password, role, active, created_at)
-VALUES (
-    'admin',
-    '系统管理员',
-    '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy',
-    'ADMIN',
-    TRUE,
-    NOW()
-);
+CREATE TABLE IF NOT EXISTS monthly_bonus_record (
+    id          BIGINT          AUTO_INCREMENT      PRIMARY KEY,
+    user_id     BIGINT          NOT NULL            COMMENT '用户ID',
+    bonus_date  DATE            NOT NULL            COMMENT '奖励日期',
+    created_at  DATETIME(6)                         COMMENT '创建时间',
+    UNIQUE KEY uk_bonus_user_date (user_id, bonus_date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='月卡每日奖励记录表';

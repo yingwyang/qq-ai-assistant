@@ -52,9 +52,18 @@ public class MessageController {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(ApiResponse.error(401, "未登录"));
         }
         List<String> userQqList = securityHelper.getCurrentUserQqBindings();
-        if (message.getSelfQq() != null && !message.getSelfQq().isBlank()) {
-            if (!userQqList.contains(message.getSelfQq())) {
-                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(ApiResponse.error(403, "selfQq 不属于当前用户绑定列表"));
+        // selfQq 为空或不属于当前用户绑定列表 → 403
+        if (message.getSelfQq() == null || message.getSelfQq().isBlank()) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(ApiResponse.error(403, "selfQq 不能为空"));
+        }
+        if (!userQqList.contains(message.getSelfQq())) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(ApiResponse.error(403, "selfQq 不属于当前用户绑定列表"));
+        }
+        // 校验群聊访问权限
+        if (message.getGroupId() != null && !message.getGroupId().isBlank()) {
+            boolean hasAccess = securityHelper.hasGroupAccess(message.getGroupId(), userQqList);
+            if (!hasAccess) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(ApiResponse.error(403, "无权访问该群聊"));
             }
         }
         Message saved = messageService.saveMessage(message);
@@ -118,7 +127,7 @@ public class MessageController {
                     .body(ApiResponse.error(403, "无权访问该群聊"));
         }
 
-        Pageable pageable = PageRequest.of(page, size);
+        Pageable pageable = PageRequest.of(page, Math.min(size, 200));
         List<Message> messages;
         Long total;
         if (selfQq != null && !selfQq.isBlank() && userQqList.contains(selfQq)) {
@@ -217,11 +226,22 @@ public class MessageController {
     /**
      * 上传文件
      */
+    private static final Set<String> ALLOWED_FILE_TYPES = Set.of("IMAGE", "VIDEO", "AUDIO", "FILE");
+    private static final long MAX_UPLOAD_SIZE = 50 * 1024 * 1024; // 50MB
+
     @PostMapping("/upload")
     public ResponseEntity<ApiResponse<FileRecord>> uploadFile(
             @RequestParam("file") MultipartFile file,
             @RequestParam("fileType") String fileType) {
         try {
+            // fileType 白名单校验
+            if (fileType == null || !ALLOWED_FILE_TYPES.contains(fileType.toUpperCase())) {
+                return ResponseEntity.badRequest().body(ApiResponse.error(400, "无效的文件类型，仅支持 IMAGE/VIDEO/AUDIO/FILE"));
+            }
+            // 文件大小校验
+            if (file.getSize() > MAX_UPLOAD_SIZE) {
+                return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE).body(ApiResponse.error(413, "文件大小超过限制（最大50MB）"));
+            }
             FileRecord.FileType type = FileRecord.FileType.valueOf(fileType.toUpperCase());
             FileRecord fileRecord = fileStorageService.uploadFile(file, type, securityHelper.getCurrentUserId());
             return ResponseEntity.ok(ApiResponse.success(fileRecord));
@@ -240,14 +260,37 @@ public class MessageController {
             @RequestParam("userNickname") String userNickname,
             @RequestParam("content") String content,
             @RequestParam("messageType") String messageType,
-            @RequestParam(value = "file", required = false) MultipartFile file) {
+            @RequestParam(value = "file", required = false) MultipartFile file,
+            @RequestParam(value = "selfQq", required = false) String selfQq) {
         try {
+            Long userId = securityHelper.getCurrentUserId();
+            if (userId == null) {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(ApiResponse.error(401, "未登录"));
+            }
+            List<String> userQqList = securityHelper.getCurrentUserQqBindings();
+            // selfQq 校验：若请求体未传或为空，取第一个绑定QQ
+            if (selfQq == null || selfQq.isBlank()) {
+                if (userQqList.isEmpty()) {
+                    return ResponseEntity.status(HttpStatus.FORBIDDEN).body(ApiResponse.error(403, "请先绑定QQ账号"));
+                }
+                selfQq = userQqList.get(0);
+            }
+            if (!userQqList.contains(selfQq)) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(ApiResponse.error(403, "selfQq 不属于当前用户绑定列表"));
+            }
+            // groupId 权限校验
+            boolean hasAccess = securityHelper.hasGroupAccess(groupId, userQqList);
+            if (!hasAccess) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(ApiResponse.error(403, "无权访问该群聊"));
+            }
+
             Message message = new Message();
             message.setGroupId(groupId);
             message.setUserQq(userQq);
             message.setUserNickname(userNickname);
             message.setContent(content);
             message.setMessageType(Message.MessageType.valueOf(messageType.toUpperCase()));
+            message.setSelfQq(selfQq);
 
             // 如果有文件，先上传文件
             if (file != null && !file.isEmpty()) {
@@ -364,9 +407,10 @@ public class MessageController {
         } catch (IOException ignored) {
         }
 
+        String safeFilename = file.getName().replaceAll("[\\r\\n\"]", "_");
         return ResponseEntity.ok()
                 .contentType(MediaType.parseMediaType(contentType))
-                .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + file.getName() + "\"")
+                .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + safeFilename + "\"")
                 .body(resource);
     }
 
@@ -434,7 +478,7 @@ public class MessageController {
                         .body(ApiResponse.error(403, "无权删除该消息"));
             }
 
-            messageService.deleteMessage(messageId, userId);
+            messageService.deleteMessage(messageId, userId, userQqList);
             return ResponseEntity.ok(ApiResponse.success());
         } catch (RuntimeException e) {
             return ResponseEntity.badRequest().body(ApiResponse.error(400, e.getMessage()));
@@ -567,6 +611,54 @@ public class MessageController {
     }
 
     /**
+     * 删除群聊会话（硬删除）：彻底删除指定QQ下该群的所有消息、媒体文件、群记录和已读状态。
+     * 适用于已退出群聊的清理，操作不可恢复。
+     *
+     * 请求体示例:
+     * {
+     *   "ownerQq": "123456789"
+     * }
+     */
+    @PostMapping("/group/{groupId}/delete-conversation")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> deleteGroupConversation(
+            @PathVariable String groupId,
+            @RequestBody(required = false) Map<String, Object> request) {
+        try {
+            Long userId = securityHelper.getCurrentUserId();
+            if (userId == null) {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                        .body(ApiResponse.error(401, "未登录"));
+            }
+
+            List<String> userQqList = securityHelper.getCurrentUserQqBindings();
+            if (userQqList.isEmpty()) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                        .body(ApiResponse.error(403, "请先绑定QQ账号"));
+            }
+
+            // ownerQq 从请求体获取，默认取第一个绑定QQ
+            String ownerQq = (request != null && request.get("ownerQq") != null)
+                    ? String.valueOf(request.get("ownerQq")) : userQqList.get(0);
+
+            // 权限校验：ownerQq 必须属于当前用户绑定的QQ
+            if (!userQqList.contains(ownerQq)) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                        .body(ApiResponse.error(403, "无权操作该QQ的群聊"));
+            }
+
+            Map<String, Object> result = messageService.deleteGroupConversation(groupId, ownerQq, userId);
+            auditLogService.log(securityHelper.getCurrentUsername(), "GROUP_DELETE_CONVERSATION",
+                    "group:" + groupId + ",ownerQq:" + ownerQq, "SUCCESS",
+                    "删除群聊会话: " + result.get("message") + ", userId=" + userId);
+            return ResponseEntity.ok(ApiResponse.success(result));
+        } catch (Exception e) {
+            auditLogService.log(securityHelper.getCurrentUsername(), "GROUP_DELETE_CONVERSATION",
+                    "group:" + groupId, "FAILURE", e.getMessage());
+            return ResponseEntity.badRequest().body(ApiResponse.error(400, "删除群聊失败: " + e.getMessage()));
+        }
+    }
+
+    /**
      * 清理媒体文件（按类型扫描 backend/uploads 目录，删除匹配扩展名的文件）。
      *
      * 请求体示例:
@@ -622,6 +714,10 @@ public class MessageController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
         try {
+            String role = securityHelper.getCurrentUserRole();
+            if (!"ADMIN".equalsIgnoreCase(role)) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(ApiResponse.error(403, "需要管理员权限"));
+            }
             Long userId = securityHelper.getCurrentUserId();
             if (userId == null) {
                 return ResponseEntity.status(HttpStatus.UNAUTHORIZED)

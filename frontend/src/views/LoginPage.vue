@@ -11,7 +11,7 @@
         <div class="orb orb-5"></div>
       </div>
       <div class="particles">
-        <div v-for="n in 20" :key="n" class="particle" :style="getParticleStyle(n)"></div>
+        <div v-for="(style, n) in particleStyles" :key="n" class="particle" :style="style"></div>
       </div>
     </div>
 
@@ -52,6 +52,7 @@
                 placeholder="请输入账号"
                 required
                 :disabled="isProcessing"
+                maxlength="32"
                 class="form-input"
               />
             </div>
@@ -69,6 +70,7 @@
                 placeholder="请输入密码"
                 required
                 :disabled="isProcessing"
+                maxlength="64"
                 class="form-input"
               />
               <button type="button" class="password-toggle" @click="showLoginPassword = !showLoginPassword">
@@ -119,6 +121,7 @@
                 placeholder="请输入账号"
                 required
                 :disabled="isProcessing"
+                maxlength="32"
                 class="form-input"
               />
             </div>
@@ -134,6 +137,7 @@
                 type="text"
                 placeholder="请输入昵称（可选）"
                 :disabled="isProcessing"
+                maxlength="32"
                 class="form-input"
               />
             </div>
@@ -151,6 +155,7 @@
                 placeholder="请输入密码"
                 required
                 :disabled="isProcessing"
+                maxlength="64"
                 class="form-input"
               />
               <button type="button" class="password-toggle" @click="showRegisterPassword = !showRegisterPassword">
@@ -180,6 +185,7 @@
                 placeholder="请再次输入密码"
                 required
                 :disabled="isProcessing"
+                maxlength="64"
                 class="form-input"
               />
             </div>
@@ -285,11 +291,15 @@ export default {
       }
     });
 
-    // 如果已登录，自动跳转到首页
+    // 如果已有 Cookie 登录态，自动跳转首页（快速判断：有缓存的 user_role 即视为已登录）
     onMounted(() => {
-      const token = localStorage.getItem('auth_token');
-      if (token) {
-        router.replace('/');
+      const cachedRole = localStorage.getItem('user_role');
+      if (cachedRole) {
+        if (cachedRole === 'ADMIN') {
+          router.replace('/admin');
+        } else {
+          router.replace('/');
+        }
       }
     });
 
@@ -305,8 +315,8 @@ export default {
       try {
         const data = await authApi.login(loginForm.username, loginForm.password);
 
-        localStorage.setItem('auth_token', data.token);
-        localStorage.setItem('user_role', data.role || 'USER');
+        // 登录成功（Cookie 已由后端 Set-Cookie 自动设置），通过 /me 获取角色后跳转
+        // 保存用户基本信息到 localStorage（非敏感缓存）
         localStorage.setItem('user_info', JSON.stringify({
           username: data.username,
           nickname: data.nickname,
@@ -316,15 +326,24 @@ export default {
           createdAt: data.createdAt,
           lastLoginTime: data.lastLoginTime
         }));
-        localStorage.setItem('isLoggedIn', 'true');
 
-        // 登录成功后清除表单草稿
+        // 清除表单草稿
         sessionStorage.removeItem(LOGIN_FORM_KEY);
         sessionStorage.removeItem(REGISTER_FORM_KEY);
         sessionStorage.removeItem(ACTIVE_TAB_KEY);
 
-        // 登录成功后根据角色跳转（插件启动由后端 PluginEnsureService 异步处理）
-        if (data.role === 'ADMIN') {
+        // 通过 /api/auth/me 获取真实角色
+        let role = data.role || 'USER';
+        try {
+          const meData = await authApi.getCurrentUser();
+          role = meData?.role || role;
+        } catch (e) {
+          // me 失败时用登录返回的 role 兜底
+        }
+        localStorage.setItem('user_role', role);
+
+        // 根据角色跳转（插件启动由后端 PluginEnsureService 异步处理）
+        if (role === 'ADMIN') {
           router.push('/admin');
         } else {
           router.push('/');
@@ -364,8 +383,7 @@ export default {
 
         const data = await authApi.login(registerForm.username, registerForm.password);
 
-        localStorage.setItem('auth_token', data.token);
-        localStorage.setItem('user_role', data.role || 'USER');
+        // 登录成功（Cookie 已由后端 Set-Cookie 自动设置）
         localStorage.setItem('user_info', JSON.stringify({
           username: data.username,
           nickname: data.nickname,
@@ -375,15 +393,24 @@ export default {
           createdAt: data.createdAt,
           lastLoginTime: data.lastLoginTime
         }));
-        localStorage.setItem('isLoggedIn', 'true');
 
-        // 注册并登录成功后清除表单草稿
+        // 清除表单草稿
         sessionStorage.removeItem(LOGIN_FORM_KEY);
         sessionStorage.removeItem(REGISTER_FORM_KEY);
         sessionStorage.removeItem(ACTIVE_TAB_KEY);
 
-        // 注册并登录成功后根据角色跳转（插件启动由后端 PluginEnsureService 异步处理）
-        if (data.role === 'ADMIN') {
+        // 通过 /api/auth/me 获取真实角色
+        let role = data.role || 'USER';
+        try {
+          const meData = await authApi.getCurrentUser();
+          role = meData?.role || role;
+        } catch (e) {
+          // me 失败时用登录返回的 role 兜底
+        }
+        localStorage.setItem('user_role', role);
+
+        // 根据角色跳转（插件启动由后端 PluginEnsureService 异步处理）
+        if (role === 'ADMIN') {
           router.push('/admin');
         } else {
           router.push('/');
@@ -405,17 +432,16 @@ export default {
       errorMessage.value = '';
     };
 
-    const getParticleStyle = (n) => {
-      const colors = ['#fff', '#a855f7', '#6366f1', '#8b5cf6', '#c084fc'];
-      return {
-        left: `${Math.random() * 100}%`,
-        animationDelay: `${Math.random() * 5}s`,
-        animationDuration: `${5 + Math.random() * 10}s`,
-        backgroundColor: colors[n % colors.length],
-        width: `${2 + Math.random() * 4}px`,
-        height: `${2 + Math.random() * 4}px`
-      };
-    };
+    // 粒子样式在初始化时一次性计算（避免每次渲染调用 Math.random 导致漂移）
+    const colors = ['#fff', '#a855f7', '#6366f1', '#8b5cf6', '#c084fc'];
+    const particleStyles = Array.from({ length: 20 }, (_, n) => ({
+      left: `${Math.random() * 100}%`,
+      animationDelay: `${Math.random() * 5}s`,
+      animationDuration: `${5 + Math.random() * 10}s`,
+      backgroundColor: colors[n % colors.length],
+      width: `${2 + Math.random() * 4}px`,
+      height: `${2 + Math.random() * 4}px`
+    }));
 
     return {
       isRegistering,
@@ -429,7 +455,7 @@ export default {
       handleRegister,
       switchToRegister,
       switchToLogin,
-      getParticleStyle
+      particleStyles
     };
   }
 };

@@ -60,7 +60,7 @@
                       v-if="!isCollapsed && group.groupType && group.groupType !== 'OTHER'"
                       :class="['gt-badge', `gt-badge-${group.groupType}`]"
                       :title="GT_MAP[group.groupType]?.label || group.groupType"
-                    >{{ GT_MAP[group.groupType]?.icon || '' }}</span>
+                    ><Icon :name="GT_MAP[group.groupType]?.iconName || 'tag'" :size="12" /></span>
                   </div>
                   <div v-if="!isCollapsed" class="group-info">
                     <div class="group-name">
@@ -101,7 +101,7 @@
         @click="goToCreditsCenter"
         title="查看用量管理"
       >
-        <span class="credits-badge-gem">💎</span>
+        <span class="credits-badge-gem"><Icon name="diamond" :size="14" /></span>
         <span class="credits-badge-num">{{ formatCreditsNumber(balance) }}</span>
         <span class="credits-badge-label">积分</span>
       </div>
@@ -116,12 +116,10 @@
       :visible="showMenu"
       :user-info="userInfo"
       :user-avatar-url="userAvatarUrl"
-      :theme="theme"
       @close="showMenu = false"
       @open-user-center="handleOpenUserCenter"
       @open-admin="handleOpenAdmin"
       @open-docs="handleOpenDocs"
-      @toggle-theme="handleToggleTheme"
       @logout="handleLogout"
     />
 
@@ -175,6 +173,11 @@
         <span class="context-menu-icon"><Icon name="delete" :size="14" /></span>
         删除所有消息
       </div>
+      <div class="context-menu-divider"></div>
+      <div class="context-menu-item danger" @click="deleteGroupConversation">
+        <span class="context-menu-icon"><Icon name="delete" :size="14" /></span>
+        删除群聊
+      </div>
     </div>
   </div>
 </template>
@@ -186,20 +189,19 @@ import { messageApi, userApi } from '../services/api';
 import Icon from './Icon.vue';
 import { showToast } from './Toast.vue';
 import { showConfirm } from './ConfirmDialog.vue';
-import { useTheme } from '../composables/useTheme';
 import { useUserCreditsStore } from '../composables/useUserCreditsStore';
 import UserMenuPopover from './UserMenuPopover.vue';
 import GroupTypeSelector from './GroupTypeSelector.vue';
 
 // 群类型元数据（与后端/其他组件保持一致）
 const GT_MAP = {
-  GAME:   { label: '游戏群', icon: '🎮', color: '#6366f1' },
-  STUDY:  { label: '学习群', icon: '📚', color: '#10b981' },
-  WORK:   { label: '工作群', icon: '💼', color: '#f59e0b' },
-  HOBBY:  { label: '兴趣群', icon: '🎨', color: '#ec4899' },
-  LIFE:   { label: '生活群', icon: '☕', color: '#14b8a6' },
-  SOCIAL: { label: '社交群', icon: '💬', color: '#3b82f6' },
-  OTHER:  { label: '其他群', icon: '🏷️', color: '#6b7280' }
+  GAME:   { label: '游戏群', iconName: 'gamepad', color: '#6366f1' },
+  STUDY:  { label: '学习群', iconName: 'book', color: '#10b981' },
+  WORK:   { label: '工作群', iconName: 'briefcase', color: '#f59e0b' },
+  HOBBY:  { label: '兴趣群', iconName: 'palette', color: '#ec4899' },
+  LIFE:   { label: '生活群', iconName: 'home', color: '#14b8a6' },
+  SOCIAL: { label: '社交群', iconName: 'chat', color: '#3b82f6' },
+  OTHER:  { label: '其他群', iconName: 'tag', color: '#6b7280' }
 };
 
 export default {
@@ -222,10 +224,9 @@ export default {
   emits: ['tab-change', 'logout', 'open-login-modal', 'open-system-modal', 'open-user-profile', 'select-group', 'toggle-sidebar', 'show-context-menu', 'navigate-admin', 'navigate-docs', 'group-type-change'],
   setup(props, { emit }) {
     const router = useRouter();
-    const { theme, toggleTheme: toggleThemeAction } = useTheme();
 
     // 全局共享积分余额（与 UserMenuPopover / UserCenter 同步）
-    const { balance } = useUserCreditsStore();
+    const { balance, reload: reloadCredits } = useUserCreditsStore();
 
     const formatCreditsNumber = (n) => {
       if (n === null || n === undefined) return '0';
@@ -234,10 +235,6 @@ export default {
 
     const goToCreditsCenter = () => {
       router.push('/user-center?tab=credits');
-    };
-
-    const toggleTheme = () => {
-      toggleThemeAction();
     };
 
     const isCollapsedLocal = ref(false);
@@ -425,12 +422,6 @@ export default {
       }
     };
 
-    const handleToggleTheme = (mode) => {
-      const { setTheme } = useTheme();
-      setTheme(mode);
-      showMenu.value = false;
-    };
-
     const handleLogout = () => {
       showMenu.value = false;
       logout();
@@ -515,6 +506,33 @@ export default {
       } catch (error) {
         console.error('删除消息失败:', error);
         showToast('删除失败: ' + error.message, 'error');
+      }
+    };
+
+    const deleteGroupConversation = async () => {
+      const group = contextMenuGroup.value;
+      hideContextMenu();
+      if (!group) return;
+
+      const displayName = group.groupName || ('群聊 ' + group.groupId);
+      const confirmed = await showConfirm({
+        title: '确认删除群聊',
+        message: `确定要彻底删除群聊「${displayName}」吗？\n将删除该QQ下此群的所有消息、图片、视频、音频及群记录，操作不可恢复！`,
+        confirmText: '彻底删除',
+        cancelText: '取消'
+      });
+      if (!confirmed) return;
+
+      try {
+        const result = await messageApi.deleteGroupConversation(group.groupId, group.ownerQq);
+        showToast(result?.message || '群聊已删除', 'success');
+        // 刷新群聊列表（被删除的群会从列表中消失）
+        loadRecentGroups();
+        // 通知父组件清空当前聊天视图
+        emit('select-group', null);
+      } catch (error) {
+        console.error('删除群聊失败:', error);
+        showToast('删除群聊失败: ' + error.message, 'error');
       }
     };
 
@@ -663,6 +681,7 @@ export default {
       if (newValue) {
         loadRecentGroups();
         loadQqBindings();
+        reloadCredits();
       } else {
         recentGroups.value = [];
         qqBindings.value = [];
@@ -694,14 +713,11 @@ export default {
       openUserProfile,
       openAdminDashboard,
       openHelpPage,
-      theme,
-      toggleTheme,
       showMenu,
       handleOpenUserCenter,
       handleOpenAdmin,
       handleOpenDocs,
       handleGoHome,
-      handleToggleTheme,
       handleLogout,
       selectGroup,
       getGroupsByQq,
@@ -718,6 +734,7 @@ export default {
       showContextMenu,
       hideContextMenu,
       deleteMessagesByType,
+      deleteGroupConversation,
       balance,
       formatCreditsNumber,
       goToCreditsCenter,

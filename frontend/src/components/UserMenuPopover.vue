@@ -4,7 +4,7 @@
       <div 
         ref="popoverEl"
         class="user-menu-popover" 
-        :class="{ 'theme-dark': theme === 'dark' }"
+        :class="{ 'theme-dark': false }"
       >
         <!-- 用户信息头部 -->
         <div v-if="userInfo" class="menu-user-header">
@@ -20,7 +20,7 @@
         <!-- 积分行：余额 + 升级 + 签到 -->
         <div v-if="userInfo" class="menu-credits-row">
           <div class="credits-balance" @click="goToCredits">
-            <span class="credits-gem">💎</span>
+            <span class="credits-gem"><Icon name="diamond" :size="14" /></span>
             <span class="credits-num">{{ formatNumber(balance) }}</span>
             <span class="credits-unit">积分</span>
           </div>
@@ -91,22 +91,6 @@
             </div>
           </div>
 
-          <div class="menu-item has-submenu" @click="toggleSubmenu($event, 'theme')">
-            <Icon :name="theme === 'dark' ? 'sun' : 'moon'" :size="18" />
-            <span class="menu-label">主题</span>
-            <span class="menu-arrow" :class="{ expanded: activeSubmenu === 'theme' }">›</span>
-          </div>
-          <div v-show="activeSubmenu === 'theme'" class="submenu">
-            <div class="submenu-item" :class="{ active: theme === 'light' }" @click.stop="handleSetTheme('light')">
-              <Icon name="sun" :size="16" />
-              <span>浅色模式</span>
-            </div>
-            <div class="submenu-item" :class="{ active: theme === 'dark' }" @click.stop="handleSetTheme('dark')">
-              <Icon name="moon" :size="16" />
-              <span>深色模式</span>
-            </div>
-          </div>
-
           <div class="menu-item" @click="$emit('open-docs')">
             <Icon name="book" :size="18" />
             <span class="menu-label">帮助与反馈</span>
@@ -138,17 +122,16 @@ export default {
   props: {
     visible: { type: Boolean, required: true },
     userInfo: { type: Object, default: null },
-    theme: { type: String, default: 'light' },
     userAvatarUrl: { type: String, default: '' }
   },
-  emits: ['close', 'open-user-center', 'open-admin', 'open-docs', 'toggle-theme', 'logout'],
+  emits: ['close', 'open-user-center', 'open-admin', 'open-docs', 'logout'],
   setup(props, { emit }) {
     const router = useRouter();
     const activeSubmenu = ref('');
     const popoverEl = ref(null);
 
     // 全局共享积分状态（与 Sidebar / UserCenter 引用同一份 ref）
-    const { balance, todaySigned, isSigningIn, signIn } = useUserCreditsStore();
+    const { balance, todaySigned, isSigningIn, signIn, reload: reloadCredits } = useUserCreditsStore();
 
     const formatNumber = (n) => {
       if (n === null || n === undefined) return '0';
@@ -178,6 +161,11 @@ export default {
         }
       }
     };
+
+    // 弹窗可见时刷新积分余额
+    watch(() => props.visible, (v) => {
+      if (v) reloadCredits();
+    });
 
     const {
       componentStatus,
@@ -226,13 +214,6 @@ export default {
       positionPopover();
     };
 
-    const handleSetTheme = (mode) => {
-      if ((mode === 'dark' && props.theme !== 'dark') || (mode === 'light' && props.theme !== 'light')) {
-        emit('toggle-theme', mode);
-      }
-      activeSubmenu.value = '';
-    };
-
     const handleOverlayClick = () => {
       emit('close');
     };
@@ -273,7 +254,6 @@ export default {
       componentStatus,
       qrCode,
       toggleSubmenu,
-      handleSetTheme,
       handleOverlayClick,
       handleAvatarError,
       refreshQrCode,

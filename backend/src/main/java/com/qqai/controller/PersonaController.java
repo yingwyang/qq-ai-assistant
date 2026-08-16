@@ -7,6 +7,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.io.File;
@@ -91,7 +92,10 @@ public class PersonaController {
         }
     }
 
+    // ===== 以下写操作修改 AstrBot 全局人格配置,仅限管理员 =====
+
     @PostMapping
+    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<?> createPersona(@RequestBody Map<String, Object> request) {
         String personaId = (String) request.get("personaId");
         String systemPrompt = (String) request.getOrDefault("systemPrompt", "");
@@ -127,6 +131,7 @@ public class PersonaController {
     }
 
     @PutMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<?> updatePersona(@PathVariable int id, @RequestBody Map<String, Object> request) {
         String personaId = (String) request.get("personaId");
         String systemPrompt = (String) request.getOrDefault("systemPrompt", "");
@@ -158,6 +163,7 @@ public class PersonaController {
     }
 
     @DeleteMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<?> deletePersona(@PathVariable int id) {
         try (Connection conn = getConnection();
              PreparedStatement ps = conn.prepareStatement("DELETE FROM personas WHERE id = ?")) {
@@ -173,6 +179,7 @@ public class PersonaController {
     }
 
     @PostMapping("/set-default")
+    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<?> setDefaultPersona(@RequestBody Map<String, Object> request) {
         String personaId = (String) request.get("personaId");
         if (personaId == null || personaId.trim().isEmpty()) {

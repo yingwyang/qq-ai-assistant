@@ -1,6 +1,8 @@
 <template>
   <div :class="'theme-' + (theme || 'light')">
     <router-view :key="viewKey" />
+    <!-- 全局图片预览 Lightbox（所有页面共享同一弹窗） -->
+    <ImagePreview />
   </div>
 </template>
 
@@ -8,9 +10,11 @@
 import { ref, onMounted, onBeforeUnmount } from 'vue';
 import { useRouter } from 'vue-router';
 import { useTheme } from './composables/useTheme';
+import ImagePreview from './components/ImagePreview.vue';
 
 export default {
   name: 'App',
+  components: { ImagePreview },
   setup() {
     const { theme, toggleTheme, initTheme } = useTheme();
     const router = useRouter();

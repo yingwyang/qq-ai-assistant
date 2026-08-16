@@ -100,12 +100,21 @@ public class UserSettingsController {
                 }
                 java.util.HashMap<String, Object> data = new java.util.HashMap<>();
                 data.put("botName", s.getBotName() != null ? s.getBotName() : "AstrBot 助手");
-                data.put("astrbotApiKey", s.getAstrbotApiKey() != null ? s.getAstrbotApiKey() : "");
-                data.put("llmApiKey", s.getLlmApiKey() != null ? s.getLlmApiKey() : "");
+                data.put("astrbotApiKey", maskApiKey(s.getAstrbotApiKey()));
+                data.put("llmApiKey", maskApiKey(s.getLlmApiKey()));
                 data.put("llmBaseUrl", s.getLlmBaseUrl() != null ? s.getLlmBaseUrl() : "");
                 data.put("llmModel", s.getLlmModel() != null ? s.getLlmModel() : "");
                 data.put("llmModels", modelList);
-                data.put("providers", providerList);
+                // providers 数组中 apiKey 掩码
+                List<Map<String, Object>> maskedProviders = new ArrayList<>();
+                for (Map<String, Object> p : providerList) {
+                    Map<String, Object> mp = new java.util.HashMap<>(p);
+                    if (mp.containsKey("apiKey")) {
+                        mp.put("apiKey", maskApiKey((String) mp.get("apiKey")));
+                    }
+                    maskedProviders.add(mp);
+                }
+                data.put("providers", maskedProviders);
                 result.putPOJO("data", data);
             } else {
                 java.util.HashMap<String, Object> data = new java.util.HashMap<>();
@@ -171,12 +180,21 @@ public class UserSettingsController {
             List<Map<String, Object>> providerList = parseProviders(settings.getProviders());
             java.util.HashMap<String, Object> data = new java.util.HashMap<>();
             data.put("botName", settings.getBotName() != null ? settings.getBotName() : "AstrBot 助手");
-            data.put("astrbotApiKey", settings.getAstrbotApiKey() != null ? settings.getAstrbotApiKey() : "");
-            data.put("llmApiKey", settings.getLlmApiKey() != null ? settings.getLlmApiKey() : "");
+            data.put("astrbotApiKey", maskApiKey(settings.getAstrbotApiKey()));
+            data.put("llmApiKey", maskApiKey(settings.getLlmApiKey()));
             data.put("llmBaseUrl", settings.getLlmBaseUrl() != null ? settings.getLlmBaseUrl() : "");
             data.put("llmModel", settings.getLlmModel() != null ? settings.getLlmModel() : "");
             data.put("llmModels", modelList);
-            data.put("providers", providerList);
+            // providers 数组中 apiKey 掩码
+            List<Map<String, Object>> maskedSavedProviders = new ArrayList<>();
+            for (Map<String, Object> p : providerList) {
+                Map<String, Object> mp = new java.util.HashMap<>(p);
+                if (mp.containsKey("apiKey")) {
+                    mp.put("apiKey", maskApiKey((String) mp.get("apiKey")));
+                }
+                maskedSavedProviders.add(mp);
+            }
+            data.put("providers", maskedSavedProviders);
             result.putPOJO("data", data);
 
             return ResponseEntity.ok(result);
@@ -208,5 +226,16 @@ public class UserSettingsController {
         } catch (Exception e) {
             return new ArrayList<>();
         }
+    }
+
+    /**
+     * API Key 掩码：长度>8 → 前4位+****+后4位，否则返回****；空字符串保持空。
+     */
+    private String maskApiKey(String key) {
+        if (key == null || key.isEmpty()) return "";
+        if (key.length() > 8) {
+            return key.substring(0, 4) + "****" + key.substring(key.length() - 4);
+        }
+        return "****";
     }
 }

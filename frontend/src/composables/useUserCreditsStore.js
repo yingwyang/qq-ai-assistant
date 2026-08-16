@@ -9,16 +9,20 @@ const expiresAt = ref(null);
 const todaySigned = ref(false);
 const loading = ref(false);
 const isSigningIn = ref(false);
-let loaded = false;
+let loaded = false;  // 标记"是否成功加载过"，失败不标记，允许下次引用时重试
 
 const tierLabel = computed(() => {
   const map = {
     FREE: '免费版',
-    LITE: '轻享版',
-    PRO: '专业版',
-    PROPLUS: '旗舰版',
-    PRO_PLUS: '旗舰版',
-    ULTRA: '至尊版',
+    LITE: '直购积分·600',
+    PRO: '直购积分·3500',
+    PROPLUS: '直购积分·16000',
+    PRO_PLUS: '直购积分·16000',
+    ULTRA: '直购积分·45000',
+    MEGA: '直购积分·100000',
+    SMALL_MONTH_CARD: '小月卡',
+    LARGE_MONTH_CARD: '大月卡',
+    ALL: '全功能版',
   };
   return map[tier.value] || tier.value || '免费版';
 });
@@ -35,9 +39,11 @@ export function useUserCreditsStore() {
       // creditsApi.getBalance() 经 parseResponse 解包后直接返回 data 对象
       const data = await creditsApi.getBalance();
       balance.value = Number(data?.balance ?? 0);
+      // 后端 CreditsBalance record 字段名是 tier + expiresAt
       tier.value = data?.subscriptionTier || data?.tier || 'FREE';
-      expiresAt.value = data?.subscriptionExpiresAt || data?.tierExpireAt || null;
-      todaySigned.value = !!(data?.todaySignInDone ?? data?.todayDone ?? false);
+      expiresAt.value = data?.subscriptionExpiresAt || data?.tierExpireAt || data?.expiresAt || null;
+      todaySigned.value = !!(data?.todaySignInDone ?? data?.todayDone ?? data?.todaySigned ?? false);
+      loaded = true;  // 成功才标记，失败允许后续引用时重试
     } catch (error) {
       // 401 已由 api.js 统一处理（清 token + auth:logout），这里静默失败
       console.error('加载积分余额失败:', error);
@@ -109,11 +115,13 @@ export function useUserCreditsStore() {
     }
   };
 
-  // 首次引用时自动加载一次（后续组件复用同一份已加载状态）
-  if (!loaded) {
-    loaded = true;
-    reload().catch(() => {});
-  }
+  const reset = () => {
+    balance.value = 0;
+    tier.value = 'FREE';
+    expiresAt.value = null;
+    todaySigned.value = false;
+    loaded = false;  // 登出切换账号时重置缓存，允许新账号重新加载
+  };
 
   return {
     balance,
@@ -124,6 +132,7 @@ export function useUserCreditsStore() {
     loading,
     isSigningIn,
     reload,
+    reset,
     signIn,
   };
 }

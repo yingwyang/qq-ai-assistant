@@ -8,9 +8,11 @@ import org.springframework.stereotype.Service;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileOutputStream;
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
+import java.net.InetAddress;
 import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -54,17 +56,41 @@ public class MediaDownloadService {
             Path localPath = groupDir.resolve(fileName);
 
             if (isLocalFilePath(mediaUrl)) {
-                // 本地文件路径：直接复制
-                Path sourcePath = Paths.get(mediaUrl);
+                // 本地文件路径：直接复制。
+                // 安全:群成员可在文本中伪造 "[CQ:image,path=C:/敏感文件]" 触发任意本地文件拷贝,
+                // 因此必须同时满足:(1) 文件扩展名与媒体类型匹配;(2) 路径位于 uploads 目录之内
+                // (NapCat 上报的本地缓存路径通常位于 NapCat 安装目录,不在 uploads 内,
+                //  这类合法路径会改走 HTTP url 字段下载,一般不会走到本地复制分支)。
+                Path sourcePath = Paths.get(mediaUrl).toAbsolutePath().normalize();
                 if (!Files.exists(sourcePath)) {
                     log.warn("本地媒体文件不存在: {}", mediaUrl);
+                    return null;
+                }
+                if (!isAllowedExtensionForType(sourcePath.getFileName().toString(), mediaType)) {
+                    log.warn("【安全】本地文件扩展名与媒体类型不符,拒绝复制: {}", mediaUrl);
+                    return null;
+                }
+                Path uploadsRoot = Paths.get("uploads").toAbsolutePath().normalize();
+                Path imagesRoot = Paths.get(localImagePath).toAbsolutePath().normalize();
+                if (!sourcePath.startsWith(uploadsRoot) && !sourcePath.startsWith(imagesRoot)) {
+                    log.warn("【安全】本地文件路径越界,拒绝复制: {}", sourcePath);
                     return null;
                 }
                 Files.copy(sourcePath, localPath, StandardCopyOption.REPLACE_EXISTING);
                 log.info("复制本地媒体文件: {} -> {}", mediaUrl, localPath);
             } else {
-                // 远程 URL：走 HTTP 下载
+                // 远程 URL：走 HTTP 下载（含 SSRF 防护）
                 URL url = new URL(mediaUrl);
+                String protocol = url.getProtocol();
+                if (!"http".equalsIgnoreCase(protocol) && !"https".equalsIgnoreCase(protocol)) {
+                    log.warn("SSRF防护：拒绝非 HTTP/HTTPS 协议: {}", protocol);
+                    return null;
+                }
+                String host = url.getHost();
+                if (isBlockedHost(host)) {
+                    log.warn("SSRF防护：拒绝访问内网/敏感地址: {}", host);
+                    return null;
+                }
                 HttpURLConnection connection = (HttpURLConnection) url.openConnection();
                 connection.setRequestMethod("GET");
                 connection.setConnectTimeout(10000);
@@ -76,11 +102,24 @@ public class MediaDownloadService {
                     return null;
                 }
 
+                // 检查 Content-Length 头，超过 100MB 拒绝
+                long contentLength = connection.getContentLengthLong();
+                final long MAX_DOWNLOAD_SIZE = 100L * 1024 * 1024; // 100MB
+                if (contentLength > MAX_DOWNLOAD_SIZE) {
+                    log.warn("下载{}失败，文件大小超过100MB限制: {} bytes", mediaType, contentLength);
+                    return null;
+                }
+
                 try (InputStream inputStream = connection.getInputStream();
                      FileOutputStream outputStream = new FileOutputStream(localPath.toFile())) {
                     byte[] buffer = new byte[4096];
                     int bytesRead;
+                    long totalRead = 0;
                     while ((bytesRead = inputStream.read(buffer)) != -1) {
+                        totalRead += bytesRead;
+                        if (totalRead > MAX_DOWNLOAD_SIZE) {
+                            throw new IOException("下载文件超过100MB限制");
+                        }
                         outputStream.write(buffer, 0, bytesRead);
                     }
                 }
@@ -254,12 +293,55 @@ public class MediaDownloadService {
         return null;
     }
 
+    /**
+     * SSRF 防护：校验 host 是否为内网/敏感地址。
+     * 拒绝回环、私网、链路本地、0.0.0.0、广播、组播、以及 "localhost" 裸主机名。
+     */
+    private boolean isBlockedHost(String host) {
+        if (host == null || host.isEmpty()) return true;
+        // 拒绝裸主机名 localhost
+        if ("localhost".equalsIgnoreCase(host)) return true;
+        try {
+            InetAddress[] addresses = InetAddress.getAllByName(host);
+            for (InetAddress addr : addresses) {
+                if (addr.isLoopbackAddress() || addr.isLinkLocalAddress()
+                        || addr.isSiteLocalAddress() || addr.isAnyLocalAddress()
+                        || addr.isMulticastAddress()) {
+                    return true;
+                }
+            }
+        } catch (Exception e) {
+            log.warn("SSRF防护：无法解析主机名 {}, 拒绝下载", host);
+            return true;
+        }
+        return false;
+    }
+
     private boolean isLocalFilePath(String path) {
         if (path == null || path.isEmpty()) {
             return false;
         }
         // Windows 盘符路径或 Unix 绝对路径
         return path.matches("^[A-Za-z]:\\\\.*$") || path.startsWith("/") || path.startsWith("\\\\");
+    }
+
+    /**
+     * 校验本地文件扩展名是否与媒体类型匹配,防止把任意文件(如配置、密钥)复制进公开媒体目录。
+     */
+    private boolean isAllowedExtensionForType(String fileName, String mediaType) {
+        if (fileName == null || fileName.isEmpty()) {
+            return false;
+        }
+        String name = fileName.toLowerCase();
+        return switch (mediaType) {
+            case "images" -> name.endsWith(".jpg") || name.endsWith(".jpeg") || name.endsWith(".png")
+                    || name.endsWith(".gif") || name.endsWith(".webp") || name.endsWith(".bmp");
+            case "voice" -> name.endsWith(".amr") || name.endsWith(".silk") || name.endsWith(".mp3")
+                    || name.endsWith(".wav") || name.endsWith(".m4a");
+            case "video" -> name.endsWith(".mp4") || name.endsWith(".mov") || name.endsWith(".webm")
+                    || name.endsWith(".m4v") || name.endsWith(".avi");
+            default -> false;
+        };
     }
 
     private String resolveFfmpegPath() {
@@ -305,7 +387,17 @@ public class MediaDownloadService {
             absolutePathStr = new File(baseDir + subPath).getAbsolutePath();
         }
 
-        Path voicePath = Paths.get(absolutePathStr);
+        Path voicePath = Paths.get(absolutePathStr).toAbsolutePath().normalize();
+
+        // 路径穿越防护：必须位于合法的两个根目录之下
+        Path basePath = Paths.get(localImagePath).toAbsolutePath().normalize();
+        File uploadsDir = new File("uploads");
+        Path uploadsPath = uploadsDir.toPath().toAbsolutePath().normalize();
+        if (!voicePath.startsWith(basePath) && !voicePath.startsWith(uploadsPath)) {
+            log.warn("路径穿越攻击检测: relativePath={}, resolved={}", relativePath, voicePath);
+            return null;
+        }
+
         if (!Files.exists(voicePath)) {
             log.warn("语音文件不存在: {}", absolutePathStr);
             return null;

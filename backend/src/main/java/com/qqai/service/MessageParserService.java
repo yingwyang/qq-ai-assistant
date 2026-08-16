@@ -1,5 +1,6 @@
 package com.qqai.service;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.qqai.dto.webhook.MediaTaskPayload;
@@ -289,18 +290,36 @@ public class MessageParserService {
     /**
      * 轻量 CQ 码解析：识别类型 + 收集媒体任务（不下载）。
      * 图片/语音/视频 → 收集到 mediaTasks；合并转发/回复/JSON → 同步处理（轻量或保留原逻辑）。
+     *
+     * 安全:媒体类型必须有消息数组佐证 —— 群成员可以发一段包含
+     * "[CQ:image,url=...]" 的纯文本,若直接信任 raw_message 会触发
+     * 服务端下载任意 URL(SSRF)或拷贝任意本地文件。因此:
+     * payload 带有 message 数组/elements 数组时,必须以其中是否存在
+     * 对应媒体段为准;伪造的媒体 CQ 码按普通文本处理。
      */
     private void parseCqCodesLightweight(MessageParseResult result, ObjectNode json) {
         String rawMessage = result.getRawMessage();
         String groupId = String.valueOf(result.getGroupId());
 
         if (rawMessage.contains("[CQ:image")) {
+            if (!hasMediaSegment(json, "image")) {
+                log.warn("【安全】疑似伪造媒体CQ码(无对应图片消息段),按文本处理: groupId={}", groupId);
+                return;
+            }
             result.setMsgType(Message.MessageType.IMAGE);
             addMediaTask(result, rawMessage, groupId, "images", ".jpg");
         } else if (rawMessage.contains("[CQ:record") || rawMessage.contains("[CQ:voice")) {
+            if (!hasMediaSegment(json, "voice")) {
+                log.warn("【安全】疑似伪造媒体CQ码(无对应语音消息段),按文本处理: groupId={}", groupId);
+                return;
+            }
             result.setMsgType(Message.MessageType.VOICE);
             addMediaTask(result, rawMessage, groupId, "voice", ".amr");
         } else if (rawMessage.contains("[CQ:video")) {
+            if (!hasMediaSegment(json, "video")) {
+                log.warn("【安全】疑似伪造媒体CQ码(无对应视频消息段),按文本处理: groupId={}", groupId);
+                return;
+            }
             result.setMsgType(Message.MessageType.VIDEO);
             addMediaTask(result, rawMessage, groupId, "video", ".mp4");
         } else if (rawMessage.contains("[CQ:file")) {
@@ -313,6 +332,47 @@ public class MessageParserService {
         } else if (rawMessage.contains("[CQ:json")) {
             handleJson(result, rawMessage);
         }
+    }
+
+    /**
+     * 检查 payload 的消息数组是否包含指定类型的媒体段。
+     * - OneBot 11: message 数组,item.type = image / record / voice / video
+     * - NapCat:    elements 数组,elementType = 2(图片) / 3(语音) / 4(视频)
+     * 若 payload 同时缺少两种数组(旧格式),返回 true 保持向后兼容。
+     */
+    private boolean hasMediaSegment(ObjectNode json, String kind) {
+        if (json.has("message") && json.get("message").isArray()) {
+            for (JsonNode item : json.get("message")) {
+                String type = item.has("type") ? item.get("type").asText() : null;
+                if (typeMatchesKind(kind, type)) {
+                    return true;
+                }
+            }
+            // message 数组存在但没有对应媒体段 → 视为伪造
+            return false;
+        }
+        if (json.has("elements") && json.get("elements").isArray()) {
+            for (JsonNode el : json.get("elements")) {
+                int elementType = el.has("elementType") ? el.get("elementType").asInt() : -1;
+                if ((("image".equals(kind) && elementType == 2))
+                        || ("voice".equals(kind) && elementType == 3)
+                        || ("video".equals(kind) && elementType == 4)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        return true;
+    }
+
+    private boolean typeMatchesKind(String kind, String type) {
+        if (type == null) return false;
+        return switch (kind) {
+            case "image" -> "image".equals(type);
+            case "voice" -> "record".equals(type) || "voice".equals(type);
+            case "video" -> "video".equals(type);
+            default -> false;
+        };
     }
 
     /** 收集媒体任务到 result.mediaTasks（不执行下载） */

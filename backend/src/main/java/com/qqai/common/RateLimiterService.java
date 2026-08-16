@@ -23,7 +23,14 @@ public class RateLimiterService {
             timestamps.pollFirst();
         }
 
+        // 清理空队列防止内存泄漏
+        if (timestamps.isEmpty()) {
+            requestTimestamps.remove(key, timestamps);
+        }
+
         if (timestamps.size() < maxRequests) {
+            // 重新获取或创建时间戳队列（可能已被 remove）
+            timestamps = requestTimestamps.computeIfAbsent(key, k -> new ArrayDeque<>());
             timestamps.offerLast(now);
             return true;
         }

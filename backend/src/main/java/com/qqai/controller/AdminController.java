@@ -78,6 +78,7 @@ public class AdminController {
         pageData.put("first", userPage.isFirst());
         pageData.put("last", userPage.isLast());
 
+        auditLogService.log(currentUsername(), "ADMIN_LIST_USERS", "users", "SUCCESS", "查看用户列表");
         return ResponseEntity.ok(ApiResponse.success(pageData));
     }
 

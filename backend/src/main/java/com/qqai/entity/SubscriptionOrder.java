@@ -63,6 +63,9 @@ public class SubscriptionOrder {
     @Column(length = 500)
     private String refundReason;
 
+    @Column(length = 500)
+    private String disputeReason;
+
     @Column(length = 2000)
     private String metadata;
 
@@ -133,6 +136,9 @@ public class SubscriptionOrder {
 
     public String getRefundReason() { return refundReason; }
     public void setRefundReason(String refundReason) { this.refundReason = refundReason; }
+
+    public String getDisputeReason() { return disputeReason; }
+    public void setDisputeReason(String disputeReason) { this.disputeReason = disputeReason; }
 
     public String getMetadata() { return metadata; }
     public void setMetadata(String metadata) { this.metadata = metadata; }

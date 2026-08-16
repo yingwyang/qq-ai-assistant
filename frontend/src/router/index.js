@@ -41,58 +41,55 @@ const router = createRouter({
   routes
 });
 
-// 路由守卫：检查登录状态和管理员权限
+// 路由守卫：通过 /api/auth/me 验证登录状态（同源 Cookie 自动携带）
 router.beforeEach(async (to, from, next) => {
-  const token = localStorage.getItem('auth_token');
-  const isLoggedIn = !!token;
   const cachedRole = localStorage.getItem('user_role') || 'USER';
 
-  if (to.meta.requiresAuth && !isLoggedIn) {
-    // 未登录且访问需要授权的页面，跳转到登录页
-    next('/login');
+  // 公开页面：已登录则按角色跳转（先不验证，信任缓存角色快速判断）
+  if (to.path === '/login') {
+    if (cachedRole) {
+      if (cachedRole === 'ADMIN') {
+        next('/admin');
+      } else {
+        next('/');
+      }
+      return;
+    }
+    next();
     return;
   }
 
-  if (to.meta.requiresAdmin) {
-    if (!isLoggedIn) {
-      next('/login');
-      return;
-    }
-    // 必须向后端确认真实角色，localStorage 的 user_role 仅用于 UI 展示
+  if (to.meta.requiresAuth) {
     try {
-      const res = await fetch('/api/auth/me', {
-        headers: token ? { Authorization: `Bearer ${token}` } : {}
-      });
+      // 通过同源 Cookie 认证，后端返回当前用户信息
+      const res = await fetch('/api/auth/me');
       if (res.status === 401) {
-        localStorage.removeItem('auth_token');
+        // 未登录 → 跳转登录页（不清 localStorage，handleUnauthorized 会处理）
         localStorage.removeItem('user_role');
         next('/login');
+        return;
+      }
+      if (!res.ok) {
+        // 其他错误（如 500）→ 仍放行到目标页，让页面内请求兜底处理
+        next();
         return;
       }
       const data = await res.json();
       const realRole = data?.data?.role || data?.role || cachedRole;
       localStorage.setItem('user_role', realRole);
-      if (realRole !== 'ADMIN') {
+
+      if (to.meta.requiresAdmin && realRole !== 'ADMIN') {
         next('/');
         return;
       }
+      next();
     } catch (e) {
-      next('/');
-      return;
+      // 网络错误（后端未启动等）→ 跳转登录页
+      next('/login');
     }
+  } else {
+    next();
   }
-
-  if (to.path === '/login' && isLoggedIn) {
-    // 已登录但访问登录页，根据角色跳转
-    if (cachedRole === 'ADMIN') {
-      next('/admin');
-    } else {
-      next('/');
-    }
-    return;
-  }
-
-  next();
 });
 
 export default router;

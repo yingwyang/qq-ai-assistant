@@ -1,5 +1,9 @@
 <template>
   <div class="user-center">
+    <!-- 全局系统消息提示（z-index 高于 modal） -->
+    <div v-if="systemMessage" class="system-toast" :class="systemMessageType">
+      {{ systemMessage }}
+    </div>
     <header class="user-center-header">
       <div class="header-brand">
         <Icon name="user" :size="24" />
@@ -14,7 +18,7 @@
           <span v-if="expiresAt" class="hcs-expire">{{ formatShortDate(expiresAt) }}到期</span>
           <span class="hcs-divider">·</span>
           <span class="hcs-balance">
-            <span class="hcs-gem">💎</span>
+            <span class="hcs-gem"><Icon name="diamond" :size="14" /></span>
             <span class="hcs-num">{{ formatCreditsNumber(balance) }}</span>
           </span>
         </div>
@@ -498,6 +502,7 @@
                     <p class="bind-tip">请使用手机QQ发送验证码到以下号码：</p>
                     <div class="bind-qq-number">{{ bindForm.qqNumber }}</div>
                     <p class="bind-tip-small">验证码有效期 5 分钟</p>
+                    <p class="bind-tip-small">请查看QQ自发消息</p>
                   </div>
                   <div class="form-group">
                     <label>验证码</label>
@@ -578,6 +583,8 @@
                     :alt="file.fileName"
                     loading="lazy"
                     @error="markMediaError(file.id)"
+                    @click.stop="openMediaImagePreview(file.url)"
+                    style="cursor: zoom-in;"
                   />
                   <img
                     v-else-if="file.fileType === 'IMAGE'"
@@ -593,10 +600,10 @@
                     @error="markMediaError(file.id)"
                   ></video>
                   <div v-else-if="file.fileType === 'AUDIO'" class="preview-thumbnail-audio">
-                    <span>🎵</span>
+                    <Icon name="audio" :size="28" />
                   </div>
                   <div v-else class="preview-thumbnail-file">
-                    <span>📄</span>
+                    <Icon name="file" :size="28" />
                   </div>
                 </div>
                 <div class="preview-grid-info" @click="enterSingleView(index)">
@@ -654,6 +661,8 @@
               :alt="currentPreviewFile.fileName"
               class="preview-img"
               @error="markMediaError(currentPreviewFile.id)"
+              @click.stop="openMediaImagePreview(currentPreviewFile.url)"
+              style="cursor: zoom-in;"
             />
             <img
               v-else-if="currentPreviewFile.fileType === 'IMAGE'"
@@ -710,6 +719,7 @@ import { useComponentControl } from '../composables/useComponentControl';
 import { useMediaManager } from '../composables/useMediaManager';
 import { useUserDashboardData } from '../composables/useUserDashboardData';
 import { useUserCreditsStore } from '../composables/useUserCreditsStore';
+import { useImagePreview } from '../composables/useImagePreview';
 
 export default {
   name: 'UserCenter',
@@ -725,14 +735,28 @@ export default {
     const dashboardLoaded = ref(false);
 
     const systemMessage = ref('');
+    const systemMessageType = ref('success');
     const showSystemMsg = (msg, type = 'success') => {
       systemMessage.value = msg;
+      systemMessageType.value = type;
       setTimeout(() => { systemMessage.value = ''; }, 5000);
     };
 
     const componentCtrl = useComponentControl({ showSystemMsg });
     const media = useMediaManager({ showSystemMsg });
     const dashboard = useUserDashboardData({ showSystemMsg });
+    const imgPreview = useImagePreview();
+
+    // 媒体管理网格：当前页所有图片URL（供 ← → 切换）
+    const mediaGalleryUrls = computed(() =>
+      (media.previewFiles.value || [])
+        .filter(f => f && f.fileType === 'IMAGE' && f.url)
+        .map(f => f.url)
+    );
+    const openMediaImagePreview = (url) => {
+      if (!url) return;
+      imgPreview.open(url, mediaGalleryUrls.value);
+    };
 
     // 预览搜索
     const previewSearchQuery = ref('');
@@ -766,7 +790,7 @@ export default {
     };
 
     // 全局共享积分状态（与 Sidebar / UserMenuPopover 同步，签到后 Header 自动更新）
-    const { balance, tier, tierLabel, expiresAt } = useUserCreditsStore();
+    const { balance, tier, tierLabel, expiresAt, reload: reloadCredits } = useUserCreditsStore();
 
     const formatShortDate = (dateStr) => {
       if (!dateStr) return '-';
@@ -998,7 +1022,7 @@ export default {
       try {
         await userApi.bindQq({
           qqNumber: bindForm.value.qqNumber,
-          code: bindForm.value.code
+          verificationCode: bindForm.value.code
         });
         showBindModal.value = false;
         showSystemMsg('QQ绑定成功');
@@ -1128,6 +1152,7 @@ export default {
       window.addEventListener('keydown', media.onPreviewKeydown);
 
       loadUserInfo();
+      reloadCredits();
 
       // 数据概览为默认标签页，进入页面即加载数据
       if (activeTab.value === 'dashboard') {
@@ -1169,8 +1194,9 @@ export default {
       activeTab, navItems, isMediaCollapsed,
       formatDate, formatBytes, goHome, handleAvatarError,
       handleNavClick,
+      systemMessage, systemMessageType,
       autoFocusSignIn, autoOpenUpgrade, autoRelatedId,
-      handleCreditsOpenUpgrade, handleRefreshCredits,
+      handleCreditsOpenUpgrade, handleCreditsSwitchTab, handleRefreshCredits,
       userInfo, userAvatarUrl,
       componentStatus: componentCtrl.componentStatus,
       qrCode: componentCtrl.qrCode,
@@ -1222,6 +1248,7 @@ export default {
       isMediaError: media.isMediaError,
       markMediaError: media.markMediaError,
       showPreviewModal: media.showPreviewModal,
+      openMediaImagePreview,
       previewSearchQuery,
       onPreviewSearch,
       confirmDeleteSelectedFromPreview,
@@ -2084,6 +2111,27 @@ export default {
 .btn-save:disabled {
   background-color: #bdc3c7;
   cursor: not-allowed;
+}
+
+/* 全局系统消息提示（高于 modal 层级） */
+.system-toast {
+  position: fixed;
+  top: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 12px 24px;
+  border-radius: 8px;
+  color: #fff;
+  font-size: 14px;
+  z-index: 9999;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+  animation: toast-slide-in 0.3s ease;
+}
+.system-toast.success { background-color: #07c160; }
+.system-toast.error { background-color: #e74c3c; }
+@keyframes toast-slide-in {
+  from { opacity: 0; transform: translate(-50%, -16px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
 }
 
 .preview-modal {

@@ -14,6 +14,22 @@ uploads/temp/
 uploads/archive/
 backend/uploads/
 *.log
+*.err
+
+# 运行时日志与调试产物(全部忽略)
+backend/backend*.log
+backend/backend*.err
+backend/spring-boot*.log
+backend/effective-pom
+backend/forward-debug.json
+backend/runtime_verify_*.ps1
+
+# 开发会话记录/临时文档
+/(1)*.md
+SESSION_FULL_*.md
+
+# 历史清洗工具产物(含旧密钥,禁止提交)
+.git-filter-replacements.txt
 
 # IDE
 .idea/
@@ -48,3 +64,6 @@ frontend/devserver.err
 
 # Trae specs
 .trae/
+
+# 设计工具产物
+frontend/login-page.design/

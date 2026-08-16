@@ -72,34 +72,35 @@ public class RootWebhookController {
             @RequestHeader(value = "X-Self-ID", required = false) String selfId,
             @RequestParam(value = "access_token", required = false) String accessToken) {
 
-        log.info("【根路径】收到NapCat消息: {}", payload.substring(0, Math.min(500, payload.length())));
+        // 日志脱敏:不打印原始消息内容与认证头,仅记录长度
+        int payloadLen = payload != null ? payload.length() : 0;
+        log.info("【根路径】收到NapCat消息, payload长度={}", payloadLen);
         long webhookStartMs = System.currentTimeMillis();
-        log.debug("Authorization: {}", authHeader);
-        log.debug("X-Token: {}", xToken);
-        log.debug("X-OneBot-Token: {}", xOneBotToken);
-        log.debug("X-Self-ID: {}", selfId);
-        log.debug("access_token param: {}", accessToken);
 
-        // 验证 Webhook Token（支持多种头格式和URL参数）
-        if (webhookToken != null && !webhookToken.isEmpty()) {
-            boolean valid = false;
-            if (authHeader != null) {
-                valid = authHeader.equals("Bearer " + webhookToken) || authHeader.equals(webhookToken);
-            }
-            if (!valid && xToken != null) {
-                valid = xToken.equals(webhookToken);
-            }
-            if (!valid && xOneBotToken != null) {
-                valid = xOneBotToken.equals(webhookToken);
-            }
-            if (!valid && accessToken != null) {
-                valid = accessToken.equals(webhookToken);
-            }
-            if (!valid) {
-                log.error("【安全】Webhook Token 验证失败，拒绝接收消息。");
-                return ResponseEntity.status(401)
-                        .body(Map.of("error", "Unauthorized", "message", "Webhook token validation failed"));
-            }
+        // 验证 Webhook Token（支持多种头格式和URL参数）。
+        // fail closed:未配置 token 时直接拒绝,防止无认证的消息注入。
+        if (webhookToken == null || webhookToken.isEmpty()) {
+            log.error("【安全】napcat.webhook-token 未配置,拒绝接收消息。");
+            return ResponseEntity.status(503)
+                    .body(Map.of("error", "ServiceUnavailable", "message", "Webhook token not configured"));
+        }
+        boolean valid = false;
+        if (authHeader != null) {
+            valid = authHeader.equals("Bearer " + webhookToken) || authHeader.equals(webhookToken);
+        }
+        if (!valid && xToken != null) {
+            valid = xToken.equals(webhookToken);
+        }
+        if (!valid && xOneBotToken != null) {
+            valid = xOneBotToken.equals(webhookToken);
+        }
+        if (!valid && accessToken != null) {
+            valid = accessToken.equals(webhookToken);
+        }
+        if (!valid) {
+            log.error("【安全】Webhook Token 验证失败，拒绝接收消息。");
+            return ResponseEntity.status(401)
+                    .body(Map.of("error", "Unauthorized", "message", "Webhook token validation failed"));
         }
 
         try {
@@ -138,8 +139,9 @@ public class RootWebhookController {
             }
 
             String finalMessageId = parsed.getMessageId() != null ? String.valueOf(parsed.getMessageId()) : null;
-            if (finalMessageId != null && messageService.existsByMessageId(finalMessageId)) {
-                log.debug("消息已存在，跳过: messageId={}", finalMessageId);
+            String groupIdStr = String.valueOf(parsed.getGroupId());
+            if (finalMessageId != null && messageService.existsByMessageIdAndGroupId(finalMessageId, groupIdStr)) {
+                log.debug("消息已存在，跳过: messageId={}, groupId={}", finalMessageId, groupIdStr);
                 Map<String, Object> okResult = new HashMap<>();
                 okResult.put("status", "ok");
                 okResult.put("duplicate", true);
@@ -156,11 +158,11 @@ public class RootWebhookController {
             boolean isSelfMessage = currentSelfQq != null && currentSelfQq.equals(String.valueOf(parsed.getUserId()));
 
             if (isSelfMessage) {
-                log.info("【登录账号】发送群聊消息: 群{}({}) 用户{}({}): {}",
-                        parsed.getGroupId(), groupName, parsed.getUserId(), nickname, parsed.getRawMessage());
+                log.info("【登录账号】发送群聊消息: 群{}({}) 用户{}({})",
+                        parsed.getGroupId(), groupName, parsed.getUserId(), nickname);
             } else {
-                log.info("【其他成员】收到群聊消息: 群{}({}) 用户{}({}): {}",
-                        parsed.getGroupId(), groupName, parsed.getUserId(), nickname, parsed.getRawMessage());
+                log.info("【其他成员】收到群聊消息: 群{}({}) 用户{}({})",
+                        parsed.getGroupId(), groupName, parsed.getUserId(), nickname);
             }
 
             // 创建消息实体

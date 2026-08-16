@@ -10,6 +10,7 @@ import com.qqai.entity.enums.OrderStatus;
 import com.qqai.entity.enums.SubscriptionTier;
 import com.qqai.exception.BizException;
 import com.qqai.exception.CreditErrorCode;
+import com.qqai.repository.SubscriptionOrderRepository;
 import com.qqai.repository.UserRepository;
 import com.qqai.service.AuditLogService;
 import com.qqai.service.CreditService;
@@ -54,6 +55,9 @@ public class AdminOrdersController {
 
     @Autowired
     private UserRepository userRepository;
+
+    @Autowired
+    private SubscriptionOrderRepository subscriptionOrderRepository;
 
     @Autowired(required = false)
     private AuditLogService auditLogService;
@@ -193,6 +197,31 @@ public class AdminOrdersController {
         return ApiResponse.success(data);
     }
 
+    /**
+     * 管理员确认支付：将 PENDING 订单标记为 PAID，发放权益。
+     */
+    @PostMapping("/orders/{orderNo}/approve-payment")
+    public ApiResponse<Map<String, Object>> approvePayment(@PathVariable String orderNo) {
+        Long adminUserId = securityHelper.requireAdminUserId();
+        SubscriptionOrder paid = subscriptionService.markPaid(orderNo, "MANUAL",
+                "ADMIN-" + adminUserId + "-" + System.currentTimeMillis());
+
+        Map<String, Object> data = new HashMap<>();
+        data.put("orderNo", paid.getOrderNo());
+        data.put("status", paid.getStatus() != null ? paid.getStatus().name() : null);
+        data.put("expiresAt", paid.getExpiresAt());
+        data.put("pointsGranted", paid.getCreditAmount());
+
+        String adminUsername = securityHelper.getCurrentUsername();
+        if (auditLogService != null) {
+            auditLogService.log(adminUsername, "ADMIN_APPROVE_PAYMENT",
+                    "order:" + orderNo, "SUCCESS",
+                    "adminUserId=" + adminUserId + " plan=" + paid.getPlanTier()
+                    + " points=" + paid.getCreditAmount() + " price=" + paid.getPrice());
+        }
+        return ApiResponse.success(data);
+    }
+
     @PostMapping("/orders/{orderNo}/refund")
     public ApiResponse<Map<String, Object>> refund(@PathVariable String orderNo,
                                                    @RequestBody(required = false) Map<String, Object> body) {
@@ -226,30 +255,194 @@ public class AdminOrdersController {
         return ApiResponse.success(data);
     }
 
+    @PostMapping("/orders/{orderNo}/resolve-dispute")
+    public ApiResponse<Map<String, Object>> resolveDispute(@PathVariable String orderNo,
+                                                           @RequestBody(required = false) Map<String, Object> body) {
+        Long adminUserId = securityHelper.requireAdminUserId();
+        boolean agree = body != null && Boolean.TRUE.equals(body.get("agree"));
+        String reason = body != null ? (String) body.get("reason") : null;
+        if (reason == null || reason.isBlank()) reason = agree ? "管理员同意退款" : "管理员驳回纠纷";
+
+        SubscriptionOrder order = subscriptionService.findByOrderNo(orderNo)
+                .orElseThrow(() -> new BizException(404, CreditErrorCode.ORDER_NOT_FOUND, "订单不存在: " + orderNo));
+
+        if (agree) {
+            int refundPoints = subscriptionService.refundedPointsLastRefund(order, 1.0);
+            subscriptionService.resolveDispute(orderNo, true, reason, adminUserId);
+            UserCredit after = creditService.getBalanceWithTier(order.getUserId());
+            Map<String, Object> data = new HashMap<>();
+            data.put("orderNo", orderNo);
+            data.put("refundPoints", refundPoints);
+            data.put("newBalance", after.getBalance());
+            data.put("status", "REFUNDED");
+            String adminUsername = securityHelper.getCurrentUsername();
+            if (auditLogService != null) {
+                auditLogService.log(adminUsername, "ADMIN_RESOLVE_DISPUTE_REFUND",
+                        "order:" + orderNo, "SUCCESS", "refundPoints=" + refundPoints + " reason=" + reason);
+            }
+            return ApiResponse.success(data);
+        } else {
+            SubscriptionOrder resolved = subscriptionService.resolveDispute(orderNo, false, reason, adminUserId);
+            Map<String, Object> data = new HashMap<>();
+            data.put("orderNo", orderNo);
+            data.put("status", resolved.getStatus() != null ? resolved.getStatus().name() : null);
+            String adminUsername = securityHelper.getCurrentUsername();
+            if (auditLogService != null) {
+                auditLogService.log(adminUsername, "ADMIN_RESOLVE_DISPUTE_REJECT",
+                        "order:" + orderNo, "SUCCESS", reason);
+            }
+            return ApiResponse.success(data);
+        }
+    }
+
+    @PostMapping("/orders/{orderNo}/approve-refund")
+    public ApiResponse<Map<String, Object>> approveRefund(@PathVariable String orderNo,
+                                                          @RequestBody(required = false) Map<String, Object> body) {
+        Long adminUserId = securityHelper.requireAdminUserId();
+        String reason = body != null ? (String) body.get("reason") : null;
+        if (reason == null || reason.isBlank()) reason = "管理员同意退款";
+
+        SubscriptionOrder order = subscriptionService.findByOrderNo(orderNo)
+                .orElseThrow(() -> new BizException(404, CreditErrorCode.ORDER_NOT_FOUND, "订单不存在: " + orderNo));
+        if (order.getStatus() != OrderStatus.PENDING_REFUND) {
+            throw new BizException(400, CreditErrorCode.ORDER_STATUS_INVALID,
+                    "订单状态" + order.getStatus() + "不是退款待审批，无法审批通过");
+        }
+
+        int refundPoints = subscriptionService.refundedPointsLastRefund(order, 1.0);
+        subscriptionService.refundOrderWithRatio(orderNo, "退款审批通过: " + reason, adminUserId, 1.0);
+        UserCredit after = creditService.getBalanceWithTier(order.getUserId());
+
+        Map<String, Object> data = new HashMap<>();
+        data.put("orderNo", orderNo);
+        data.put("status", "REFUNDED");
+        data.put("refundPoints", refundPoints);
+        data.put("newBalance", after.getBalance());
+
+        String adminUsername = securityHelper.getCurrentUsername();
+        if (auditLogService != null) {
+            auditLogService.log(adminUsername, "ADMIN_APPROVE_REFUND",
+                    "order:" + orderNo, "SUCCESS",
+                    "refundPoints=" + refundPoints + " reason=" + reason);
+        }
+        return ApiResponse.success(data);
+    }
+
+    @PostMapping("/orders/{orderNo}/reject-refund")
+    public ApiResponse<Map<String, Object>> rejectRefund(@PathVariable String orderNo,
+                                                         @RequestBody(required = false) Map<String, Object> body) {
+        Long adminUserId = securityHelper.requireAdminUserId();
+        String reason = body != null ? (String) body.get("reason") : null;
+        if (reason == null || reason.isBlank()) reason = "管理员驳回退款申请";
+
+        SubscriptionOrder rejected = subscriptionService.rejectRefund(orderNo, reason, adminUserId);
+
+        Map<String, Object> data = new HashMap<>();
+        data.put("orderNo", orderNo);
+        data.put("status", rejected.getStatus() != null ? rejected.getStatus().name() : null);
+
+        String adminUsername = securityHelper.getCurrentUsername();
+        if (auditLogService != null) {
+            auditLogService.log(adminUsername, "ADMIN_REJECT_REFUND",
+                    "order:" + orderNo, "SUCCESS", reason);
+        }
+        return ApiResponse.success(data);
+    }
+
+    @GetMapping("/orders/pending-count")
+    public ApiResponse<Map<String, Object>> pendingCount() {
+        securityHelper.requireAdmin();
+        long pendingRefunds = subscriptionOrderRepository.countByStatus(OrderStatus.PENDING_REFUND);
+        long pendingDisputes = subscriptionOrderRepository.countByStatus(OrderStatus.DISPUTED);
+        Map<String, Object> data = new HashMap<>();
+        // 双写字段：pendingRefundCount/pendingDisputeCount 为前端约定主字段，其他为兼容
+        data.put("pendingRefundCount", pendingRefunds);
+        data.put("pendingDisputeCount", pendingDisputes);
+        data.put("pendingRefunds", pendingRefunds);
+        data.put("pendingDisputes", pendingDisputes);
+        return ApiResponse.success(data);
+    }
+
     private Map<String, Object> orderToMap(SubscriptionOrder o) {
         Map<String, Object> m = new HashMap<>();
         m.put("id", o.getId());
         m.put("orderNo", o.getOrderNo());
         m.put("userId", o.getUserId());
         m.put("planTier", o.getPlanTier() != null ? o.getPlanTier().name() : null);
+        m.put("planName", planTierToName(o.getPlanTier()));
         m.put("price", o.getPrice());
+        m.put("amount", o.getPrice());
+        m.put("paidAmount", o.getPrice());
         m.put("creditAmount", o.getCreditAmount());
+        m.put("credits", o.getCreditAmount());
         m.put("durationDays", o.getDurationDays());
+        m.put("planDurationDays", o.getDurationDays());
         m.put("status", o.getStatus() != null ? o.getStatus().name() : null);
         m.put("paymentMethod", o.getPaymentMethod());
         m.put("paymentTransactionId", o.getPaymentTransactionId());
         m.put("paidAt", o.getPaidAt());
+        m.put("validFrom", o.getPaidAt());
         m.put("expiresAt", o.getExpiresAt());
         m.put("refundedAt", o.getRefundedAt());
         m.put("refundAmount", o.getRefundAmount());
         m.put("refundReason", o.getRefundReason());
+        m.put("disputeReason", o.getDisputeReason());
+        m.put("refundStatus", refundStatusName(o.getStatus()));
         m.put("refundAdminUserId", o.getRefundAdminUserId());
+        // 从 metadata 解析申请时间等扩展字段
+        String meta = o.getMetadata();
+        if (meta != null && !meta.isEmpty()) {
+            m.put("refundRequestedAt", extractMeta(meta, "refundRequestedAt"));
+            m.put("disputedAt", extractMeta(meta, "disputedAt"));
+            m.put("refundRejectReason", extractMeta(meta, "refundRejectReason"));
+        }
         m.put("metadata", o.getMetadata());
         m.put("clientIp", o.getClientIp());
         m.put("userAgent", o.getUserAgent());
         m.put("createdAt", o.getCreatedAt());
         m.put("updatedAt", o.getUpdatedAt());
+        m.put("autoRenew", false);
+        m.put("source", "WEB");
         return m;
+    }
+
+    private String planTierToName(SubscriptionTier tier) {
+        if (tier == null) return "免费版";
+        return switch (tier) {
+            case FREE -> "免费版";
+            case LITE -> "直购积分·600";
+            case PRO -> "直购积分·3500";
+            case PROPLUS -> "直购积分·16000";
+            case ULTRA -> "直购积分·45000";
+            case MEGA -> "直购积分·100000";
+            case SMALL_MONTH_CARD -> "小月卡";
+            case LARGE_MONTH_CARD -> "大月卡";
+            case ALL -> "全功能版";
+        };
+    }
+
+    private String refundStatusName(OrderStatus status) {
+        if (status == null) return "";
+        return switch (status) {
+            case REFUNDED -> "已退款";
+            case PENDING_REFUND -> "退款审批中";
+            default -> "";
+        };
+    }
+
+    /**
+     * 从 metadata 字符串（;分隔 key=value）中提取指定 key 的值。
+     * metadata 格式示例：refundRequestReason=xxx;refundRequestedAt=2026-08-14T18:00;refundRequestedBy=2
+     */
+    private String extractMeta(String metadata, String key) {
+        if (metadata == null || key == null) return null;
+        for (String part : metadata.split(";")) {
+            int eq = part.indexOf('=');
+            if (eq > 0 && part.substring(0, eq).equals(key)) {
+                return part.substring(eq + 1);
+            }
+        }
+        return null;
     }
 
     private Map<String, Object> txToMap(CreditTransaction tx) {

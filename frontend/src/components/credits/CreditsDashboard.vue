@@ -13,7 +13,7 @@
     <template v-else>
       <div class="credits-banner section-card" :class="{ highlight: highlightSignIn }" ref="bannerRef">
         <div class="banner-left">
-          <div class="banner-icon">🎉</div>
+          <div class="banner-icon"><Icon name="celebrate" :size="36" /></div>
           <div class="banner-content">
             <div class="banner-title">欢迎使用积分体系 · 每日签到 +150</div>
             <div class="banner-subtitle">
@@ -48,7 +48,7 @@
         <div class="main-card-top">
           <div class="main-card-left">
             <div class="main-icon-wrap">
-              <span class="main-icon">💎</span>
+              <Icon name="diamond" :size="36" class="main-icon" />
             </div>
             <div class="main-info">
               <div class="main-label">总可用积分</div>
@@ -77,57 +77,6 @@
               {{ tierLabel }}
               <small v-if="tierExpireAt">· {{ formatShortDate(tierExpireAt) }}到期</small>
             </span>
-          </div>
-        </div>
-      </div>
-
-      <div class="section-card">
-        <div class="section-card-header">
-          <h4>奖励积分</h4>
-          <span class="section-hint">完成任务领取积分</span>
-        </div>
-        <div v-if="rewardsLoading" class="rewards-loading">
-          <div class="loading-spinner"></div><span>加载中...</span>
-        </div>
-        <div v-else class="rewards-grid">
-          <div
-            v-for="(reward, idx) in normalizedRewards"
-            :key="reward.id || idx"
-            class="reward-card"
-            :class="{ claimed: reward.status === 'CLAIMED' }"
-          >
-            <div class="reward-header">
-              <span class="reward-emoji">{{ rewardEmojis[idx] || '🎁' }}</span>
-              <div class="reward-title-block">
-                <div class="reward-name">{{ reward.name }}</div>
-                <div class="reward-type">{{ rewardTypeName(reward.type) }}</div>
-              </div>
-            </div>
-            <div class="reward-progress">
-              <div v-if="reward.progressTotal && reward.progressTotal > 0" class="progress-bar">
-                <div
-                  class="progress-fill"
-                  :style="{ width: Math.min(100, (reward.progressCurrent / reward.progressTotal) * 100) + '%' }"
-                ></div>
-              </div>
-              <div class="progress-text">
-                <span v-if="reward.progressTotal && reward.progressTotal > 0">
-                  {{ reward.progressCurrent || 0 }} / {{ reward.progressTotal }}
-                </span>
-                <span v-else-if="reward.creditAmount !== undefined">
-                  已到账 <b>+{{ reward.creditAmount }}</b>
-                </span>
-              </div>
-            </div>
-            <div class="reward-footer">
-              <span class="reward-expiry">
-                <Icon name="calendar" :size="12" />
-                {{ reward.expireAt ? formatShortDate(reward.expireAt) : '永久有效' }}
-              </span>
-              <span class="reward-status" :class="rewardStatusClass(reward.status)">
-                {{ rewardStatusText(reward.status) }}
-              </span>
-            </div>
           </div>
         </div>
       </div>
@@ -307,7 +256,7 @@ export default {
   setup(props, { emit }) {
     const bannerRef = ref(null);
     const typeOptions = TX_TYPE_OPTIONS;
-    const rewardEmojis = ['🎁', '📅', '📆', '👑'];
+    const rewardIconNames = ['gift', 'calendar', 'calendar', 'crown'];
 
     const showSystemMsg = (msg, type = 'success') => {
       window.dispatchEvent(new CustomEvent('system:toast', { detail: { msg, type } }));
@@ -458,7 +407,7 @@ export default {
       ...credits,
       bannerRef,
       typeOptions,
-      rewardEmojis,
+      rewardIconNames,
       normalizedRewards,
       rewardTypeName,
       rewardStatusClass,

@@ -18,7 +18,7 @@
       <div v-if="currentTypeKey" class="gt-current">
         <span class="gt-current-label">当前：</span>
         <span :class="['gt-pill', `gt-pill-${currentTypeKey}`]">
-          {{ GT_MAP[currentTypeKey]?.icon }} {{ GT_MAP[currentTypeKey]?.label }}
+          <Icon :name="GT_MAP[currentTypeKey]?.iconName" :size="12" /> {{ GT_MAP[currentTypeKey]?.label }}
         </span>
       </div>
 
@@ -31,7 +31,7 @@
           :disabled="isSaving"
           @click="selectType(opt.value)"
         >
-          <div :class="['gt-icon', `gt-icon-${opt.value}`]">{{ opt.icon }}</div>
+          <div :class="['gt-icon', `gt-icon-${opt.value}`]"><Icon :name="opt.iconName" :size="24" /></div>
           <div class="gt-info">
             <div class="gt-name">{{ opt.label }}</div>
             <div class="gt-desc">{{ opt.desc }}</div>
@@ -46,12 +46,12 @@
       <!-- AI 识别区域 -->
       <div class="gt-ai-box">
         <div class="gt-ai-left">
-          <div class="gt-ai-title">🤖 让 AI 自动识别</div>
+          <div class="gt-ai-title"><Icon name="robot" :size="16" /> 让 AI 自动识别</div>
           <div class="gt-ai-desc">基于最近群聊内容推断群类型（消耗 1 积分）</div>
           <div v-if="recognized && recognized.groupType" class="gt-ai-result">
             <span>识别结果：</span>
             <span :class="['gt-pill', `gt-pill-${recognized.groupType}`]">
-              {{ GT_MAP[recognized.groupType]?.icon }} {{ GT_MAP[recognized.groupType]?.label }}
+              <Icon :name="GT_MAP[recognized.groupType]?.iconName" :size="12" /> {{ GT_MAP[recognized.groupType]?.label }}
             </span>
             <span v-if="typeof recognized.confidence === 'number'" class="gt-ai-conf">
               置信度 {{ (recognized.confidence * 100).toFixed(0) }}%
@@ -102,19 +102,19 @@ import { showToast } from './Toast.vue';
 
 // 群类型元数据（与后端 GroupType 枚举 + GROUP_TYPE_RECOMMEND 保持一致）
 const GT_MAP = {
-  GAME:   { label: '游戏群', icon: '🎮', color: '#6366f1', desc: '讨论游戏攻略、组队、赛事、版本更新',
+  GAME:   { label: '游戏群', iconName: 'gamepad', color: '#6366f1', desc: '讨论游戏攻略、组队、赛事、版本更新',
             rec: ['meme-dictionary', 'integration-guide', 'summary'], recLabel: '梗词典 / 融入指南 / 速览' },
-  STUDY:  { label: '学习群', icon: '📚', color: '#10b981', desc: '科目学习、课程答疑、作业讨论、资源分享',
+  STUDY:  { label: '学习群', iconName: 'book', color: '#10b981', desc: '科目学习、课程答疑、作业讨论、资源分享',
             rec: ['summary', 'topic-trend', 'integration-guide'], recLabel: '速览 / 话题趋势 / 融入指南' },
-  WORK:   { label: '工作群', icon: '💼', color: '#f59e0b', desc: '项目讨论、任务分配、职场沟通协作',
+  WORK:   { label: '工作群', iconName: 'briefcase', color: '#f59e0b', desc: '项目讨论、任务分配、职场沟通协作',
             rec: ['summary', 'integration-guide', 'social-graph'], recLabel: '速览 / 融入指南 / 社交图谱' },
-  HOBBY:  { label: '兴趣群', icon: '🎨', color: '#ec4899', desc: '动漫、运动、音乐、手工等兴趣爱好',
+  HOBBY:  { label: '兴趣群', iconName: 'palette', color: '#ec4899', desc: '动漫、运动、音乐、手工等兴趣爱好',
             rec: ['meme-dictionary', 'persona-match', 'summary'], recLabel: '梗词典 / 人设匹配 / 速览' },
-  LIFE:   { label: '生活群', icon: '☕', color: '#14b8a6', desc: '家庭、邻里、日常琐事、生活经验分享',
+  LIFE:   { label: '生活群', iconName: 'coffee', color: '#14b8a6', desc: '家庭、邻里、日常琐事、生活经验分享',
             rec: ['integration-guide', 'topic-trend', 'summary'], recLabel: '融入指南 / 话题趋势 / 速览' },
-  SOCIAL: { label: '社交群', icon: '💬', color: '#3b82f6', desc: '闲聊交友、聚会活动、拓展人脉',
+  SOCIAL: { label: '社交群', iconName: 'chat', color: '#3b82f6', desc: '闲聊交友、聚会活动、拓展人脉',
             rec: ['social-graph', 'persona-match', 'integration-guide'], recLabel: '社交图谱 / 人设匹配 / 融入指南' },
-  OTHER:  { label: '其他群', icon: '🏷️', color: '#6b7280', desc: '暂时无法归类或混合主题的群',
+  OTHER:  { label: '其他群', iconName: 'tag', color: '#6b7280', desc: '暂时无法归类或混合主题的群',
             rec: ['summary', 'integration-guide'], recLabel: '速览 / 融入指南' }
 };
 
@@ -138,7 +138,7 @@ export default {
 
     const groupTypeOptions = computed(() =>
       Object.entries(GT_MAP).map(([value, meta]) => ({
-        value, label: meta.label, icon: meta.icon,
+        value, label: meta.label, iconName: meta.iconName,
         desc: meta.desc, recLabel: meta.recLabel
       }))
     );

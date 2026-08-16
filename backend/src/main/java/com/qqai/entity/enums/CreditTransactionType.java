@@ -10,5 +10,6 @@ public enum CreditTransactionType {
     REFUND,
     ADMIN_GRANT,
     ADMIN_DEDUCT,
-    EXPIRE
+    EXPIRE,
+    MONTHLY_CARD_DAILY
 }

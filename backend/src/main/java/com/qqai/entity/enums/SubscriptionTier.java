@@ -5,5 +5,9 @@ public enum SubscriptionTier {
     LITE,
     PRO,
     PROPLUS,
-    ULTRA
+    ULTRA,
+    MEGA,
+    SMALL_MONTH_CARD,
+    LARGE_MONTH_CARD,
+    ALL
 }

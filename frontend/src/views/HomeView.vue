@@ -193,7 +193,7 @@
 </template>
 
 <script>
-import { ref, onMounted, onUnmounted, computed, nextTick } from 'vue';
+import { ref, onMounted, onUnmounted, computed, nextTick, provide } from 'vue';
 import { useRouter } from 'vue-router';
 import Icon from '../components/Icon.vue';
 import Sidebar from '../components/Sidebar.vue';
@@ -209,6 +209,7 @@ import { useResponsive } from '../composables/useResponsive';
 import { useTheme } from '../composables/useTheme';
 import { authApi, logout } from '../services/api';
 import { useAutoStartAfterLogin } from '../composables/useAutoStartAfterLogin';
+import { useUserCreditsStore } from '../composables/useUserCreditsStore';
 
 export default {
   name: 'HomeView',
@@ -227,6 +228,7 @@ export default {
   setup() {
     const router = useRouter();
     const { runSequence } = useAutoStartAfterLogin();
+    const { reload: reloadCredits, reset: resetCredits } = useUserCreditsStore();
     const isLoggedIn = ref(false);
     const isAuthChecking = ref(true); // 认证检查中，防止"请先登录"闪现
     const activeTab = ref('recent');
@@ -238,6 +240,8 @@ export default {
     const selectedGroup = ref(null); // { groupId, ownerQq }
     const astrBotChatRef = ref(null);
     const sidebarRef = ref(null); // Sidebar 组件引用，暴露了 refreshGroups 方法
+    // 提供 refreshSidebar 供深层子组件触发侧边栏刷新（保持向后兼容，原 ref 调用仍保留）
+    provide('refreshSidebar', () => sidebarRef.value?.refreshGroups?.());
     const userInfo = ref(null);
     const centerPanelRef = ref(null);
     const rightPanelRef = ref(null);
@@ -317,7 +321,6 @@ export default {
     onMounted(async () => {
       const savedGroupRaw = localStorage.getItem('selectedGroup');
       const savedUserInfo = localStorage.getItem('user_info');
-      const token = localStorage.getItem('auth_token');
       const savedCenterWidth = localStorage.getItem('home_center_width');
 
       if (savedCenterWidth) {
@@ -352,10 +355,10 @@ export default {
       };
       window.addEventListener('auth:logout', _handleAuthLogout);
 
-      // 检查用户登录状态
-      if (token) {
+      // 检查用户登录状态(同源 Cookie 自动携带,直接向后端验证)
+      {
         try {
-          // 验证token有效性
+          // 验证登录态有效性
           const userData = await authApi.getCurrentUser();
           if (userData) {
             userInfo.value = {
@@ -371,18 +374,15 @@ export default {
               localStorage.setItem('user_role', userData.role);
             }
           } else {
-            console.log('Token验证失败，跳转登录页');
+            console.log('登录验证失败，跳转登录页');
             router.replace('/login');
             return;
           }
         } catch (e) {
-          console.log('Token验证异常:', e);
+          console.log('登录验证异常:', e);
           router.replace('/login');
           return;
         }
-      } else {
-        router.replace('/login');
-        return;
       }
       // 认证检查完成，无论成功失败都关闭加载状态
       isAuthChecking.value = false;
@@ -409,6 +409,7 @@ export default {
       if (userData.role) {
         localStorage.setItem('user_role', userData.role);
       }
+      reloadCredits();
       nextTick(() => {
         runSequence();
       });
@@ -435,7 +436,7 @@ export default {
       isLoggedIn.value = false;
       userInfo.value = null;
       selectedGroup.value = null;
-      localStorage.removeItem('auth_token');
+      resetCredits();
       localStorage.removeItem('user_role');
       localStorage.removeItem('user_info');
       localStorage.removeItem('isLoggedIn');

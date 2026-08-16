@@ -3,15 +3,20 @@ package com.qqai.service;
 import com.qqai.entity.CreditTransaction;
 import com.qqai.entity.CreditRule;
 import com.qqai.entity.SignInRecord;
+import com.qqai.entity.SubscriptionOrder;
 import com.qqai.entity.UserCredit;
 import com.qqai.entity.enums.CreditDirection;
 import com.qqai.entity.enums.CreditTransactionType;
+import com.qqai.entity.enums.OrderStatus;
 import com.qqai.entity.enums.SubscriptionTier;
 import com.qqai.exception.BizException;
 import com.qqai.exception.CreditErrorCode;
 import com.qqai.repository.CreditTransactionRepository;
+import com.qqai.repository.MonthlyBonusRecordRepository;
 import com.qqai.repository.SignInRecordRepository;
+import com.qqai.repository.SubscriptionOrderRepository;
 import com.qqai.repository.UserCreditRepository;
+import com.qqai.entity.MonthlyBonusRecord;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.TypedQuery;
 import jakarta.persistence.criteria.CriteriaBuilder;
@@ -34,6 +39,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -48,6 +54,9 @@ public class CreditService {
     private static final int DEFAULT_NEW_USER_BONUS = 500;
     private static final int DEFAULT_SIGN_IN_POINTS = 150;
 
+    private static final List<SubscriptionTier> MONTHLY_CARD_TIERS = Arrays.asList(
+            SubscriptionTier.SMALL_MONTH_CARD, SubscriptionTier.LARGE_MONTH_CARD);
+
     @Autowired
     private UserCreditRepository userCreditRepository;
 
@@ -56,6 +65,12 @@ public class CreditService {
 
     @Autowired
     private SignInRecordRepository signInRecordRepository;
+
+    @Autowired
+    private SubscriptionOrderRepository subscriptionOrderRepository;
+
+    @Autowired
+    private MonthlyBonusRecordRepository monthlyBonusRecordRepository;
 
     @Autowired
     private CreditRuleService creditRuleService;
@@ -204,6 +219,51 @@ public class CreditService {
         return record;
     }
 
+    /**
+     * 月卡每日登录额外积分：通过订单表查询用户是否有未过期的月卡（PAID状态+expiresAt>=now），
+     * 取最高档月卡（大月卡优先）发放每日登录奖励。不依赖 tier 字段，避免直购积分高 tier 覆盖
+     * 月卡 tier 导致用户无法领取月卡奖励的问题。
+     * 幂等：通过 relatedId=MONTHLY_CARD_DAILY-{yyyy-MM-dd} 唯一标识当日发放，重复调用不会重复发放。
+     * 触发场景：/api/auth/login 和 /api/auth/me 接口（覆盖手动登录和自动登录）。
+     * 小月卡每日 +100 积分，大月卡每日 +300 积分。
+     */
+    @Transactional
+    public void grantMonthlyCardDailyBonus(Long userId) {
+        LocalDate today = LocalDate.now();
+        String relatedId = "MONTHLY_CARD_DAILY-" + today;
+
+        // 幂等加固：先检查 MonthlyBonusRecord 是否已存在
+        if (monthlyBonusRecordRepository.existsByUserIdAndBonusDate(userId, today)) {
+            return;
+        }
+
+        // 查询有效月卡订单：PAID状态 + 月卡类型 + 未过期，按月卡 tier 倒序（大月卡优先）
+        List<SubscriptionOrder> activeCards = subscriptionOrderRepository.findActiveMonthlyCards(
+                userId, OrderStatus.PAID, MONTHLY_CARD_TIERS, LocalDateTime.now());
+        if (activeCards == null || activeCards.isEmpty()) {
+            return;
+        }
+        SubscriptionTier tier = activeCards.get(0).getPlanTier();
+        int bonus = (tier == SubscriptionTier.LARGE_MONTH_CARD) ? 300 : 100;
+
+        // 插入月度奖励记录（幂等：唯一约束防并发重复）
+        MonthlyBonusRecord record = new MonthlyBonusRecord();
+        record.setUserId(userId);
+        record.setBonusDate(today);
+        try {
+            monthlyBonusRecordRepository.save(record);
+        } catch (DataIntegrityViolationException e) {
+            log.warn("用户{} 月卡每日奖励并发冲突，视为已发放直接返回", userId);
+            return;
+        }
+
+        UserCredit account = ensureAccount(userId);
+        grantPointsInternal(account, bonus, CreditTransactionType.MONTHLY_CARD_DAILY,
+                "月卡每日登录奖励(" + tier + "): +" + bonus, relatedId, null);
+        userCreditRepository.save(account);
+        log.info("用户{} 月卡每日登录奖励发放: +{} ({}月卡)", userId, bonus, tier);
+    }
+
     private int calculateStreakDays(Long userId, LocalDate today) {
         LocalDate yesterday = today.minusDays(1);
         if (signInRecordRepository.existsByUserIdAndSignInDate(userId, yesterday)) {
@@ -237,16 +297,108 @@ public class CreditService {
         return userCreditRepository.findByUserId(userId);
     }
 
+    /**
+     * 纯读查询：基于 PAID 月卡订单在内存中推导用户当前订阅等级和到期时间，不落库。
+     * 直购积分不改变 tier（始终保持 FREE）。订阅过期自动降级 FREE。
+     * 不再执行任何补偿写操作（积分补发、月卡奖励补发等由 AuthController 的登录路径处理）。
+     */
     public UserCredit getBalanceWithTier(Long userId) {
         UserCredit account = ensureAccount(userId);
+        LocalDateTime now = LocalDateTime.now();
+
+        // 计算：直购积分 tier 应该在内存中视为 FREE（直购积分不改变账号状态）
+        SubscriptionTier cur = account.getSubscriptionTier();
+        if (cur != null && cur != SubscriptionTier.FREE && !isMonthlyCard(cur)) {
+            account.setSubscriptionTier(SubscriptionTier.FREE);
+            account.setSubscriptionExpiresAt(null);
+        }
+
+        // 计算：订阅过期 → FREE（内存判断，不落库）
         if (account.getSubscriptionExpiresAt() != null
-                && account.getSubscriptionExpiresAt().isBefore(LocalDateTime.now())
+                && account.getSubscriptionExpiresAt().isBefore(now)
                 && account.getSubscriptionTier() != SubscriptionTier.FREE) {
             account.setSubscriptionTier(SubscriptionTier.FREE);
             account.setSubscriptionExpiresAt(null);
-            userCreditRepository.save(account);
         }
+
+        // 纯读：基于 PAID 订单在内存中推导订阅等级
+        try {
+            List<SubscriptionOrder> validPaid = subscriptionOrderRepository
+                    .findByUserIdAndStatusOrderByCreatedAtDesc(userId, OrderStatus.PAID,
+                            org.springframework.data.domain.PageRequest.of(0, 200))
+                    .getContent();
+
+            boolean hasSmallCard = false;
+            boolean hasLargeCard = false;
+            LocalDateTime bestExpires = null;
+
+            for (SubscriptionOrder o : validPaid) {
+                // 内存推导 expiresAt（找不到时用 paidAt+durationDays，不落库）
+                LocalDateTime derivedExpiresAt = o.getExpiresAt();
+                if (derivedExpiresAt == null && o.getPaidAt() != null && o.getDurationDays() != null) {
+                    derivedExpiresAt = o.getPaidAt().plusDays(o.getDurationDays());
+                }
+                if (derivedExpiresAt == null && o.getDurationDays() != null) {
+                    derivedExpiresAt = (o.getCreatedAt() != null
+                            ? o.getCreatedAt().plusDays(o.getDurationDays())
+                            : now.plusDays(o.getDurationDays()));
+                }
+
+                if (derivedExpiresAt == null || derivedExpiresAt.isBefore(now)) continue;
+                SubscriptionTier t = o.getPlanTier();
+                if (t == SubscriptionTier.SMALL_MONTH_CARD) {
+                    hasSmallCard = true;
+                    if (bestExpires == null || derivedExpiresAt.isAfter(bestExpires)) {
+                        bestExpires = derivedExpiresAt;
+                    }
+                } else if (t == SubscriptionTier.LARGE_MONTH_CARD) {
+                    hasLargeCard = true;
+                    if (bestExpires == null || derivedExpiresAt.isAfter(bestExpires)) {
+                        bestExpires = derivedExpiresAt;
+                    }
+                }
+            }
+
+            SubscriptionTier bestTier;
+            if (hasSmallCard && hasLargeCard) {
+                bestTier = SubscriptionTier.ALL;
+            } else if (hasLargeCard) {
+                bestTier = SubscriptionTier.LARGE_MONTH_CARD;
+            } else if (hasSmallCard) {
+                bestTier = SubscriptionTier.SMALL_MONTH_CARD;
+            } else {
+                bestTier = SubscriptionTier.FREE;
+                bestExpires = null;
+            }
+
+            // 只设置内存对象的值，不 save
+            account.setSubscriptionTier(bestTier);
+            account.setSubscriptionExpiresAt(bestExpires);
+        } catch (Exception e) {
+            log.warn("月卡tier纯读计算异常（不影响主流程）: {}", e.getMessage(), e);
+        }
+
         return account;
+    }
+
+    private static boolean isMonthlyCard(SubscriptionTier tier) {
+        return tier == SubscriptionTier.SMALL_MONTH_CARD || tier == SubscriptionTier.LARGE_MONTH_CARD
+                || tier == SubscriptionTier.ALL;
+    }
+
+    private static int tierRank(SubscriptionTier tier) {
+        if (tier == null) return 0;
+        return switch (tier) {
+            case FREE -> 0;
+            case LITE -> 1;
+            case PRO -> 2;
+            case PROPLUS -> 3;
+            case ULTRA -> 4;
+            case MEGA -> 5;
+            case SMALL_MONTH_CARD -> 6;
+            case LARGE_MONTH_CARD -> 7;
+            case ALL -> 8;
+        };
     }
 
     public boolean hasSignedInToday(Long userId) {
@@ -392,6 +544,43 @@ public class CreditService {
                                          LocalDateTime start, LocalDateTime end, Long minAmount, Long maxAmount, String relatedId) {
         CriteriaQuery<Long> countCq = cb.createQuery(Long.class);
         Root<CreditTransaction> root = countCq.from(CreditTransaction.class);
+        List<Predicate> predicates = buildTxPredicates(cb, root, userId, type, direction, start, end, minAmount, maxAmount, relatedId);
+        countCq.select(cb.count(root)).where(predicates.toArray(new Predicate[0]));
+        return entityManager.createQuery(countCq).getSingleResult();
+    }
+
+    /** 全站流水汇总统计（按筛选条件） */
+    public Map<String, Object> summaryTransactionsAdmin(Long userId, CreditTransactionType type, CreditDirection direction,
+                                                          LocalDateTime start, LocalDateTime end, Long minAmount, Long maxAmount,
+                                                          String relatedId) {
+        CriteriaBuilder cb = entityManager.getCriteriaBuilder();
+        CriteriaQuery<Object[]> cq = cb.createQuery(Object[].class);
+        Root<CreditTransaction> root = cq.from(CreditTransaction.class);
+        List<Predicate> predicates = buildTxPredicates(cb, root, userId, type, direction, start, end, minAmount, maxAmount, relatedId);
+        cq.multiselect(
+            cb.sumAsLong(cb.<Integer>selectCase()
+                .when(cb.equal(root.get("direction"), "IN"), root.get("amount"))
+                .otherwise(0)),
+            cb.sumAsLong(cb.<Integer>selectCase()
+                .when(cb.equal(root.get("direction"), "OUT"), cb.abs(root.get("amount")))
+                .otherwise(0)),
+            cb.count(root)
+        ).where(predicates.toArray(new Predicate[0]));
+        Object[] row = entityManager.createQuery(cq).getSingleResult();
+        long earned = row[0] != null ? (long) row[0] : 0;
+        long spent = row[1] != null ? (long) row[1] : 0;
+        long count = row[2] != null ? (long) row[2] : 0;
+        Map<String, Object> m = new HashMap<>();
+        m.put("totalEarned", earned);
+        m.put("totalSpent", spent);
+        m.put("totalNet", earned - spent);
+        m.put("totalCount", count);
+        return m;
+    }
+
+    private List<Predicate> buildTxPredicates(CriteriaBuilder cb, Root<CreditTransaction> root,
+                                               Long userId, CreditTransactionType type, CreditDirection direction,
+                                               LocalDateTime start, LocalDateTime end, Long minAmount, Long maxAmount, String relatedId) {
         List<Predicate> predicates = new ArrayList<>();
         if (userId != null) predicates.add(cb.equal(root.get("userId"), userId));
         if (type != null) predicates.add(cb.equal(root.get("type"), type));
@@ -401,8 +590,7 @@ public class CreditService {
         if (minAmount != null) predicates.add(cb.greaterThanOrEqualTo(root.get("amount"), minAmount.intValue()));
         if (maxAmount != null) predicates.add(cb.lessThanOrEqualTo(root.get("amount"), maxAmount.intValue()));
         if (relatedId != null && !relatedId.isBlank()) predicates.add(cb.equal(root.get("relatedId"), relatedId));
-        countCq.select(cb.count(root)).where(predicates.toArray(new Predicate[0]));
-        return entityManager.createQuery(countCq).getSingleResult();
+        return predicates;
     }
 
     public Map<String, Object> getRewards(Long userId) {

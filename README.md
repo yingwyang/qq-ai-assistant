@@ -40,6 +40,11 @@
 | **QQ 绑定验证** | 通过向目标 QQ 发送验证码私信，验证用户身份，确保只有 QQ 账号主人才能绑定 |
 | **AI 多提供商配置** | 支持配置多个大模型提供商（SiliconFlow/OpenAI 等），可切换、增删，分账号持久化 |
 | **智能体管理** | 内置人格管理面板，支持自定义系统提示词、开场白、工具调用配置 |
+| **积分系统** | 每日签到、新用户奖励、AI 对话按 Token 计费，积分流水可查；管理员可配置积分规则、调整用户积分 |
+| **订阅与订单** | 多档订阅套餐（Lite / Pro / ProPlus / Ultra），订单购买、取消、退款；管理员可补单、作废、退款 |
+| **文本转语音（TTS）** | 集成 GPT-SoVITS，支持多音色切换，AI 回复一键生成语音（可选） |
+| **系统管理后台** | 数据概览、用户管理、组件控制、媒体管理、配置管理、数据维护、系统日志、审计 |
+| **删除群聊会话** | 右键群聊可彻底删除该群会话（消息 + 媒体文件 + 群记录 + 已读状态，不可恢复） |
 
 ---
 
@@ -57,12 +62,15 @@
 - **Maven** — 项目构建
 - **Thumbnailator** — 图片缩略图处理
 - **MinIO**（可选）— 对象存储
+- **Groovy** — 后端插件脚本引擎（AI 回复后处理，热加载）
+- **Caffeine** — JWT 黑名单本地缓存
+- **SQLite** — 本地轻量存储
 
 ### 前端技术栈
 
 - **Vue 3** — 前端框架
 - **Vite** — 构建工具
-- **Axios** — HTTP 客户端
+- **原生 fetch 封装** — HTTP 客户端（`services/api.js` 统一请求 / 401 自动登出）
 - **CSS Grid / Flexbox** — 响应式布局
 
 ### 第三方组件
@@ -97,14 +105,14 @@ qq-ai-assistant/
 │   │   ├── common/                    # 通用工具（头像解析、限流、安全助手）
 │   │   ├── config/                    # 配置类（Security / WebSocket / JWT / CORS / RabbitMQ ...）
 │   │   ├── consumer/                  # RabbitMQ 消费者（媒体下载 / 语音转码 / AI 分析 / 广播）
-│   │   ├── controller/                # API 控制器（15+ 个）
+│   │   ├── controller/                # API 控制器（21 个）
 │   │   ├── dto/                       # 数据传输对象（auth / message / user / webhook）
-│   │   ├── entity/                    # JPA 实体类（10 张表）
+│   │   ├── entity/                    # JPA 实体类（15 张表）
 │   │   ├── exception/                 # 自定义异常（业务/权限/未找到/未授权）
 │   │   ├── plugin/                    # Groovy 插件接口与插件管理器
-│   │   ├── repository/                # 数据访问层（10 个 Repository）
+│   │   ├── repository/                # 数据访问层（15 个 Repository）
 │   │   ├── security/                  # 安全模块（JWT 过滤器 / AuthPrincipal）
-│   │   ├── service/                   # 业务逻辑层（18+ 个 Service）
+│   │   ├── service/                   # 业务逻辑层（29 个 Service）
 │   │   ├── util/                      # 工具类（CQ 码解析）
 │   │   ├── websocket/                 # WebSocket 处理器（前端/NapCat）
 │   │   └── Application.java           # 启动入口
@@ -124,9 +132,9 @@ qq-ai-assistant/
 │   └── pom.xml                        # Maven 配置
 ├── frontend/                          # Vue 3 前端
 │   ├── src/
-│   │   ├── components/                # 组件（AstrBotChat / ChatInterface / Sidebar ...）
-│   │   ├── composables/               # 组合式函数（9 个 use* 钩子）
-│   │   ├── views/                     # 页面视图（Home / Admin / Login / UserCenter）
+│   │   ├── components/                # 组件（AstrBotChat / ChatInterface / Sidebar / PersonaManager / RichTextRenderer ...）
+│   │   ├── composables/               # 组合式函数（20 个 use* 钩子）
+│   │   ├── views/                     # 页面视图（Home / Admin / Login / UserCenter / Docs）
 │   │   ├── router/                    # 路由配置
 │   │   ├── services/                  # API 服务层（统一 fetch 封装）
 │   │   ├── utils/                     # 工具函数（消息过滤）
@@ -148,7 +156,7 @@ qq-ai-assistant/
 
 ## 数据库设计
 
-共 **10 张核心表**，完整 DDL 见 [`backend/src/main/resources/init-mysql.sql`](backend/src/main/resources/init-mysql.sql)。
+共 **15 张表**（其中 9 张由 `init-mysql.sql` 初始化，其余由 JPA `ddl-auto` 首次启动自动创建），完整 DDL 见 [`backend/src/main/resources/init-mysql.sql`](backend/src/main/resources/init-mysql.sql)。
 
 ### 表结构总览
 
@@ -163,7 +171,12 @@ qq-ai-assistant/
 | `astrbot_messages` | AstrBot 对话消息表（按会话聚合） |
 | `user_settings` | 用户个性化设置（Bot 名称 / AstrBot Key / **AI 多提供商配置**） |
 | `group_read_state` | **群聊阅读进度表**（每个用户/每个群聊的 last_read_time，用于高效计算未读消息数） |
-| `audit_logs` | 审计日志表（记录关键操作） |
+| `credit_rule` | **积分规则配置表**（单行：新用户奖励 / 签到积分 / Token 计费 / 套餐价格） |
+| `credit_transaction` | **积分流水表**（类型 / 增减方向 / 金额 / 余额快照） |
+| `user_credit` | **用户积分表**（余额 / 累计收入支出 / 消费封禁 / 订阅等级与到期时间） |
+| `sign_in_record` | **签到记录表**（每日一次，连续签到天数） |
+| `subscription_order` | **订阅订单表**（套餐 / 价格 / 支付状态 / 退款信息） |
+| `audit_log` | 审计日志表（记录关键管理操作） |
 
 ### 表字段详情
 
@@ -315,6 +328,95 @@ qq-ai-assistant/
 - 一键全部标已读：`POST /api/messages/read-all` → 批量把当前用户全部群聊的 last_read_time 更新为 NOW。
 - 多用户隔离：不同用户之间互不影响未读数。
 
+#### 10. audit_log — 审计日志表
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | BIGINT PK | 主键ID |
+| username | VARCHAR(50) | 操作人 |
+| action | VARCHAR(50) | 操作类型（ROLE_CHANGE / COMPONENT_START / FILE_DELETE / USER_DELETE 等） |
+| target | VARCHAR(255) | 操作目标 |
+| result | VARCHAR(20) | 操作结果：SUCCESS / FAILURE |
+| detail | VARCHAR(1000) | 详细信息 |
+| timestamp | TIMESTAMP | 操作时间 |
+
+#### 11. credit_rule — 积分规则配置表（单行）
+
+| 字段 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| id | BIGINT PK | 1 | 固定单行 |
+| new_user_bonus | INT | 500 | 新用户注册奖励积分 |
+| sign_in_points | INT | 150 | 每日签到积分 |
+| token_unit | INT | 1000 | 计费 Token 单位（每 1000 token 计费一次） |
+| prompt_rate / completion_rate | INT | 2 / 4 | 输入 / 输出 Token 单价（积分） |
+| min_cost | INT | 5 | 单次对话最低消耗积分 |
+| default_cost_per_msg | INT | 10 | 消息默认消耗积分 |
+| admin_free | BOOLEAN | true | 管理员是否免积分 |
+| plan_lite_price / plan_lite_credit | DECIMAL / INT | 9.9 / 2000 | Lite 套餐价格（元）/ 赠送积分 |
+| plan_pro_price / plan_pro_credit | DECIMAL / INT | 59 / 4000 | Pro 套餐价格 / 赠送积分 |
+| plan_proplus_price / plan_proplus_credit | DECIMAL / INT | 219 / 12000 | ProPlus 套餐价格 / 赠送积分 |
+| plan_ultra_price / plan_ultra_credit | DECIMAL / INT | 629 / 40000 | Ultra 套餐价格 / 赠送积分 |
+| plan_duration_days | INT | 30 | 套餐有效期（天） |
+| created_at / updated_at | TIMESTAMP | — | 创建 / 更新时间 |
+
+#### 12. credit_transaction — 积分流水表
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | BIGINT PK | 主键ID |
+| user_id | BIGINT NOT NULL | 用户ID |
+| type | VARCHAR(30) | 流水类型（SIGN_IN / PURCHASE / CONSUME / ADMIN_ADJUST 等） |
+| direction | VARCHAR(10) | 增减方向：INCOME / EXPENSE |
+| amount | INT NOT NULL | 变动积分 |
+| balance_after | INT NOT NULL | 变动后余额快照 |
+| remark | VARCHAR(500) | 备注 |
+| related_id | VARCHAR(100) | 关联业务ID（如订单号） |
+| admin_user_id | BIGINT | 操作管理员ID |
+| created_at | TIMESTAMP | 创建时间 |
+
+#### 13. user_credit — 用户积分表
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | BIGINT PK | 主键ID |
+| user_id | BIGINT UNIQUE NOT NULL | 用户ID（唯一） |
+| balance | INT DEFAULT 0 | 当前积分余额 |
+| total_earned / total_spent | INT | 累计收入 / 支出 |
+| consumption_banned | BOOLEAN | 是否禁止消费 |
+| subscription_tier | VARCHAR(20) DEFAULT 'FREE' | 订阅等级：FREE / LITE / PRO / PROPLUS / ULTRA |
+| subscription_expires_at | TIMESTAMP | 订阅到期时间 |
+| version | INT | 乐观锁版本号 |
+| created_at / updated_at | TIMESTAMP | 创建 / 更新时间 |
+
+#### 14. sign_in_record — 签到记录表
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | BIGINT PK | 主键ID |
+| user_id | BIGINT NOT NULL | 用户ID |
+| sign_in_date | DATE NOT NULL | 签到日期（UNIQUE(user_id, sign_in_date)） |
+| points | INT NOT NULL | 获得积分 |
+| streak_days | INT NOT NULL | 连续签到天数 |
+| created_at | TIMESTAMP | 创建时间 |
+
+#### 15. subscription_order — 订阅订单表
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | BIGINT PK | 主键ID |
+| order_no | VARCHAR(50) UNIQUE NOT NULL | 订单号 |
+| user_id | BIGINT NOT NULL | 用户ID |
+| plan_tier | VARCHAR(20) NOT NULL | 套餐等级 |
+| price | DECIMAL(10,2) NOT NULL | 订单金额（元） |
+| credit_amount | INT NOT NULL | 赠送积分 |
+| duration_days | INT NOT NULL | 有效天数 |
+| status | VARCHAR(20) | PENDING / PAID / REFUNDED / CANCELLED |
+| payment_method / payment_transaction_id | VARCHAR | 支付方式 / 支付流水号 |
+| paid_at / expires_at / refunded_at | TIMESTAMP | 支付 / 到期 / 退款时间 |
+| refund_amount / refund_reason | DECIMAL / VARCHAR(500) | 退款金额 / 原因 |
+| client_ip / user_agent | VARCHAR | 下单客户端信息 |
+| created_at / updated_at | TIMESTAMP | 创建 / 更新时间 |
+
 ---
 
 ## 快速开始
@@ -349,9 +451,9 @@ qq-ai-assistant/
     Get-Content backend/src/main/resources/init-mysql.sql | mysql -u root -p
     ```
 
-    脚本会自动创建数据库 `qq_chat` 并创建上述 **8 张表**，同时插入一条默认管理员账号：`admin / admin123`（BCrypt 加密后的密码已在 SQL 中预置）。
+    脚本会自动创建数据库 `qq_chat` 并创建 **9 张基础表**（users / user_qq_bindings / chat_groups / file_records / messages / astrbot_conversations / astrbot_messages / user_settings / group_read_state），其余 6 张表（审计日志 / 积分 / 订阅等）由 JPA 在首次启动时自动创建。SQL 中不再预置任何默认账号密码。
 
-    > 如果你选择不手动初始化数据库，也可以让 JPA 的 `ddl-auto: update` 自动建表；首次启动时 `DataInitializer` 会自动创建默认管理员。
+    > 如果你选择不手动初始化数据库，也可以让 JPA 的 `ddl-auto: update` 自动建表；首次启动时 `DataInitializer` 会自动创建初始管理员（密码来自环境变量 `ADMIN_INIT_PASSWORD`，未设置时生成随机密码并打印到启动日志，请登录后立即修改）。
 
 ### 步骤二：部署 RabbitMQ 消息队列
 
@@ -418,14 +520,14 @@ astrbot:
 
 # NapCat
 napcat:
-  api-url:       ${NAPCAT_API_URL:http://localhost:6099}
+  api-url:       ${NAPCAT_API_URL:http://localhost:6100}
   token:         ${NAPCAT_TOKEN:xxx}
   webhook-token: ${NAPCAT_WEBHOOK_TOKEN:xxx}
   self-qq:       ${NAPCAT_SELF_QQ:你的机器人QQ号}
 
 # GPT-SoVITS (可选)
 gpt-sovits:
-  api-url: ${GPT_SOVITS_API_URL:http://localhost:7860}
+  api-url: ${GPT_SOVITS_API_URL:http://localhost:8000}
   token:   ${GPT_SOVITS_TOKEN:xxx}
 
 # MinIO (可选)
@@ -450,7 +552,7 @@ jwt:
   expiration: ${JWT_EXPIRATION:86400000}
 ```
 
-### 步骤三：启动后端
+### 步骤四：启动后端
 
 ```bash
 cd backend
@@ -465,17 +567,16 @@ java -jar target/qq-ai-assistant-1.0-SNAPSHOT.jar
 
 后端服务运行在：**http://localhost:8081**
 
-首次启动时，如果数据库中不存在任何 `ADMIN` 角色的用户，控制台会输出：
+首次启动时，如果数据库中不存在任何 `ADMIN` 角色的用户，控制台会输出初始管理员账号与**随机生成的密码**（或你在 `.env` 中通过 `ADMIN_INIT_PASSWORD` 指定的密码）：
 
 ```
-========================================
-  默认管理员账号已创建
-  账号: admin
-  密码: admin123
-========================================
+===============================================================
+  【安全】已创建初始管理员账号 admin,初始密码: <随机密码>
+  【安全】请立即登录并在个人中心修改该密码。
+===============================================================
 ```
 
-### 步骤五：启动前端
+### 步骤六：启动前端
 
 ```bash
 cd frontend
@@ -492,18 +593,16 @@ npm run build
 # 产物在 frontend/dist/，可部署到 Nginx / 任意静态服务器
 ```
 
-### 步骤六：登录系统
+### 步骤七：登录系统
 
 1. 打开浏览器，访问前端页面 `http://localhost:5173`。
-2. 使用默认管理员账号登录：
-    - 账号：`admin`
-    - 密码：`admin123`
+2. 使用初始管理员账号登录（账号 `admin`，密码见首次启动日志；或注册普通账号使用）。
 3. 管理员登录后：
     - 可进入 **管理员页面** — 查看系统统计、管理用户角色 / 启停账号。
     - 进入 **用户主页** — 绑定自己的QQ号，查看 NapCat 推送过来的消息。
 4. 首次绑定QQ号后，该QQ号的群聊与消息才会显示在首页。
 
-### 步骤七：配置 NapCat Webhook（关键）
+### 步骤八：配置 NapCat Webhook（关键）
 
 1. 启动 NapCat 并扫码登录机器人账号。
 2. 在 NapCat WebUI 中配置 HTTP Webhook 上报：
@@ -531,7 +630,7 @@ npm run build
     - `token` 必须与 `application.yml` 中的 `napcat.webhook-token` 一致
     - `reportSelfMessage: true` 用于接收机器人自己发送的消息
 
-### 步骤八：配置 AstrBot（可选）
+### 步骤九：配置 AstrBot（可选）
 
 ```bash
 # 在 AstrBot 目录
@@ -540,11 +639,11 @@ python main.py
 
 并将 `application.yml` 中的 `astrbot.api-url`、`astrbot.token` 指向对应服务。
 
-### 步骤九：配置 GPT-SoVITS（可选）
+### 步骤十：配置 GPT-SoVITS（可选）
 
 ```bash
 cd GPT-SoVITS-v2pro-20250604-nvidia50
-runtime\python.exe api_v2.py -a 127.0.0.1 -p 7860
+runtime\python.exe api_v2.py -a 127.0.0.1 -p 8000
 ```
 
 ---
@@ -559,9 +658,9 @@ runtime\python.exe api_v2.py -a 127.0.0.1 -p 7860
 | RabbitMQ AMQP | 5672 | 消息队列（后端连接） |
 | RabbitMQ 管理界面 | 15672 | Web 管理控制台（guest/guest） |
 | AstrBot | 6185 | AI 对话服务 |
-| NapCat | 6099 | QQ 消息监听 |
-| GPT-SoVITS API | 7860 | 语音合成 API |
-| GPT-SoVITS WebUI | 9872 | 语音合成 WebUI |
+| NapCat API | 6100 | OneBot API（后端连接） |
+| NapCat WebUI | 6099 | 扫码登录 / 配置界面 |
+| GPT-SoVITS API | 8000 | 语音合成 API |
 | MinIO（可选） | 9000 | 对象存储 |
 
 ---
@@ -621,6 +720,48 @@ runtime\python.exe api_v2.py -a 127.0.0.1 -p 7860
 - 支持自定义系统提示词、开场白、工具调用配置
 - 支持设置默认人格、排序、分类管理
 
+### 积分与签到
+
+- 新用户注册自动获得奖励积分（默认 500，可在后台积分规则中调整）
+- 每日可在用户中心 **签到** 领取积分（默认 150，连续签到有记录）
+- AI 对话按 Token 计费（输入 / 输出单价、最低消费均可配置），余额不足时无法发起对话
+- 积分明细可在「用量管理」查看，管理员可在后台调整积分 / 配置规则
+
+### 订阅与订单
+
+- 提供 Lite / Pro / ProPlus / Ultra 四档订阅套餐，购买后获得对应积分并升级权益
+- 在「订阅管理」中查看套餐、发起购买、查看订单、申请退款
+- 管理员可在后台进行 **补单 / 作废 / 退款** 操作
+
+### 文本转语音（TTS）
+
+- 在 AI 回复下方点击 **语音生成**，通过 GPT-SoVITS 将文本合成为语音
+- 可在设置中切换 TTS 音色（默认 Kisaki / 加藤惠，可扩展）
+- 需要已启动 GPT-SoVITS 服务
+
+### 系统管理后台（管理员）
+
+后台提供以下板块：
+
+| 板块 | 说明 |
+|------|------|
+| 数据概览 | 系统统计、消息趋势、AI 对话趋势 |
+| 用户管理 | 查看用户、修改角色（ADMIN/USER）、启用/禁用、删除 |
+| 组件状态与控制 | 启动 / 停止 AstrBot、NapCat、GPT-SoVITS |
+| 媒体文件管理 | 按类型浏览、预览、批量删除本地媒体文件 |
+| 配置管理 | 系统级配置项查看与修改 |
+| 数据维护 | 数据库备份 / 恢复等维护操作 |
+| 系统日志 | 后端日志在线查看 |
+| 积分规则配置 | 调整签到积分、Token 计费、套餐价格等 |
+| 用户积分 | 查看用户积分、调整积分（增加 / 扣除） |
+| 积分流水 | 全部积分流水查询与导出 |
+| 订单管理 | 订单查询、补单、作废、退款 |
+
+### 删除群聊会话
+
+- 在左侧群聊列表右键 → **删除群聊会话**，可彻底删除该 QQ 下该群的全部消息、媒体文件、群记录与已读状态
+- 属于硬删除，操作不可恢复，适用于已退出群聊的清理
+
 ### QQ 账号绑定与验证
 
 为确保安全，绑定 QQ 号时需要进行身份验证：
@@ -661,9 +802,12 @@ backend/uploads/images/
 ## 前端特性
 
 - **三栏布局**：左（导航 / 最近对话） + 中（消息） + 右（AI 对话 / 设置）
-- **消息列表每 5 秒自动刷新**，群聊列表每 30 秒刷新
+- **消息实时推送**：WebSocket 推送新消息，断线时每 10 秒兜底轮询；群聊列表每 5 秒自动刷新
 - **智能滚动**：仅当你在消息底部时自动滚动；阅读历史消息时不打扰
 - **JWT 登录**：Token 存储于 localStorage，过期后自动跳转登录页
+- **未读计数**：按用户 / 群记录最后阅读时间，侧边栏实时展示未读消息数（>99 显示 99+）
+- **右键菜单**：群聊右键可删除指定类型消息或整个群聊会话
+- **深色主题**：支持浅色 / 深色模式切换，自动保存
 
 ---
 
@@ -712,6 +856,18 @@ backend/uploads/images/
 - 检查 AstrBot 是否正常启动
 - 检查 `astrbot.token` 与 AstrBot 配置中设置的 token 是否一致
 - 查看后端日志中 `/api/astrbot/*` 相关错误
+
+### 8. TTS 语音生成失败
+
+- 检查 GPT-SoVITS 是否启动，`gpt-sovits.api-url` 配置是否正确
+- 检查参考音频与模型路径是否有效
+- 查看后端日志中 `/api/system/tts` 相关错误
+
+### 9. 积分余额不足 / 签到失败
+
+- AI 对话会按 Token 消耗积分，余额不足时无法发起对话
+- 签到每天一次，重复签到会提示"今日已签到"
+- 可在用户中心「用量管理」查看积分流水；异常请联系管理员
 
 ---
 

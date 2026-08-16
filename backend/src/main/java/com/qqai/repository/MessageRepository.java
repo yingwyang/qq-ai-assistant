@@ -131,8 +131,17 @@ public interface MessageRepository extends JpaRepository<Message, Long> {
 
     /**
      * 根据消息ID判断消息是否存在
+     * @deprecated QQ message_id 仅在群内唯一,跨群会重复;请使用 {@link #existsByMessageIdAndGroupId(String, String)}
      */
+    @Deprecated
     boolean existsByMessageId(String messageId);
+
+    /**
+     * 按 (群, QQ消息ID) 判断消息是否已存在。
+     * NapCat 的 message_id 只在同一账号+群内唯一,跨群可能重复,
+     * 因此去重必须以 groupId + messageId 组合为准。
+     */
+    boolean existsByMessageIdAndGroupId(String messageId, String groupId);
 
     /**
      * 根据 QQ 消息 ID 查询消息

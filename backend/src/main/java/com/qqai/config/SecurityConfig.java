@@ -23,6 +23,16 @@ import org.springframework.web.socket.config.annotation.EnableWebSocket;
 import org.springframework.web.socket.config.annotation.WebSocketConfigurer;
 import org.springframework.web.socket.config.annotation.WebSocketHandlerRegistry;
 
+/**
+ * 安全配置。
+ *
+ * 权限矩阵原则:
+ * - 全局共享基础设施(组件启停、NapCat 配置、后台管理)一律 ADMIN;
+ * - 聊天媒体 /images/**, /uploads/** 不再公开,必须登录后经同源 Cookie 访问,
+ *   仅头像目录 /uploads/avatars/** 保持公开(群头像/用户头像展示场景);
+ * - WebSocket 握手本身放行,鉴权由各自的 HandshakeInterceptor 完成
+ *   (/ws = NapCat 上行,校验 napcat.webhook-token;/ws/messages = 前端下行,校验 JWT Cookie)。
+ */
 @Configuration
 @EnableWebSecurity
 @EnableMethodSecurity
@@ -41,6 +51,9 @@ public class SecurityConfig implements WebSocketConfigurer {
     @Autowired
     private JwtHandshakeInterceptor jwtHandshakeInterceptor;
 
+    @Autowired
+    private NapCatHandshakeInterceptor napCatHandshakeInterceptor;
+
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http
@@ -56,23 +69,29 @@ public class SecurityConfig implements WebSocketConfigurer {
                 })
             )
             .authorizeHttpRequests(auth -> auth
-                .requestMatchers("/api/auth/login").permitAll()
-                .requestMatchers("/api/auth/register").permitAll()
-                .requestMatchers("/api/auth/logout").permitAll()
+                // 认证与健康检查
+                .requestMatchers("/api/auth/login", "/api/auth/register", "/api/auth/logout").permitAll()
                 .requestMatchers("/api/system/health").permitAll()
-                .requestMatchers("/").permitAll()
-                .requestMatchers("/webhook").permitAll()
-                .requestMatchers("/api/avatar/**").permitAll()
-                .requestMatchers("/uploads/**").permitAll()
-                .requestMatchers("/images/**").permitAll()
+                // NapCat 上行入口(token 在控制器内校验)
+                .requestMatchers("/", "/webhook", "/api/napcat", "/api/napcat/**").permitAll()
+                // WebSocket 握手(鉴权在拦截器中)
+                .requestMatchers("/ws", "/ws/**").permitAll()
+                // 头像:读取公开,上传/删除仅管理员
+                .requestMatchers(HttpMethod.GET, "/api/avatar/**").permitAll()
+                .requestMatchers(HttpMethod.POST, "/api/avatar/**").hasRole("ADMIN")
+                .requestMatchers(HttpMethod.DELETE, "/api/avatar/**").hasRole("ADMIN")
+                .requestMatchers("/uploads/avatars/**").permitAll()
+                // 聊天媒体不再公开:任何登录用户经同源 Cookie 访问(前端 <img>/<audio> 自动携带 Cookie)
+                // /images/** 与 /uploads/** 均落入 anyRequest().authenticated()
+                // 管理后台
                 .requestMatchers("/api/admin/**").hasRole("ADMIN")
                 .requestMatchers("/api/credits/admin/**").hasRole("ADMIN")
-                .requestMatchers("/api/system/start-astrbot", "/api/system/stop-astrbot", "/api/system/restart-astrbot").hasRole("ADMIN")
-                .requestMatchers("/api/system/start-gptsovits", "/api/system/stop-gptsovits", "/api/system/restart-gptsovits").hasRole("ADMIN")
+                // 组件启停/配置:统一收口为 ADMIN,避免逐接口枚举遗漏
+                .requestMatchers("/api/system/start-*", "/api/system/stop-*", "/api/system/restart-*").hasRole("ADMIN")
+                .requestMatchers("/api/system/napcat/auto-configure").hasRole("ADMIN")
+                // TTS 等资源消耗接口:登录即可用(积分在服务内扣减)
                 .requestMatchers("/api/system/tts", "/api/system/tts/**", "/api/system/convert-voice").authenticated()
-                .requestMatchers("/api/system/napcat/qrcode-image").permitAll()
-                .requestMatchers("/api/system/napcat/login-status").permitAll()
-                .requestMatchers("/api/system/component-status").permitAll()
+                .requestMatchers("/api/system/napcat/qrcode-image", "/api/system/napcat/login-status", "/api/system/component-status").permitAll()
                 .anyRequest().authenticated()
             )
             .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
@@ -82,9 +101,12 @@ public class SecurityConfig implements WebSocketConfigurer {
 
     @Override
     public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
+        // NapCat 上行通道:握手时校验 webhook token,防止伪造 QQ 消息
         registry.addHandler(napCatWebSocketHandler, "/ws")
+                .addInterceptors(napCatHandshakeInterceptor)
                 .setAllowedOrigins("*");
 
+        // 前端下行通道:握手时校验 JWT Cookie/黑名单/tokenVersion
         registry.addHandler(frontendMessageWebSocketHandler, "/ws/messages")
                 .addInterceptors(jwtHandshakeInterceptor)
                 .setAllowedOrigins("*");

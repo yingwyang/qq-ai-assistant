@@ -686,6 +686,45 @@ public class NapCatService {
     }
 
     /**
+     * 获取QQ陌生人信息（昵称）- 用于QQ绑定时自动填充昵称
+     * @param qqNumber QQ号
+     * @return 昵称，获取失败返回 null
+     */
+    public String getStrangerNickname(String qqNumber) {
+        if (qqNumber == null || qqNumber.isBlank()) return null;
+        String baseUrl = onebotApiUrl != null && !onebotApiUrl.isBlank() ? onebotApiUrl : napcatApiUrl;
+        CloseableHttpClient httpClient = this.httpClient;
+        HttpPost httpPost = new HttpPost(baseUrl + "/get_stranger_info");
+        httpPost.setHeader("Content-Type", "application/json");
+        httpPost.setHeader("Authorization", "Bearer " + napcatToken);
+
+        ObjectNode body = objectMapper.createObjectNode();
+        try {
+            body.put("user_id", Long.parseLong(qqNumber));
+        } catch (NumberFormatException e) {
+            body.put("user_id", qqNumber);
+        }
+        body.put("no_cache", false);
+        httpPost.setEntity(new StringEntity(body.toString(), java.nio.charset.StandardCharsets.UTF_8));
+
+        try (CloseableHttpResponse response = httpClient.execute(httpPost)) {
+            String responseStr = new String(response.getEntity().getContent().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+            log.debug("获取QQ{}陌生人信息响应: {}", qqNumber, responseStr.length() > 300 ? responseStr.substring(0, 300) + "..." : responseStr);
+
+            JsonNode json = objectMapper.readTree(responseStr);
+            if (json.has("status") && "ok".equals(json.get("status").asText()) && json.has("data")) {
+                JsonNode data = json.get("data");
+                if (data.has("nickname") && !data.get("nickname").asText().isBlank()) {
+                    return data.get("nickname").asText();
+                }
+            }
+        } catch (Exception e) {
+            log.warn("获取QQ陌生人信息失败 (qqNumber={}): {}", qqNumber, e.getMessage());
+        }
+        return null;
+    }
+
+    /**
      * 获取群列表
      */
     public ArrayNode getGroupList() throws Exception {

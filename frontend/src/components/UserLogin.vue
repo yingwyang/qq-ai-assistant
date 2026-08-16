@@ -156,8 +156,7 @@ export default {
       try {
         const response = await authApi.login(loginForm.username, loginForm.password);
         
-        // 保存token和用户信息
-        localStorage.setItem('auth_token', response.token);
+        // 登录态由后端 HttpOnly Cookie 维护,这里只缓存非敏感用户信息
         localStorage.setItem('user_info', JSON.stringify({
           id: response.id,
           username: response.username,
@@ -165,6 +164,7 @@ export default {
           role: response.role,
           avatar: response.avatar
         }));
+        localStorage.setItem('user_role', response.role || 'USER');
         
         emit('login-success', response);
         closeModal();
@@ -205,16 +205,16 @@ export default {
           registerForm.nickname || registerForm.username
         );
         
-        // 注册成功后自动登录
+        // 注册成功后自动登录(登录态由后端 HttpOnly Cookie 维护)
         const response = await authApi.login(registerForm.username, registerForm.password);
         
-        localStorage.setItem('auth_token', response.token);
         localStorage.setItem('user_info', JSON.stringify({
           username: response.username,
           nickname: response.nickname,
           role: response.role,
           avatar: response.avatar
         }));
+        localStorage.setItem('user_role', response.role || 'USER');
         
         emit('login-success', response);
         closeModal();

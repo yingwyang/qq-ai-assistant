@@ -3,7 +3,7 @@ import { adminCreditsApi } from '../services/api';
 
 // 积分流水 Tab：多条件搜索 + 分页 + 顶栏汇总 + 导出
 // 后端 CreditTransactionType: NEW_USER_BONUS, SIGN_IN, AI_CONSUMPTION, AI_CHAT,
-// AI_ANALYZE, SUBSCRIPTION_PURCHASE, REFUND, ADMIN_GRANT, ADMIN_DEDUCT, EXPIRE
+// AI_ANALYZE, SUBSCRIPTION_PURCHASE, REFUND, ADMIN_GRANT, ADMIN_DEDUCT, EXPIRE, MONTHLY_CARD_DAILY
 // 后端 CreditDirection: IN / OUT
 export const TX_TYPE_OPTIONS = [
   { value: '', label: '全部类型' },
@@ -13,6 +13,7 @@ export const TX_TYPE_OPTIONS = [
   { value: 'AI_CHAT', label: 'AI 对话' },
   { value: 'AI_ANALYZE', label: 'AI 分析' },
   { value: 'SUBSCRIPTION_PURCHASE', label: '订阅购买' },
+  { value: 'MONTHLY_CARD_DAILY', label: '月卡每日奖励' },
   { value: 'REFUND', label: '退款' },
   { value: 'ADMIN_GRANT', label: '管理员发放' },
   { value: 'ADMIN_DEDUCT', label: '管理员扣减' },
@@ -38,6 +39,7 @@ export function useAdminTransactions({ showSystemMsg } = {}) {
   const txTotalElements = ref(0);
   const txTotalPages = ref(0);
   const txExporting = ref(false);
+  const txTotalSummary = ref({ totalEarned: 0, totalSpent: 0, totalNet: 0, totalCount: 0 });
 
   // 筛选条件
   const filters = reactive({
@@ -96,6 +98,9 @@ export function useAdminTransactions({ showSystemMsg } = {}) {
       txTotalElements.value = data?.totalElements ?? 0;
       txTotalPages.value = data?.totalPages ?? 0;
       txPage.value = data?.number ?? txPage.value;
+      if (data?.summary) {
+        txTotalSummary.value = data.summary;
+      }
     } catch (error) {
       if (showSystemMsg) showSystemMsg('加载流水失败: ' + error.message, 'error');
       txList.value = [];
@@ -141,7 +146,7 @@ export function useAdminTransactions({ showSystemMsg } = {}) {
 
   return {
     txList, txLoading, txPage, txSize, txTotalElements, txTotalPages, txExporting,
-    filters, summary,
+    txTotalSummary, filters, summary,
     loadTransactions, searchTransactions, resetFilters, goToTxPage, exportTransactions,
   };
 }

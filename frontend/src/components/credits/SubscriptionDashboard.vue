@@ -37,6 +37,8 @@
             <option value="">全部状态</option>
             <option value="PAID">已支付</option>
             <option value="PENDING">待支付</option>
+            <option value="PENDING_REFUND">退款审批中</option>
+            <option value="DISPUTED">纠纷中</option>
             <option value="REFUNDED">已退款</option>
             <option value="CANCELLED">已取消</option>
             <option value="EXPIRED">已过期</option>
@@ -78,6 +80,7 @@
                 <button class="btn-link" @click="openOrderDetail(order)">查看详情</button>
                 <button v-if="order.status === 'PENDING'" class="btn-link btn-danger" @click="cancelOrder(order)">取消</button>
                 <button v-if="order.status === 'PAID'" class="btn-link btn-warn" @click="openRefundDialog(order)">申请退款</button>
+                <button v-if="order.status === 'PAID'" class="btn-link btn-warn" @click="openDisputeDialog(order)">纠纷申诉</button>
               </td>
             </tr>
           </tbody>
@@ -105,40 +108,75 @@
               <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2L9.19 8.63 2 9.24l5.46 4.73L5.82 21 12 17.27 18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2z"/></svg>
               <span>积分余额 {{ creditsBalance }}</span>
             </button>
-            <button class="btn-disabled-sm" disabled title="敬请期待">订阅与发票</button>
+            <button class="credits-chip" @click="goToOrders" title="查看订单与发票">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M19 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.89-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>
+              <span>订阅与发票</span>
+            </button>
             <button class="upgrade-close" @click="showUpgradeDialog = false">×</button>
           </div>
         </div>
 
-        <div class="upgrade-segment">
-          <button class="seg-btn seg-disabled" disabled title="敬请期待">
-            <span>连续包月</span><span class="seg-tag">9折</span><span class="seg-soon">敬请期待</span>
-          </button>
-          <button class="seg-btn seg-active">单月购买</button>
-        </div>
+        <div class="plan-groups">
+          <!-- 月卡组 -->
+          <div class="plan-group" v-if="monthlyCardPlans.length > 0">
+            <div class="plan-group-header">
+              <div class="plan-group-title">
+                <span class="plan-group-dot month"></span>
+                <h4>会员月卡</h4>
+                <span class="plan-group-sub">30 天权益，超值更省</span>
+              </div>
+            </div>
+            <div class="plans-grid">
+              <div v-for="plan in monthlyCardPlans" :key="plan.planCode"
+                   class="plan-card">
+                <div class="plan-card-name">{{ plan.planName }}</div>
+                <div class="plan-card-price"><sup>¥</sup>{{ Number(plan.price || 0).toFixed(1) }}<sub>/{{ plan.durationDays }}天</sub></div>
+                <div class="plan-card-credits">+{{ plan.credits }} 积分</div>
+                <ul class="plan-card-features">
+                  <li v-for="(f, i) in (plan.features || [])" :key="i">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+                    <span>{{ f }}</span>
+                  </li>
+                </ul>
+                <button
+                  class="plan-card-btn"
+                  :disabled="purchasingPlan === plan.planCode || isCurrentPlan(plan.planCode)"
+                  @click="purchasePlan(plan)"
+                >
+                  <span v-if="purchasingPlan === plan.planCode">购买中...</span>
+                  <span v-else-if="isCurrentPlan(plan.planCode)">已购买</span>
+                  <span v-else>立即购买</span>
+                </button>
+              </div>
+            </div>
+          </div>
 
-        <div class="plans-grid">
-          <div v-for="plan in plans" :key="plan.planCode" class="plan-card" :class="{ selected: isCurrentPlan(plan.planCode), highlight: plan.planCode === 'PRO' }">
-            <div v-if="plan.firstMonthDiscount" class="plan-discount">首月优惠</div>
-            <div class="plan-card-name">{{ plan.planName }}</div>
-            <div class="plan-card-price"><sup>¥</sup>{{ Number(plan.price || 0).toFixed(0) }}<sub>/{{ plan.durationDays }}天</sub></div>
-            <div class="plan-card-credits">+{{ plan.credits }} 积分</div>
-            <ul class="plan-card-features">
-              <li v-for="(f, i) in (plan.features || []).slice(0, 4)" :key="i">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
-                <span>{{ f }}</span>
-              </li>
-            </ul>
-            <button
-              class="plan-card-btn"
-              :class="{ selected: isCurrentPlan(plan.planCode) }"
-              :disabled="isCurrentPlan(plan.planCode) || purchasingPlan === plan.planCode"
-              @click="purchasePlan(plan)"
-            >
-              <span v-if="purchasingPlan === plan.planCode">购买中...</span>
-              <span v-else-if="isCurrentPlan(plan.planCode)">已选择</span>
-              <span v-else>选择会员 {{ plan.planName.replace('版','') }}</span>
-            </button>
+          <!-- 直购积分组 -->
+          <div class="plan-group">
+            <div class="plan-group-header">
+              <div class="plan-group-title">
+                <span class="plan-group-dot direct"></span>
+                <h4>直购积分</h4>
+                <span class="plan-group-sub">按档购买，立即到账</span>
+              </div>
+            </div>
+            <div class="plans-grid">
+              <div v-for="plan in directPurchasePlans" :key="plan.planCode"
+                   class="plan-card">
+                <div class="plan-card-name">{{ plan.planName }}</div>
+                <div class="plan-card-price"><sup>¥</sup>{{ Number(plan.price || 0).toFixed(0) }}</div>
+                <div class="plan-card-credits">+{{ plan.credits }} 积分</div>
+                <button
+                  class="plan-card-btn"
+                  :disabled="purchasingPlan === plan.planCode || isCurrentPlan(plan.planCode)"
+                  @click="purchasePlan(plan)"
+                >
+                  <span v-if="purchasingPlan === plan.planCode">购买中...</span>
+                  <span v-else-if="isCurrentPlan(plan.planCode)">已购买</span>
+                  <span v-else>立即购买</span>
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -162,6 +200,30 @@
           <button class="btn-cancel" @click="showRefundDialog = false">取消</button>
           <button class="btn-save btn-warn" :disabled="!refundReason.trim() || refundSubmitting" @click="submitRefund">
             {{ refundSubmitting ? '提交中...' : '确认申请退款' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 纠纷申诉弹窗 -->
+    <div v-if="showDisputeDialog" class="modal-overlay" @click.self="showDisputeDialog = false">
+      <div class="modal-content small-modal">
+        <div class="modal-header"><h3>纠纷申诉</h3><button class="btn-close" @click="showDisputeDialog = false">×</button></div>
+        <div class="modal-body">
+          <div class="refund-order-info">
+            <div><label>订单号：</label><span>{{ disputeTarget?.orderNo }}</span></div>
+            <div><label>套餐：</label><span>{{ disputeTarget?.planName }}</span></div>
+            <div><label>金额：</label><span>¥{{ Number(disputeTarget?.amount || 0).toFixed(2) }}</span></div>
+          </div>
+          <div class="form-group">
+            <label>申诉原因 <span style="color:red">*</span></label>
+            <textarea v-model="disputeReason" rows="4" placeholder="请输入申诉原因（至少5个字）"></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-cancel" @click="showDisputeDialog = false">取消</button>
+          <button class="btn-save btn-warn" :disabled="!disputeReason.trim() || disputeSubmitting" @click="submitDispute">
+            {{ disputeSubmitting ? '提交中...' : '确认申诉' }}
           </button>
         </div>
       </div>
@@ -259,8 +321,12 @@
               </div>
             </div>
           </div>
-          <div class="drawer-footer" v-if="detail?.status === 'PAID'">
-            <button class="btn-warn" style="width:100%" @click="openRefundDialog(detail)">💰 申请退款</button>
+          <div class="drawer-footer" v-if="detail?.status === 'PAID' || detail?.status === 'DISPUTED' || detail?.status === 'PENDING_REFUND'">
+            <div v-if="detail?.status === 'PENDING_REFUND'" class="refund-pending-notice">
+              退款申请已提交，等待管理员审批中...
+            </div>
+            <button v-if="detail?.status === 'PAID'" class="btn-warn" style="width:100%" @click="openRefundDialog(detail)"><Icon name="coin" :size="14" /> 申请退款</button>
+            <button v-if="detail?.status === 'PAID'" class="btn-warn" style="width:100%;margin-top:8px" @click="openDisputeDialog(detail)"><Icon name="warning" :size="14" /> 纠纷申诉</button>
           </div>
         </div>
       </div>
@@ -269,7 +335,8 @@
 </template>
 
 <script>
-import { ref, computed, onMounted, onUnmounted, watch, getCurrentInstance } from 'vue';
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue';
+import { useRouter } from 'vue-router';
 import Icon from '../Icon.vue';
 import { subscriptionApi, creditsApi, authApi } from '../../services/api';
 import { showToast } from '../Toast.vue';
@@ -279,20 +346,26 @@ import { showConfirm } from '../ConfirmDialog.vue';
 // 后端 tier: FREE / LITE / PRO / PROPLUS / ULTRA
 const TIER_LABEL_MAP = {
   FREE: '免费版',
-  LITE: '轻享版',
-  PRO: '专业版',
-  PROPLUS: '旗舰版',
-  PRO_PLUS: '旗舰版',
-  ULTRA: '至尊版',
+  LITE: '直购积分·600',
+  PRO: '直购积分·3500',
+  PROPLUS: '直购积分·16000',
+  PRO_PLUS: '直购积分·16000',
+  ULTRA: '直购积分·45000',
+  MEGA: '直购积分·100000',
+  SMALL_MONTH_CARD: '小月卡',
+  LARGE_MONTH_CARD: '大月卡',
 };
 
 const TIER_PLAN_CODE_MAP = {
   FREE: 'FREE',
   LITE: 'LITE',
   PRO: 'PRO',
-  PROPLUS: 'PRO_PLUS',
+  PROPLUS: 'PROPLUS',
   PRO_PLUS: 'PRO_PLUS',
   ULTRA: 'ULTRA',
+  MEGA: 'MEGA',
+  SMALL_MONTH_CARD: 'SMALL_MONTH_CARD',
+  LARGE_MONTH_CARD: 'LARGE_MONTH_CARD',
 };
 
 function tierToPlanCode(tier) {
@@ -308,7 +381,7 @@ function normalizePlan(p) {
   if (!p) return null;
   const tier = p.tier || p.planCode || 'FREE';
   return {
-    planCode: tierToPlanCode(tier),
+    planCode: tierToPlanCode(tier) ?? p.planCode,
     tier,
     planName: p.planName || tierLabel(tier),
     price: p.priceYuan != null ? p.priceYuan : p.price,
@@ -318,7 +391,15 @@ function normalizePlan(p) {
     benefits: p.benefits || p.features || [],
     features: p.benefits || p.features || [],
     firstMonthDiscount: p.firstMonthDiscount || false,
+    category: p.category || detectCategory(tier),
   };
+}
+
+function detectCategory(tier) {
+  if (!tier) return 'DIRECT';
+  const t = String(tier).toUpperCase();
+  if (t.includes('MONTH') || t.includes('CARD')) return 'MONTHLY_CARD';
+  return 'DIRECT';
 }
 
 // 标准化后端 order → 模板字段
@@ -376,8 +457,7 @@ export default {
   },
   emits: ['switchTab', 'refreshCredits'],
   setup(props, { emit }) {
-    const instance = getCurrentInstance();
-    const router = instance?.proxy?.$router;
+    const router = useRouter();
 
     const userInfo = ref(null);
     const userAvatarUrl = ref('/default-avatar.svg');
@@ -407,13 +487,20 @@ export default {
     const refundTarget = ref(null);
     const refundReason = ref('');
     const refundSubmitting = ref(false);
+    const disputeTarget = ref(null);
+    const disputeReason = ref('');
+    const disputeSubmitting = ref(false);
+    const showDisputeDialog = ref(false);
 
     const planBadgeClass = computed(() => {
       const c = currentPlan.value?.planCode;
       if (c === 'ULTRA') return 'ultra';
-      if (c === 'PRO_PLUS') return 'pro-plus';
+      if (c === 'MEGA') return 'mega';
+      if (c === 'PRO_PLUS' || c === 'PROPLUS') return 'pro-plus';
       if (c === 'PRO') return 'pro';
       if (c === 'LITE') return 'lite';
+      if (c === 'SMALL_MONTH_CARD') return 'month-card';
+      if (c === 'LARGE_MONTH_CARD') return 'month-card-large';
       return 'free';
     });
 
@@ -442,6 +529,9 @@ export default {
       if (d.status === 'EXPIRED') evts.push({ title: '订单已过期', operator: '系统', time: d.expiredAt || d.expiresAt, done: true });
       return evts;
     });
+
+    const monthlyCardPlans = computed(() => plans.value.filter(p => (p.category || 'DIRECT') === 'MONTHLY_CARD'));
+    const directPurchasePlans = computed(() => plans.value.filter(p => (p.category || 'DIRECT') === 'DIRECT'));
 
     // 通过 creditsApi.getBalance 获取当前 tier 信息（替代废弃的 getCurrentPlan）
     async function loadBalanceAndTier() {
@@ -497,7 +587,23 @@ export default {
       }).catch(() => {});
       // 套餐列表先加载，再加载余额（便于 features 查找）
       subscriptionApi.getPlans().then(data => {
-        const list = Array.isArray(data) ? data : (data?.plans || []);
+        let list;
+        if (Array.isArray(data)) {
+          list = data;
+        } else if (Array.isArray(data?.groups)) {
+          list = [];
+          data.groups.forEach(g => {
+            if (Array.isArray(g?.plans)) list = list.concat(g.plans);
+          });
+        } else if (Array.isArray(data?.plans)) {
+          list = data.plans;
+        } else if (Array.isArray(data?.directPlans) || Array.isArray(data?.monthlyCards)) {
+          list = [];
+          if (Array.isArray(data.directPlans)) list = list.concat(data.directPlans);
+          if (Array.isArray(data.monthlyCards)) list = list.concat(data.monthlyCards);
+        } else {
+          list = [];
+        }
         plans.value = list.map(normalizePlan);
       }).catch(() => {
         plans.value = mockPlans();
@@ -508,10 +614,13 @@ export default {
 
     function mockPlans() {
       return [
-        { planCode: 'LITE', tier: 'LITE', planName: '轻享版', price: 9.9, credits: 2000, durationDays: 30, firstMonthDiscount: true, features: ['每月 2000 积分', '基础模型支持', '标准响应速度', '7天文件存储'] },
-        { planCode: 'PRO', tier: 'PRO', planName: '专业版', price: 59, credits: 4000, durationDays: 30, firstMonthDiscount: true, features: ['每月 4000 积分', '全模型支持', '优先响应队列', '30天文件存储'] },
-        { planCode: 'PRO_PLUS', tier: 'PROPLUS', planName: '旗舰版', price: 219, credits: 12000, durationDays: 30, firstMonthDiscount: true, features: ['每月 12000 积分', '高级模型解锁', '高峰期模型优先', '90天文件存储'] },
-        { planCode: 'ULTRA', tier: 'ULTRA', planName: '至尊版', price: 629, credits: 40000, durationDays: 30, firstMonthDiscount: true, features: ['每月 40000 积分', '全部模型解锁', '专属算力通道', '永久文件存储'] }
+        { planCode: 'SMALL_MONTH_CARD', tier: 'SMALL_MONTH_CARD', planName: '小月卡', price: 30, credits: 3000, durationDays: 30, category: 'MONTHLY_CARD', features: ['3000 积分基础', '每日登录 +100 积分', '基础模型支持', '专属折扣 9 折', '30 天有效'] },
+        { planCode: 'LARGE_MONTH_CARD', tier: 'LARGE_MONTH_CARD', planName: '大月卡', price: 68, credits: 8000, durationDays: 30, category: 'MONTHLY_CARD', features: ['8000 积分基础', '每日登录 +300 积分', '全模型支持', '专属折扣 8 折', '优先响应队列', '30 天有效'] },
+        { planCode: 'LITE', tier: 'LITE', planName: '直购积分·600', price: 6, credits: 600, durationDays: 30, category: 'DIRECT', features: ['600 积分', '基础模型支持', '标准响应速度'] },
+        { planCode: 'PRO', tier: 'PRO', planName: '直购积分·3500', price: 30, credits: 3500, durationDays: 30, category: 'DIRECT', features: ['3500 积分', '全模型支持', '优先响应', '30 天文件存储'] },
+        { planCode: 'PROPLUS', tier: 'PROPLUS', planName: '直购积分·16000', price: 128, credits: 16000, durationDays: 30, category: 'DIRECT', features: ['16000 积分', '全模型支持', '高优先级队列', '高级分析功能', '90 天文件存储'] },
+        { planCode: 'ULTRA', tier: 'ULTRA', planName: '直购积分·45000', price: 328, credits: 45000, durationDays: 30, category: 'DIRECT', features: ['45000 积分', '全模型支持', '最高优先级', '全部高级功能', '永久文件存储'] },
+        { planCode: 'MEGA', tier: 'MEGA', planName: '直购积分·100000', price: 648, credits: 100000, durationDays: 30, category: 'DIRECT', features: ['100000 积分', '全模型支持', '最高优先级', '全部高级功能', '永久文件存储', '专属客服支持'] }
       ];
     }
 
@@ -534,7 +643,17 @@ export default {
     function openUpgradeDialog() {
       if (plans.value.length === 0) {
         subscriptionApi.getPlans().then(data => {
-          const list = Array.isArray(data) ? data : (data?.plans || []);
+          let list;
+          if (Array.isArray(data)) list = data;
+          else if (Array.isArray(data?.groups)) {
+            list = [];
+            data.groups.forEach(g => { if (Array.isArray(g?.plans)) list = list.concat(g.plans); });
+          } else if (Array.isArray(data?.plans)) list = data.plans;
+          else if (Array.isArray(data?.directPlans) || Array.isArray(data?.monthlyCards)) {
+            list = [];
+            if (Array.isArray(data.directPlans)) list = list.concat(data.directPlans);
+            if (Array.isArray(data.monthlyCards)) list = list.concat(data.monthlyCards);
+          } else list = [];
           plans.value = list.map(normalizePlan);
         }).catch(() => { plans.value = mockPlans(); });
       }
@@ -542,32 +661,61 @@ export default {
     }
 
     function isCurrentPlan(code) {
+      const plan = plans.value.find(p => p.planCode === code);
+      if (!plan) return false;
+      // 只有月卡才显示"再次购买"（续费），直购积分始终显示"立即购买"
+      if ((plan.category || 'DIRECT') !== 'MONTHLY_CARD') return false;
       const currentTier = currentPlan.value?.tier || tierToPlanCode(currentPlan.value?.planCode);
-      const targetTier = plans.value.find(p => p.planCode === code)?.tier;
-      return currentTier && targetTier && currentTier === targetTier && currentTier !== 'FREE';
+      // 如果是 ALL 状态，所有月卡都显示"已购买"
+      if (currentTier === 'ALL') return true;
+      return currentTier && currentTier === plan.tier && currentTier !== 'FREE';
     }
 
     async function purchasePlan(plan) {
-      if (!window.confirm(`确认购买 ${plan.planName}（¥${Number(plan.price||0).toFixed(2)} / ${plan.durationDays}天，获得 ${plan.credits} 积分）？`)) return;
+      const price = Number(plan.price || 0).toFixed(2);
+      const isMonthCard = (plan.category || 'DIRECT') === 'MONTHLY_CARD';
+      const confirmMsg = isMonthCard
+        ? `确认购买 ${plan.planName}？\n¥${price} / ${plan.durationDays}天，获得 ${plan.credits} 积分`
+        : `确认购买 ${plan.planName}？\n¥${price}，获得 ${plan.credits} 积分`;
+      if (!window.confirm(confirmMsg)) return;
       purchasingPlan.value = plan.planCode;
       try {
         const res = await subscriptionApi.purchase({ planCode: plan.tier || plan.planCode, paymentMethod: 'MANUAL' });
-        const gained = res?.pointsGranted ?? res?.credits ?? plan.credits;
         const orderNo = res?.orderNo;
-        showToast(`购买成功，获得 ${gained} 积分！${orderNo ? `（订单号 ${orderNo}）` : ''}`, 'success');
-        showUpgradeDialog.value = false;
-        if (orderNo) highlightOrderNo.value = orderNo;
-        creditsBalance.value = (typeof res?.newBalance === 'number') ? res.newBalance : (creditsBalance.value + gained);
-        // 刷新余额、tier、订单列表
-        setTimeout(() => {
-          loadBalanceAndTier();
-          loadOrders(0);
-          emit('refreshCredits');
-        }, 300);
-        if (orderNo) setTimeout(() => highlightOrderNo.value = null, 6000);
+        const isPending = res?.status === 'PENDING';
+
+        if (isPending) {
+          showToast(res?.message || '订单已创建，待管理员确认到账后发放权益', 'success');
+          // PENDING 订单不改变余额/tier（未到账），直接刷新订单列表即可
+          showUpgradeDialog.value = false;
+          if (orderNo) highlightOrderNo.value = orderNo;
+          setTimeout(() => {
+            loadOrders(0);
+          }, 300);
+          if (orderNo) setTimeout(() => highlightOrderNo.value = null, 6000);
+        } else {
+          const gained = res?.pointsGranted ?? res?.credits ?? plan.credits;
+          showToast(`购买成功，获得 ${gained} 积分！${orderNo ? `（订单号 ${orderNo}）` : ''}`, 'success');
+          showUpgradeDialog.value = false;
+          if (orderNo) highlightOrderNo.value = orderNo;
+          creditsBalance.value = (typeof res?.newBalance === 'number') ? res.newBalance : (creditsBalance.value + gained);
+          currentPlan.value = {
+            planCode: tierToPlanCode(res?.subscriptionTier || plan.tier),
+            tier: res?.subscriptionTier || plan.tier,
+            expiresAt: res?.expiresAt || null,
+          };
+          // 刷新余额、tier、订单列表
+          setTimeout(() => {
+            loadBalanceAndTier();
+            loadOrders(0);
+            emit('refreshCredits');
+          }, 300);
+          if (orderNo) setTimeout(() => highlightOrderNo.value = null, 6000);
+        }
       } catch (err) {
         let msg = err.message || '购买失败';
         if (err.errorCode === 'PLAN_NOT_FOUND') msg = '套餐不存在或已下架';
+        else if (err.errorCode === 'ORDER_STATUS_INVALID') msg = '订单状态异常，请稍后重试';
         else if (err.errorCode === 'DUPLICATE_PURCHASE' || /重复|already/.test(msg)) msg = '您已购买相同档位，无法重复购买';
         showToast(msg, 'error');
       } finally { purchasingPlan.value = null; }
@@ -606,6 +754,26 @@ export default {
         emit('refreshCredits');
       } catch (err) { showToast(err.message || '退款申请失败', 'error'); }
       finally { refundSubmitting.value = false; }
+    }
+
+    function openDisputeDialog(order) {
+      disputeTarget.value = order;
+      disputeReason.value = '';
+      showDisputeDialog.value = true;
+    }
+
+    async function submitDispute() {
+      if (disputeReason.value.trim().length < 5) { showToast('请填写至少5个字的申诉原因', 'warning'); return; }
+      if (!disputeTarget.value) return;
+      disputeSubmitting.value = true;
+      try {
+        const res = await subscriptionApi.disputeOrder(disputeTarget.value.orderNo, disputeReason.value.trim());
+        showToast('纠纷申诉已提交，请等待管理员处理', 'success');
+        showDisputeDialog.value = false;
+        showOrderDrawer.value = false;
+        loadOrders(orderPage.value);
+      } catch (err) { showToast(err.message || '申诉失败', 'error'); }
+      finally { disputeSubmitting.value = false; }
     }
 
     async function openOrderDetail(order) {
@@ -649,6 +817,21 @@ export default {
       if (router) router.push({ path: '/user-center', query: { tab: 'credits' } });
       else window.location.href = '/user-center?tab=credits';
     }
+    function goToOrders() {
+      showUpgradeDialog.value = false;
+      emit('switchTab', 'subscription');
+      if (router && router.currentRoute.value.path === '/user-center') {
+        // 已在用户中心，直接滚动到订单区域
+        nextTick(() => {
+          const el = document.querySelector('.orders-list-section');
+          if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
+      } else if (router) {
+        router.push({ path: '/user-center', query: { tab: 'subscription' } });
+      } else {
+        window.location.href = '/user-center?tab=subscription';
+      }
+    }
     function goToCreditsWithRelated(orderNo) {
       showOrderDrawer.value = false;
       emit('switchTab', 'credits');
@@ -657,10 +840,10 @@ export default {
     }
 
     function statusText(s) {
-      return { PAID: '已支付', PENDING: '待支付', REFUNDED: '已退款', CANCELLED: '已取消', EXPIRED: '已过期' }[s] || s || '-';
+      return { PAID: '已支付', PENDING: '待确认', PENDING_REFUND: '退款审批中', DISPUTED: '纠纷中', REFUNDED: '已退款', CANCELLED: '已取消', EXPIRED: '已过期' }[s] || s || '-';
     }
     function txTypeText(t) {
-      return { SUBSCRIPTION_PURCHASE: '订阅购买', REFUND: '退款', ADMIN_ADJUST: '管理员补偿', ADMIN_ADJUSTMENT: '管理员调整', SIGN_IN: '签到奖励', DAILY_SIGN_IN: '每日签到', AI_CHAT: 'AI消耗', NEW_USER_BONUS: '新人福利', MONTHLY_LOGIN_BONUS: '每月登录赠送', LOYALTY_BONUS: '老用户福利' }[t] || t || '-';
+      return { SUBSCRIPTION_PURCHASE: '订阅购买', REFUND: '退款', ADMIN_ADJUST: '管理员补偿', ADMIN_ADJUSTMENT: '管理员调整', SIGN_IN: '签到奖励', DAILY_SIGN_IN: '每日签到', AI_CHAT: 'AI消耗', NEW_USER_BONUS: '新人福利', MONTHLY_LOGIN_BONUS: '每月登录赠送', LOYALTY_BONUS: '老用户福利', MONTHLY_CARD_DAILY: '月卡每日奖励' }[t] || t || '-';
     }
     function formatDateOnly(d) { if (!d) return '-'; const x = new Date(d); return isNaN(x) ? '-' : `${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(x.getDate()).padStart(2,'0')}`; }
     function formatShortDate(d) { if (!d) return '-'; const x = new Date(d); if (isNaN(x)) return '-'; return `${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(x.getDate()).padStart(2,'0')} ${String(x.getHours()).padStart(2,'0')}:${String(x.getMinutes()).padStart(2,'0')}`; }
@@ -691,13 +874,14 @@ export default {
     return {
       userInfo, userAvatarUrl, creditsBalance, currentPlan, recentSpent, remainingDays,
       planBadgeClass, planBenefitsText, expiryText,
-      showUpgradeDialog, plans, purchasingPlan, isCurrentPlan, openUpgradeDialog, purchasePlan, goToCredits,
+      showUpgradeDialog, plans, monthlyCardPlans, directPurchasePlans, purchasingPlan, isCurrentPlan, openUpgradeDialog, purchasePlan, goToCredits,
       orders, ordersLoading, orderPage, totalOrderPages, orderStatusFilter,
       loadOrders, cancelOrder, openRefundDialog, openOrderDetail, highlightOrderNo,
       showOrderDrawer, detail, relatedTransactions, timelineEvents,
       showRefundDialog, refundTarget, refundReason, refundSubmitting, submitRefund,
       statusText, txTypeText, formatShortDate, formatLongDate,
-      copyText, goToCreditsWithRelated
+      showDisputeDialog, disputeTarget, disputeReason, disputeSubmitting, openDisputeDialog, submitDispute,
+      copyText, goToCreditsWithRelated, goToOrders
     };
   }
 };
@@ -709,21 +893,24 @@ export default {
 .section-card h4 { margin: 0; font-size: 15px; font-weight: 600; color: #333; }
 .section-card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
 
-.current-plan-card { display: flex; justify-content: space-between; align-items: center; padding: 24px; background: linear-gradient(135deg, #f8faff 0%, #f0f7ff 100%); border: 1px solid #e0ebff; }
+.current-plan-card { display: flex; justify-content: space-between; align-items: center; padding: 24px; background: #f8f9fa; border: 1px solid #e0ebff; }
 .plan-card-left { display: flex; gap: 16px; align-items: flex-start; }
 .plan-badge { display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; border-radius: 20px; font-size: 13px; font-weight: 600; color: #fff; }
 .plan-badge.free { background: #95a5a6; }
-.plan-badge.lite { background: linear-gradient(135deg, #3498db, #2980b9); }
-.plan-badge.pro { background: linear-gradient(135deg, #27ae60, #229954); }
-.plan-badge.pro-plus { background: linear-gradient(135deg, #8e44ad, #9b59b6); }
-.plan-badge.ultra { background: linear-gradient(135deg, #f39c12, #e67e22); }
+.plan-badge.lite { background: #3498db; }
+.plan-badge.pro { background: #27ae60; }
+.plan-badge.pro-plus { background: #8e44ad; }
+.plan-badge.ultra { background: #f39c12; }
+.plan-badge.mega { background: linear-gradient(135deg, #e74c3c, #c0392b); }
+.plan-badge.month-card { background: linear-gradient(135deg, #ff9800, #f57c00); }
+.plan-badge.month-card-large { background: linear-gradient(135deg, #9c27b0, #7b1fa2); }
 .plan-info { display: flex; flex-direction: column; gap: 6px; }
 .plan-title { font-size: 16px; font-weight: 600; color: #2c3e50; }
 .plan-benefits { font-size: 13px; color: #666; }
 .plan-expiry { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #888; }
 .plan-card-right { display: flex; flex-direction: column; gap: 10px; align-items: flex-end; }
-.btn-upgrade { display: inline-flex; align-items: center; gap: 6px; padding: 10px 22px; background: linear-gradient(135deg, #3498db, #2980b9); color: #fff; border: none; border-radius: 6px; font-size: 14px; font-weight: 500; cursor: pointer; transition: all 0.2s; }
-.btn-upgrade:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(52,152,219,0.4); }
+.btn-upgrade { display: inline-flex; align-items: center; gap: 6px; padding: 8px 18px; background: #3498db; color: #fff; border: none; border-radius: 4px; font-size: 13px; font-weight: 500; cursor: pointer; transition: background 0.2s; }
+.btn-upgrade:hover { background: #2980b9; }
 .btn-upgrade-sm { padding: 8px 18px; background: #3498db; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; }
 .plan-mini-info { display: flex; gap: 16px; font-size: 12px; color: #888; }
 
@@ -749,9 +936,11 @@ export default {
 .status-REFUNDED { background: rgba(250, 140, 22, 0.12); color: #fa8c16; border-color: rgba(250, 140, 22, 0.4); }
 .status-CANCELLED { background: rgba(245, 34, 45, 0.1); color: #f5222d; border-color: rgba(245, 34, 45, 0.4); }
 .status-EXPIRED { background: rgba(24, 144, 255, 0.1); color: #1890ff; border-color: rgba(24, 144, 255, 0.4); }
+.status-PENDING_REFUND { background: rgba(255, 152, 0, 0.12); color: #ef6c00; border-color: rgba(255, 152, 0, 0.4); }
+.status-DISPUTED { background: rgba(156, 39, 176, 0.12); color: #8e24aa; border-color: rgba(156, 39, 176, 0.4); }
 .action-cell { white-space: nowrap; }
-.btn-link { background: none; border: none; color: #ffffff; cursor: pointer; font-size: 13px; padding: 4px 8px; border-radius: 4px; transition: background-color 0.2s; }
-.btn-link:hover { text-decoration: underline; background: rgba(255, 255, 255, 0.15); }
+.btn-link { background: none; border: none; color: #3498db; cursor: pointer; font-size: 13px; padding: 4px 8px; border-radius: 4px; transition: background-color 0.2s; }
+.btn-link:hover { text-decoration: underline; background: rgba(52, 152, 219, 0.1); }
 .btn-link.btn-danger { color: #ff7875; }
 .btn-link.btn-danger:hover { background: rgba(255, 120, 117, 0.15); }
 .btn-link.btn-warn { color: #ffc53d; }
@@ -771,35 +960,39 @@ export default {
 .user-level-tag.free { background: #95a5a6; } .user-level-tag.lite { background: #3498db; }
 .user-level-tag.pro { background: #27ae60; } .user-level-tag.pro-plus { background: #8e44ad; } .user-level-tag.ultra { background: #f39c12; }
 .upgrade-header-actions { display: flex; align-items: center; gap: 10px; }
-.credits-chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; background: linear-gradient(135deg, #fff7e6, #ffe7ba); color: #d46b08; border: 1px solid #ffd591; border-radius: 20px; font-size: 13px; font-weight: 500; cursor: pointer; }
+.credits-chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; background: #fff7e6; color: #d46b08; border: 1px solid #ffd591; border-radius: 4px; font-size: 13px; font-weight: 500; cursor: pointer; }
 .btn-disabled-sm { padding: 6px 14px; background: #f5f5f5; color: #bbb; border: 1px solid #e8e8e8; border-radius: 4px; font-size: 13px; cursor: not-allowed; }
 .upgrade-close { width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; background: none; border: none; color: #999; font-size: 22px; cursor: pointer; border-radius: 6px; }
 .upgrade-close:hover { background: #f5f5f5; }
 
-.upgrade-segment { display: flex; justify-content: center; gap: 12px; padding: 20px 24px 0; }
-.seg-btn { display: inline-flex; align-items: center; gap: 8px; padding: 10px 24px; border: 1px solid #e0e0e0; background: #fff; border-radius: 8px; font-size: 14px; cursor: pointer; position: relative; }
-.seg-btn.seg-active { background: linear-gradient(135deg, #3498db, #2980b9); color: #fff; border-color: #3498db; font-weight: 500; }
-.seg-btn.seg-disabled { color: #bbb; cursor: not-allowed; }
-.seg-tag { padding: 1px 6px; background: #ff7875; color: #fff; border-radius: 4px; font-size: 11px; }
-.seg-soon { padding: 1px 6px; background: #f0f0f0; color: #999; border-radius: 4px; font-size: 11px; }
+.plan-groups { padding: 16px 24px 24px; display: flex; flex-direction: column; gap: 20px; }
+.plan-group { background: #fafbfc; border: 1px solid #eef0f3; border-radius: 8px; padding: 16px; }
+.plan-group-header { margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid #eef0f3; }
+.plan-group-title { display: flex; align-items: center; gap: 8px; }
+.plan-group-title h4 { margin: 0; font-size: 15px; font-weight: 600; color: #333; }
+.plan-group-sub { font-size: 12px; color: #888; margin-left: 4px; }
+.plan-group-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.plan-group-dot.month { background: #ff9800; }
+.plan-group-dot.direct { background: #1976d2; }
 
-.plans-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; padding: 20px 24px 24px; }
-.plan-card { position: relative; background: #fff; border: 2px solid #eee; border-radius: 10px; padding: 20px 16px; display: flex; flex-direction: column; transition: all 0.2s; }
-.plan-card.highlight { border-color: #3498db; box-shadow: 0 4px 20px rgba(52,152,219,0.2); transform: translateY(-4px); }
-.plan-card.selected { border-color: #27ae60; background: #f0fff4; }
-.plan-discount { position: absolute; top: -1px; right: -1px; padding: 4px 10px; background: linear-gradient(135deg, #52c41a, #389e0d); color: #fff; font-size: 11px; font-weight: 500; border-radius: 0 9px 0 8px; }
-.plan-card-name { font-size: 16px; font-weight: 600; color: #333; margin-bottom: 8px; }
-.plan-card-price { font-size: 32px; font-weight: 700; color: #e67e22; line-height: 1; margin-bottom: 8px; }
-.plan-card-price sup { font-size: 16px; font-weight: 500; }
+.plans-grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
+
+.plan-card { position: relative; background: #fff; border: 1px solid #e5e7eb; border-radius: 6px; padding: 16px 14px; display: flex; flex-direction: column; }
+.plan-card-name { font-size: 15px; font-weight: 600; color: #333; margin-bottom: 8px; }
+.plan-card-price { font-size: 28px; font-weight: 700; color: #e67e22; line-height: 1; margin-bottom: 6px; }
+.plan-card-price sup { font-size: 14px; font-weight: 500; }
 .plan-card-price sub { font-size: 12px; color: #999; font-weight: 400; }
-.plan-card-credits { font-size: 13px; color: #27ae60; font-weight: 500; margin-bottom: 14px; }
-.plan-card-features { list-style: none; padding: 0; margin: 0 0 16px; flex: 1; }
-.plan-card-features li { display: flex; align-items: flex-start; gap: 6px; font-size: 12px; color: #666; padding: 4px 0; color: #27ae60; }
+.plan-card-credits { font-size: 13px; color: #27ae60; font-weight: 500; margin-bottom: 10px; }
+.plan-card-features { list-style: none; padding: 0; margin: 0 0 12px; flex: 1; }
+.plan-card-features li { display: flex; align-items: flex-start; gap: 6px; font-size: 12px; padding: 3px 0; color: #27ae60; }
 .plan-card-features li span { color: #555; }
-.plan-card-btn { width: 100%; padding: 10px 0; border: 1px solid #3498db; background: #fff; color: #3498db; border-radius: 8px; font-size: 13px; cursor: pointer; border-radius: 6px; transition: all 0.2s; }
-.plan-card-btn { padding: 10px; background: #fff; color: #3498db; border: 1px solid #3498db; border-radius: 8px; font-size: 13px; font-weight: 500; cursor: pointer; }
+.plan-card-btn { width: 100%; padding: 8px; background: #fff; color: #3498db; border: 1px solid #3498db; border-radius: 4px; font-size: 13px; cursor: pointer; transition: background 0.2s; }
 .plan-card-btn:hover:not(:disabled) { background: #3498db; color: #fff; }
-.plan-card-btn.selected { background: #f5f5f5; color: #999; border-color: #ddd; cursor: not-allowed; }
+
+/* 旧样式占位，保持兼容 */
+.upgrade-segment { display: none; }
+.seg-btn, .seg-tag, .seg-soon { /* 废弃 */ }
+.plan-discount { position: absolute; top: -1px; right: -1px; padding: 3px 8px; background: #52c41a; color: #fff; font-size: 11px; border-radius: 0 5px 0 5px; }
 
 .modal-content { background: #fff; border-radius: 8px; width: 90%; max-width: 480px; }
 .small-modal { max-width: 420px; }
@@ -834,10 +1027,10 @@ export default {
 .drawer-close:hover { background: #f5f5f5; }
 .drawer-body { flex: 1; overflow-y: auto; padding: 24px; }
 .drawer-footer { padding: 16px 24px; border-top: 1px solid #f0f0f0; flex-shrink: 0; }
-.btn-warn { padding: 10px 28px; background: linear-gradient(135deg, #d46b08 0%, #fa8c16 100%); color: #fff; border: none; border-radius: 24px; font-size: 15px; cursor: pointer; font-weight: 700; letter-spacing: 0.5px; box-shadow: 0 2px 6px rgba(212, 107, 8, 0.3); }
-.btn-warn:hover { background: linear-gradient(135deg, #ad4e00 0%, #d46b08 100%); box-shadow: 0 4px 12px rgba(212, 107, 8, 0.4); transform: translateY(-1px); }
-.btn-warn:active { transform: translateY(0); }
-.btn-warn:disabled { background: #ffd591; cursor: not-allowed; color: #fff; box-shadow: none; transform: none; }
+.refund-pending-notice { width: 100%; padding: 10px 12px; background: rgba(255, 152, 0, 0.1); color: #ef6c00; border: 1px solid rgba(255, 152, 0, 0.3); border-radius: 4px; font-size: 13px; text-align: center; }
+.btn-warn { padding: 8px 16px; background: #f39c12; color: #fff; border: none; border-radius: 4px; font-size: 13px; cursor: pointer; transition: background 0.2s; }
+.btn-warn:hover { background: #e67e22; }
+.btn-warn:disabled { background: #ffd591; cursor: not-allowed; color: #fff; }
 
 .detail-section { margin-bottom: 24px; }
 .detail-section h5 { margin: 0 0 16px; font-size: 14px; font-weight: 600; color: #333; padding-left: 10px; border-left: 3px solid #3498db; }
@@ -868,6 +1061,7 @@ export default {
 .related-type.REFUND { background: #fff7e6; color: #fa8c16; }
 .related-type.ADMIN { background: #f9f0ff; color: #722ed1; }
 .related-type.SIGN_IN { background: #f6ffed; color: #52c41a; }
+.related-type.MONTHLY_CARD_DAILY { background: #fff0f6; color: #c41d7f; }
 .related-type.AI_CONSUME { background: #fff1f0; color: #f5222d; }
 .related-desc { font-size: 13px; color: #555; }
 .related-right { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
@@ -880,3 +1074,4 @@ export default {
 .drawer-enter-from .drawer-container, .drawer-leave-to .drawer-container { transform: translateX(100%); }
 .drawer-enter-from, .drawer-leave-to { opacity: 0; }
 </style>
+

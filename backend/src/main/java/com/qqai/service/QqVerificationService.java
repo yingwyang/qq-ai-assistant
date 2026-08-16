@@ -34,6 +34,8 @@ public class QqVerificationService {
     private final Map<String, VerificationCode> codeStore = new ConcurrentHashMap<>();
     // 每日发送次数限制: key = qqNumber + "_" + date, value = count
     private final Map<String, Integer> dailyAttemptStore = new ConcurrentHashMap<>();
+    // 验证码验证爆破防护: key = qqNumber, value = 同一验证码累计失败次数
+    private final Map<String, Integer> verifyAttempts = new ConcurrentHashMap<>();
 
     /**
      * 发送验证码到指定QQ号
@@ -67,6 +69,8 @@ public class QqVerificationService {
             codeStore.put(qqNumber, new VerificationCode(code, Instant.now()));
             // 更新发送次数
             dailyAttemptStore.put(todayKey, attempts + 1);
+            // 重置爆破计数
+            verifyAttempts.remove(qqNumber);
             log.info("验证码已发送到QQ {}", qqNumber);
         } else {
             log.error("发送验证码到QQ {} 失败", qqNumber);
@@ -96,11 +100,21 @@ public class QqVerificationService {
 
         // 验证验证码
         if (!stored.code.equalsIgnoreCase(code)) {
+            // 爆破防护：累计同一验证码的失败次数
+            int attempts = verifyAttempts.getOrDefault(qqNumber, 0) + 1;
+            verifyAttempts.put(qqNumber, attempts);
+            if (attempts >= 10) {
+                codeStore.remove(qqNumber);
+                verifyAttempts.remove(qqNumber);
+                log.warn("QQ {} 验证码爆破防护触发，累计失败{}次，验证码已作废", qqNumber, attempts);
+                return VerificationResult.EXPIRED;
+            }
             return VerificationResult.INVALID;
         }
 
-        // 验证成功，清除验证码
+        // 验证成功，清除验证码和爆破计数
         codeStore.remove(qqNumber);
+        verifyAttempts.remove(qqNumber);
         return VerificationResult.SUCCESS;
     }
 

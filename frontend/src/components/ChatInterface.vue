@@ -84,10 +84,11 @@
             :disabled="selectedMessages.length === 0"
             @click="analyzeWithType(opt.value)"
           >
-            <div class="analysis-picker-icon">{{ opt.icon }}</div>
+            <div class="analysis-picker-icon"><Icon :name="opt.iconName" :size="24" /></div>
             <div class="analysis-picker-info">
               <div class="analysis-picker-name">
                 {{ opt.label }}
+                <Icon v-if="opt.recommendedBadge" name="star" :size="12" style="color:#f59e0b;margin-left:2px" />
                 <span v-if="opt.recommended" class="recommended-tag">推荐</span>
               </div>
               <div class="analysis-picker-desc">{{ opt.desc }}</div>
@@ -101,6 +102,7 @@
             class="analysis-picker-input"
             placeholder="补充说明（可选）：例如『重点分析图片内容』或『我刚进群，帮我找共同话题』..."
             rows="2"
+            maxlength="500"
             @keydown.enter.prevent="analyzeWithType(analysisTypeOptions[0]?.value)"
           ></textarea>
         </div>
@@ -187,11 +189,6 @@
       </div>
     </div>
     
-    <!-- 图片预览弹窗 -->
-    <div v-if="previewImage" class="image-preview" @click="closeImagePreview">
-      <img :src="previewImage" />
-    </div>
-    
   </div>
 </template>
 
@@ -202,6 +199,8 @@ import { messageApi } from '../services/api';
 import MessageContent from './MessageContent.vue';
 import { showToast } from './Toast.vue';
 import { useMessageWebSocket } from '../composables/useMessageWebSocket';
+import { extractForwardXmlTitles, extractForwardMessages } from '../utils/messageParser';
+import { formatMessageTime } from '../utils/formatTime';
 
 const PAGE_SIZE = 50;
 const FALLBACK_POLL_MS = 10000;
@@ -227,7 +226,6 @@ export default {
     const isLoading = ref(false);
     const currentGroupName = ref('');
     const messagesContainer = ref(null);
-    const previewImage = ref(null);
     const currentPage = ref(0);
     const totalMessages = ref(0);
     const hasMore = ref(true);
@@ -279,12 +277,12 @@ export default {
     const analysisTypeOptions = computed(() => {
       const recommended = new Set(GROUP_TYPE_RECOMMEND[groupType.value] || GROUP_TYPE_RECOMMEND.OTHER);
       const list = [
-        { value: 'summary', label: '群聊速览', desc: '群主题 / 氛围 / 近期热点，快速了解群在聊什么', icon: '📊' },
-        { value: 'social-graph', label: '社交图谱', desc: '活跃人物 / 意见领袖 / 话题带动者，知道谁是关键人', icon: '🕸️' },
-        { value: 'topic-trend', label: '话题趋势', desc: '上升 / 稳定 / 衰退话题，把握参与时机', icon: '📈' },
-        { value: 'integration-guide', label: '融入指南 ⭐', desc: '参与建议 / 共同兴趣 / 避雷提示（核心维度）', icon: '🧭' },
-        { value: 'meme-dictionary', label: '梗词典', desc: '群内特有梗 / 缩写 / 表情含义，看懂黑话', icon: '📖' },
-        { value: 'persona-match', label: '人设匹配', desc: '形象定位建议 / 发言风格参考，塑造受欢迎的人设', icon: '🎭' }
+        { value: 'summary', label: '群聊速览', desc: '群主题 / 氛围 / 近期热点，快速了解群在聊什么', iconName: 'chart' },
+        { value: 'social-graph', label: '社交图谱', desc: '活跃人物 / 意见领袖 / 话题带动者，知道谁是关键人', iconName: 'network' },
+        { value: 'topic-trend', label: '话题趋势', desc: '上升 / 稳定 / 衰退话题，把握参与时机', iconName: 'trending' },
+        { value: 'integration-guide', label: '融入指南', desc: '参与建议 / 共同兴趣 / 避雷提示（核心维度）', iconName: 'compass', recommendedBadge: true },
+        { value: 'meme-dictionary', label: '梗词典', desc: '群内特有梗 / 缩写 / 表情含义，看懂黑话', iconName: 'book-open' },
+        { value: 'persona-match', label: '人设匹配', desc: '形象定位建议 / 发言风格参考，塑造受欢迎的人设', iconName: 'theater' }
       ];
       return list.map(o => ({ ...o, recommended: recommended.has(o.value) }));
     });
@@ -463,7 +461,7 @@ export default {
       }
     };
 
-    const { connect: wsConnect, subscribe: wsSubscribe, unsubscribe: wsUnsubscribe, disconnect: wsDisconnect } =
+    const { connect: wsConnect, subscribe: wsSubscribe, unsubscribe: wsUnsubscribe, disconnect: wsDisconnect, connected: wsConnected } =
       useMessageWebSocket(handleWebSocketMessage);
 
     const startFallbackPoll = () => {
@@ -477,6 +475,15 @@ export default {
         fallbackPollInterval = null;
       }
     };
+
+    // WS/轮询互斥：WS 连接成功时停轮询，断开时启轮询
+    watch(wsConnected, (isConnected) => {
+      if (isConnected) {
+        stopFallbackPoll();
+      } else {
+        startFallbackPoll();
+      }
+    });
 
     const handleScroll = () => {
       if (!messagesContainer.value || isLoadingMore.value) return;
@@ -511,52 +518,7 @@ export default {
       e.target.src = 'https://q.qlogo.cn/headimg_dl?dst_uin=0&spec=100';
     };
 
-    const openImage = (url) => {
-      previewImage.value = url;
-    };
-
-    const closeImagePreview = () => {
-      previewImage.value = null;
-    };
-
-    const formatTime = (timestamp) => {
-      if (!timestamp) return '';
-      const date = new Date(timestamp);
-      if (isNaN(date.getTime())) return '';
-
-      const now = new Date();
-      const pad = (n) => String(n).padStart(2, '0');
-      const timeStr = `${pad(date.getHours())}:${pad(date.getMinutes())}`;
-
-      const isSameDay = (d1, d2) =>
-        d1.getFullYear() === d2.getFullYear() &&
-        d1.getMonth() === d2.getMonth() &&
-        d1.getDate() === d2.getDate();
-
-      const diffMs = now - date;
-      const diffMin = Math.floor(diffMs / 60000);
-      const diffHour = Math.floor(diffMs / 3600000);
-
-      // 1 分钟内
-      if (diffMin < 1) return '刚刚';
-      // 1 分钟 ~ 1 小时
-      if (diffHour < 1) return `${diffMin}分钟前`;
-      // 当天内超过 1 小时
-      if (isSameDay(date, now)) return timeStr;
-
-      // 昨天
-      const yesterday = new Date(now);
-      yesterday.setDate(yesterday.getDate() - 1);
-      if (isSameDay(date, yesterday)) return `昨天 ${timeStr}`;
-
-      // 同一年显示 MM-DD HH:mm
-      if (date.getFullYear() === now.getFullYear()) {
-        return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${timeStr}`;
-      }
-
-      // 跨年份显示 YYYY-MM-DD HH:mm
-      return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${timeStr}`;
-    };
+    // formatMessageTime 从 utils/formatTime.js 导入
 
     const scrollToBottom = () => {
       if (!messagesContainer.value) return;
@@ -606,7 +568,6 @@ export default {
       if (newGid) {
         groupMemberMap.value = new Map();
         loadMessages();
-        startFallbackPoll();
       } else {
         stopFallbackPoll();
         messages.value = [];
@@ -696,50 +657,13 @@ export default {
       showToast(`已选择最近 ${recentMessages.length} 条消息`, 'success');
     };
     
-    // 分析选中的消息（保留的工具函数：CQ 清理/转发解析，用于前端展示已选消息的折叠卡片）
-    const extractForwardXmlTitles = (xml) => {
-      if (!xml || typeof xml !== 'string') return [];
-      try {
-        const parser = new DOMParser();
-        const doc = parser.parseFromString(xml, 'text/xml');
-        return Array.from(doc.querySelectorAll('item title')).map(t => t.textContent || '');
-      } catch (e) {
-        return [];
-      }
-    };
-    const extractForwardMessages = (msg) => {
-      if (Array.isArray(msg.forwardMessages)) return msg.forwardMessages;
-      const c = msg.content || '';
-      if (!c.trim()) return [];
-      try {
-        const jsonMatch = c.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
-        if (jsonMatch) {
-          const parsed = JSON.parse(jsonMatch[1]);
-          if (Array.isArray(parsed)) return parsed;
-          if (parsed.messages && Array.isArray(parsed.messages)) return parsed.messages;
-          if (parsed.content && Array.isArray(parsed.content)) return parsed.content;
-          if (parsed.xmlContent && typeof parsed.xmlContent === 'string') {
-            const titles = extractForwardXmlTitles(parsed.xmlContent);
-            return titles.slice(1).map((text, i) => ({
-              id: `forward-${msg.id}-${i}`, userNickname: '', content: text, messageType: 'TEXT'
-            }));
-          }
-        }
-      } catch (e) { /* ignore */ }
-      if (c.includes('<msg') && c.includes('</msg>')) {
-        const titles = extractForwardXmlTitles(c);
-        return titles.slice(1).map((text, i) => ({
-          id: `forward-${msg.id}-${i}`, userNickname: '', content: text, messageType: 'TEXT'
-        }));
-      }
-      return [];
-    };
+    // extractForwardXmlTitles / extractForwardMessages 从 utils/messageParser.js 导入
     const cleanMessageText = (text) => {
       if (!text) return '[无内容]';
       return text
         .replace(/\[CQ:image[^\]]*\]/g, '[图片]')
         .replace(/\[CQ:video[^\]]*\]/g, '[视频]')
-        .replace(/\[CQ:(record|voice)[^\]]*\]/g, '[语音]')
+        .replace(/\[CQ:(?:record|voice)[^\]]*\]/g, '[语音]')
         .replace(/\[CQ:face[^\]]*\]/g, '[表情]')
         .replace(/\[CQ:file[^\]]*\]/g, '[文件]')
         .replace(/\[CQ:at,qq=([^,\]]+)\]/g, (match, qq) => {
@@ -852,16 +776,13 @@ export default {
       isLoading,
       currentGroupName,
       messagesContainer,
-      previewImage,
       isLoadingMore,
       loadMessages,
       handleScroll,
       isSelfMessage,
       getAvatar,
       handleAvatarError,
-      openImage,
-      closeImagePreview,
-      formatTime,
+      formatTime: formatMessageTime,
       highlightedMessageId,
       handleNavigateToMessage,
       qqNicknameMap,
@@ -1116,27 +1037,6 @@ export default {
 .ai-summary-content {
   line-height: 1.4;
   color: #333;
-}
-
-.image-preview {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: rgba(0, 0, 0, 0.9);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-  cursor: pointer;
-}
-
-.image-preview img {
-  max-width: 90%;
-  max-height: 90%;
-  object-fit: contain;
-  border-radius: 8px;
 }
 
 /* 滚动条样式 */

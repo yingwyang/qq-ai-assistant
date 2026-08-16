@@ -73,7 +73,8 @@
           >
             <div class="conv-group-header" @click="toggleGroup(group.key)">
               <Icon :name="collapsedGroups[group.key] ? 'arrow-right' : 'expand'" :size="14" />
-              <span class="conv-group-title">{{ group.label }}</span>
+              <Icon v-if="group.iconName" :name="group.iconName" :size="14" style="margin-left:4px" />
+              <span class="conv-group-title" :style="group.iconName ? 'margin-left:4px' : ''">{{ group.label }}</span>
               <span class="conv-group-count">{{ group.conversations.length }}</span>
             </div>
             <div v-show="!collapsedGroups[group.key]" class="conv-group-items">
@@ -468,7 +469,7 @@
             <option v-for="m in availableModels" :key="m.id" :value="m.id">{{ m.label }}</option>
           </select>
           <span v-if="modelLoading" class="model-loading">加载中...</span>
-          <span v-else-if="modelError" class="model-error" :title="modelError">⚠️</span>
+          <Icon v-else-if="modelError" name="warning" :size="14" class="model-error" :title="modelError" />
           <button v-if="!modelLoading" class="model-refresh-btn" @click="refreshAvailableModels" title="刷新模型列表">
             <Icon name="refresh" :size="12" />
           </button>
@@ -477,7 +478,7 @@
           当前会话使用：<b>{{ currentModelLabel }}</b>
         </div>
         <div class="model-tip model-empty-tip" v-else-if="!modelLoading && availableModels.length === 0">
-          <span v-if="modelError">模型加载失败，请检查 AstrBot 或点击 🔄 重试</span>
+          <span v-if="modelError">模型加载失败，请检查 AstrBot 或点击 <Icon name="refresh" :size="12" /> 重试</span>
           <span v-else>暂无可用模型，请在 AstrBot 中配置后刷新</span>
         </div>
       </div>
@@ -502,13 +503,15 @@
 </template>
 
 <script>
-import { ref, computed, onMounted, onUnmounted, nextTick, watch, getCurrentInstance } from 'vue';
+import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue';
+import { useRouter } from 'vue-router';
 import Icon from './Icon.vue';
 import RichTextRenderer from './RichTextRenderer.vue';
 import { astrBotApi, userApi, systemApi } from '../services/api';
 import { filterToolJson, processAstrBotResponse } from '../utils/messageFilter';
 import { showToast } from './Toast.vue';
 import PersonaManager from './PersonaManager.vue';
+import { formatMessageTime } from '../utils/formatTime';
 export default {
   name: 'AstrBotChat',
   components: { Icon, RichTextRenderer, PersonaManager },
@@ -537,8 +540,7 @@ export default {
     let _creditHintTimer = null;
 
     // 路由跳转
-    const instance = getCurrentInstance();
-    const router = instance?.proxy?.$router;
+    const router = useRouter();
 
     const goToSignIn = () => {
       showInsufficientCredits.value = false;
@@ -588,19 +590,24 @@ export default {
         if (!groups[key]) {
           // 从 title 中提取群名（格式："类型 - 群名"）
           let label = '';
+          let iconName = '';
           if (key === '__nogroup__') {
-            label = '💬 通用对话';
+            label = '通用对话';
+            iconName = 'chat';
           } else {
             // 如果标题包含 "- "，提取群名部分
             if (conv.title && conv.title.includes(' - ')) {
-              label = '📁 ' + conv.title.split(' - ').slice(1).join(' - ');
+              label = conv.title.split(' - ').slice(1).join(' - ');
+              iconName = 'folder';
             } else {
-              label = '👥 群 ' + key;
+              label = '群 ' + key;
+              iconName = 'group';
             }
           }
           groups[key] = {
             key,
             label,
+            iconName,
             conversations: []
           };
         }
@@ -930,34 +937,8 @@ export default {
       showToast(`已设为当前模型: ${name}`, 'success');
     };
 
-    // 加载设置 - 优先从后端获取
+    // 加载设置 - 只从后端获取（掩码值填入输入框，提交时原样返回后端判断是否更新）
     const loadSettings = async () => {
-      // 先从 localStorage 加载默认值
-      const savedBotName = localStorage.getItem('astrbot_bot_name');
-      const savedAstrbotApiKey = localStorage.getItem('astrbot_api_key');
-      const savedProviders = localStorage.getItem('providers');
-      const savedLlmModel = localStorage.getItem('llm_model');
-      const savedLlmModels = localStorage.getItem('llm_models');
-
-      if (savedBotName) botName.value = savedBotName;
-      if (savedAstrbotApiKey) astrbotApiKey.value = savedAstrbotApiKey;
-      if (savedProviders) {
-        try { providers.value = JSON.parse(savedProviders); } catch (e) {}
-      }
-      if (savedLlmModel) llmModel.value = savedLlmModel;
-      // 废弃 llmModels：不再从 localStorage 加载
-      llmModels.value = [];
-      localStorage.removeItem('llm_models');
-      // 同步到聊天界面的默认模型选择
-      if (llmModel.value && !currentModel.value) {
-        currentModel.value = llmModel.value;
-      }
-
-      // 确保至少有一个提供商
-      if (providers.value.length === 0) {
-        providers.value = [{ name: 'default', apiKey: '', baseUrl: '', showApiKey: false }];
-      }
-
       // 优先从后端获取最新设置
       try {
         const response = await userApi.getSettings(props.userId);
@@ -968,11 +949,7 @@ export default {
           botName.value = data.botName || botName.value;
           astrbotApiKey.value = data.astrbotApiKey || astrbotApiKey.value;
           llmModel.value = data.llmModel || llmModel.value;
-          // 不再从后端读取 llmModels（唯一数据源改为 AstrBot API），同时清空数据库旧值
-          if (data.llmModels && Array.isArray(data.llmModels) && data.llmModels.length > 0) {
-            llmModels.value = [];
-          }
-          // 从后端恢复 providers
+          // 从后端恢复 providers（掩码值）
           if (data.providers && Array.isArray(data.providers) && data.providers.length > 0) {
             providers.value = data.providers.map(p => ({
               name: p.name || 'default',
@@ -981,14 +958,6 @@ export default {
               showApiKey: false
             }));
           }
-
-          // 同步到 localStorage
-          localStorage.setItem('astrbot_bot_name', botName.value);
-          localStorage.setItem('astrbot_api_key', astrbotApiKey.value);
-          localStorage.setItem('providers', JSON.stringify(providers.value));
-          localStorage.setItem('llm_model', llmModel.value);
-          // 废弃 llmModels：清空本地缓存
-          localStorage.removeItem('llm_models');
         }
       } catch (error) {
         console.error('加载用户设置失败:', error);
@@ -1002,14 +971,7 @@ export default {
       if (currentModel.value) {
         llmModel.value = currentModel.value;
       }
-      // 保存到 localStorage（llmModels 不保存）
-      localStorage.setItem('astrbot_bot_name', botName.value);
-      localStorage.setItem('astrbot_api_key', astrbotApiKey.value);
-      localStorage.setItem('providers', JSON.stringify(providers.value));
-      localStorage.setItem('llm_model', llmModel.value);
-      localStorage.removeItem('llm_models');
-
-      // 保存到后端（无论是否有 userId）
+      // 保存到后端（当前输入值原样提交，后端按掩码判断是否更新）
       try {
         await userApi.saveSettings({
           userId: props.userId,
@@ -1474,53 +1436,11 @@ export default {
       }
     };
 
-    const formatTime = (time) => {
-      if (!time) return '';
-      const date = new Date(time);
-      if (isNaN(date.getTime())) return '';
+    // formatMessageTime 从 utils/formatTime.js 导入，模板中仍以 formatTime 名称使用
+    const formatTime = formatMessageTime;
 
-      const now = new Date();
-      const pad = (n) => String(n).padStart(2, '0');
-      const timeStr = `${pad(date.getHours())}:${pad(date.getMinutes())}`;
-
-      const isSameDay = (d1, d2) =>
-        d1.getFullYear() === d2.getFullYear() &&
-        d1.getMonth() === d2.getMonth() &&
-        d1.getDate() === d2.getDate();
-
-      const diffMs = now - date;
-      const diffMin = Math.floor(diffMs / 60000);
-      const diffHour = Math.floor(diffMs / 3600000);
-
-      if (diffMin < 1) return '刚刚';
-      if (diffHour < 1) return `${diffMin}分钟前`;
-      if (isSameDay(date, now)) return timeStr;
-
-      const yesterday = new Date(now);
-      yesterday.setDate(yesterday.getDate() - 1);
-      if (isSameDay(date, yesterday)) return `昨天 ${timeStr}`;
-
-      if (date.getFullYear() === now.getFullYear()) {
-        return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${timeStr}`;
-      }
-
-      return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${timeStr}`;
-    };
-
-    const formatDate = (time) => {
-      if (!time) return '';
-      const date = new Date(time);
-      const now = new Date();
-      const diff = now - date;
-      if (diff < 3600000) {
-        const minutes = Math.floor(diff / 60000);
-        return minutes < 1 ? '刚刚' : `${minutes}分钟前`;
-      }
-      if (diff < 86400000) {
-        return `${Math.floor(diff / 3600000)}小时前`;
-      }
-      return date.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' });
-    };
+    // formatDate 改用 formatMessageTime（保留"刚刚/N分钟前/N小时前/今天/昨天/日期"行为）
+    const formatDate = (time) => formatMessageTime(time);
 
     // 处理分析请求
     // — 新链路（有 messageIds）：调用 /api/astrbot/analyze-selected 接口（后端按 messageIds 查 DB + 渲染 prompts.yml 模板）

@@ -126,7 +126,8 @@ CREATE TABLE IF NOT EXISTS messages (
     INDEX idx_archived (archived),
     INDEX idx_deleted (deleted),
     INDEX idx_self_qq (self_qq),
-    INDEX idx_self_deleted (self_qq, deleted)
+    INDEX idx_self_deleted (self_qq, deleted),
+    KEY idx_group_msgid (group_id, message_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='消息表';
 
 -- =====================================================================
@@ -205,6 +206,17 @@ CREATE TABLE IF NOT EXISTS group_read_state (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='群聊阅读进度表';
 
 -- =====================================================================
+-- 11. 月卡每日奖励记录表 (monthly_bonus_record) - 幂等防重
+-- =====================================================================
+CREATE TABLE IF NOT EXISTS monthly_bonus_record (
+    id          BIGINT          AUTO_INCREMENT      PRIMARY KEY,
+    user_id     BIGINT          NOT NULL            COMMENT '用户ID',
+    bonus_date  DATE            NOT NULL            COMMENT '奖励日期',
+    created_at  DATETIME(6)                         COMMENT '创建时间',
+    UNIQUE KEY uk_bonus_user_date (user_id, bonus_date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='月卡每日奖励记录表';
+
+-- =====================================================================
 -- 10.5. 迁移脚本（仅对已有库需执行；全新库可忽略）
 -- =====================================================================
 -- 为 messages 表补齐 "用户软删除" 列
@@ -217,21 +229,6 @@ CREATE TABLE IF NOT EXISTS group_read_state (
 -- 为 file_records 表补齐 active 列
 -- ALTER TABLE file_records ADD COLUMN active BOOLEAN DEFAULT TRUE COMMENT '文件记录是否有效(清理后=FALSE)' AFTER duration;
 -- ALTER TABLE file_records ADD INDEX idx_active (active);
-
--- =====================================================================
--- 11. 初始化数据（可选）
--- =====================================================================
--- 默认管理员账号密码为 admin123 （BCrypt 加密值）
--- 若后端 ddl-auto=update 则会由 DataInitializer 自动创建
-INSERT IGNORE INTO users (username, nickname, password, role, active, created_at)
-VALUES (
-    'admin',
-    '系统管理员',
-    '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy',
-    'ADMIN',
-    TRUE,
-    NOW()
-);
 
 -- =====================================================================
 -- 11. 校验输出

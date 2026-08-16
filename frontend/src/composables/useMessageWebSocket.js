@@ -1,10 +1,8 @@
 import { ref, onUnmounted } from 'vue';
-import { getToken } from '../services/api';
 
 function getWebSocketUrl() {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const token = getToken();
-  return `${protocol}//${window.location.host}/ws/messages?token=${encodeURIComponent(token || '')}`;
+  return `${protocol}//${window.location.host}/ws/messages`;
 }
 
 export function useMessageWebSocket(onMessage) {
@@ -12,11 +10,9 @@ export function useMessageWebSocket(onMessage) {
   let ws = null;
   let reconnectTimer = null;
   let subscribedGroupId = null;
+  let retryCount = 0;
 
   const connect = () => {
-    const token = getToken();
-    if (!token) return;
-
     if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
       return;
     }
@@ -25,6 +21,7 @@ export function useMessageWebSocket(onMessage) {
 
     ws.onopen = () => {
       connected.value = true;
+      retryCount = 0; // 连接成功，重置退避计数
       if (subscribedGroupId) {
         subscribe(subscribedGroupId);
       }
@@ -42,7 +39,10 @@ export function useMessageWebSocket(onMessage) {
 
     ws.onclose = () => {
       connected.value = false;
-      reconnectTimer = setTimeout(connect, 5000);
+      // 指数退避重连：delay = min(1000 * 2^retryCount, 30000)
+      const delay = Math.min(1000 * Math.pow(2, retryCount), 30000);
+      retryCount++;
+      reconnectTimer = setTimeout(connect, delay);
     };
 
     ws.onerror = () => {

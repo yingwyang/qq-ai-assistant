@@ -128,3 +128,140 @@ Authorization: Bearer <token>
   "providers": "[{\\"name\\":\\"siliconflow\\",\\"apiKey\\":\\"xxx\\"}]"
 }
 ```
+## 群聊消息（补充）
+
+### 标记群聊已读
+
+```
+POST /api/messages/read/{groupId}
+Authorization: Bearer <token>
+```
+
+### 一键全部已读
+
+```
+POST /api/messages/read-all
+Authorization: Bearer <token>
+```
+
+### 删除群聊会话（硬删除，不可恢复）
+
+```
+POST /api/messages/group/{groupId}/delete-conversation
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "ownerQq": "123456789"
+}
+```
+
+## 积分与签到
+
+### 查询积分余额
+
+```
+GET /api/credits/balance
+Authorization: Bearer <token>
+```
+
+### 每日签到
+
+```
+POST /api/credits/sign-in
+Authorization: Bearer <token>
+```
+
+### 签到状态
+
+```
+GET /api/credits/sign-in/status
+Authorization: Bearer <token>
+```
+
+### 积分流水
+
+```
+GET /api/credits/transactions?page=0&size=20&direction=&type=&start=&end=
+Authorization: Bearer <token>
+```
+
+### 消费趋势
+
+```
+GET /api/credits/trend?days=7
+Authorization: Bearer <token>
+```
+
+### 积分奖励规则
+
+```
+GET /api/credits/rewards
+Authorization: Bearer <token>
+```
+
+### 管理员：积分规则 / 用户积分 / 调整
+
+```
+GET  /api/credits/admin/rule          # 查询积分规则
+GET  /api/credits/admin/user-credits  # 用户积分列表
+POST /api/credits/admin/adjust        # 调整用户积分（增加 / 扣除）
+GET  /api/credits/admin/transactions  # 全量积分流水
+```
+
+## 订阅与订单
+
+### 套餐列表
+
+```
+GET /api/subscriptions/plans
+Authorization: Bearer <token>
+```
+
+### 购买套餐
+
+```
+POST /api/subscriptions/purchase
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "planCode": "pro"
+}
+```
+
+### 我的订单
+
+```
+GET /api/subscriptions/orders
+Authorization: Bearer <token>
+```
+
+### 订单详情 / 取消 / 申请退款
+
+```
+GET  /api/subscriptions/orders/{orderNo}
+POST /api/subscriptions/orders/{orderNo}/cancel
+POST /api/subscriptions/orders/{orderNo}/refund-request
+```
+
+## TTS 语音合成
+
+### 生成语音
+
+```
+POST /api/system/tts
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "text": "要合成的文本"
+}
+```
+
+### 音色列表 / 切换音色
+
+```
+GET  /api/system/tts/characters
+POST /api/system/tts/switch-character
+```

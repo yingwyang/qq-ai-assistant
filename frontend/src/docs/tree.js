@@ -3,7 +3,7 @@ export const categories = [
     id: 'usage',
     slug: 'usage',
     title: '使用指南',
-    icon: '📖',
+    iconName: 'book-open',
     sortOrder: 1,
     children: [
       {
@@ -35,7 +35,7 @@ export const categories = [
     id: 'faq',
     slug: 'faq',
     title: '常见问题',
-    icon: '❓',
+    iconName: 'help-circle',
     sortOrder: 2,
     children: [],
     pages: [
@@ -47,7 +47,7 @@ export const categories = [
     id: 'dev',
     slug: 'dev',
     title: '开发文档',
-    icon: '💻',
+    iconName: 'code',
     sortOrder: 3,
     children: [],
     pages: [

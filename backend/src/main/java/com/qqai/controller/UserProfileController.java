@@ -5,6 +5,7 @@ import com.qqai.common.SecurityHelper;
 import com.qqai.entity.User;
 import com.qqai.entity.UserQqBinding;
 import com.qqai.repository.UserQqBindingRepository;
+import com.qqai.service.NapCatService;
 import com.qqai.service.QqVerificationService;
 import com.qqai.service.UserService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -37,6 +38,9 @@ public class UserProfileController {
 
     @Autowired
     private UserQqBindingRepository userQqBindingRepository;
+
+    @Autowired
+    private NapCatService napCatService;
 
     /**
      * 获取当前登录用户信息
@@ -105,7 +109,12 @@ public class UserProfileController {
             Map<String, Object> item = new HashMap<>();
             item.put("id", binding.getId());
             item.put("qqNumber", binding.getQqNumber());
-            item.put("nickname", binding.getNickname());
+            // 昵称为空时回退使用QQ号，确保前端 div 始终有名称显示
+            String nickname = binding.getNickname();
+            if (nickname == null || nickname.isBlank()) {
+                nickname = binding.getQqNumber();
+            }
+            item.put("nickname", nickname);
             // 如果没有存储头像，使用QQ官方头像CDN
             String avatar = binding.getAvatar();
             if (avatar == null || avatar.isEmpty()) {
@@ -233,8 +242,29 @@ public class UserProfileController {
                         .body(Map.of("error", "验证码错误，请重新输入", "code", 400));
             case SUCCESS:
                 // 验证通过，执行绑定
+                // 昵称为空时，通过 NapCat OneBot11 API 自动获取QQ昵称
+                if (nickname == null || nickname.isBlank()) {
+                    try {
+                        String fetched = napCatService.getStrangerNickname(qqNumber);
+                        if (fetched != null && !fetched.isBlank()) {
+                            nickname = fetched;
+                            log.info("通过NapCat获取QQ{}昵称: {}", qqNumber, nickname);
+                        }
+                    } catch (Exception e) {
+                        log.warn("获取QQ昵称失败，将使用QQ号作为昵称: {}", e.getMessage());
+                    }
+                }
+                // 仍为空时，回退使用QQ号作为昵称，确保前端 div 不为空
+                if (nickname == null || nickname.isBlank()) {
+                    nickname = qqNumber;
+                    log.info("使用QQ号作为昵称: {}", qqNumber);
+                }
+                // 头像为空时，使用QQ头像URL
+                if (avatar == null || avatar.isBlank()) {
+                    avatar = "https://q.qlogo.cn/headimg_dl?dst_uin=" + qqNumber + "&spec=100";
+                }
                 userService.bindQqAccount(userId, qqNumber, nickname, avatar);
-                return ResponseEntity.ok(Map.of("message", "绑定成功", "qqNumber", qqNumber));
+                return ResponseEntity.ok(Map.of("message", "绑定成功", "qqNumber", qqNumber, "nickname", nickname));
             default:
                 return ResponseEntity.badRequest()
                         .body(Map.of("error", "验证失败", "code", 400));

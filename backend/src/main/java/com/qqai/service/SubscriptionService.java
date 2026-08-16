@@ -11,6 +11,7 @@ import com.qqai.exception.BizException;
 import com.qqai.exception.CreditErrorCode;
 import com.qqai.repository.CreditTransactionRepository;
 import com.qqai.repository.SubscriptionOrderRepository;
+import com.qqai.repository.UserCreditRepository;
 import com.qqai.repository.UserRepository;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.TypedQuery;
@@ -64,6 +65,9 @@ public class SubscriptionService {
     private UserRepository userRepository;
 
     @Autowired
+    private UserCreditRepository userCreditRepository;
+
+    @Autowired
     private EntityManager entityManager;
 
     /**
@@ -80,9 +84,43 @@ public class SubscriptionService {
         List<SubscriptionOrder> recent = subscriptionOrderRepository.findRecentByUserAndPlan(userId, planTier, idempotencySince);
         if (!recent.isEmpty()) {
             SubscriptionOrder existing = recent.get(0);
-            if (existing.getStatus() == OrderStatus.PENDING || existing.getStatus() == OrderStatus.PAID) {
+            if (existing.getStatus() == OrderStatus.PENDING) {
                 log.info("订单幂等命中 user={} plan={} orderNo={}", userId, planTier, existing.getOrderNo());
                 return existing;
+            }
+        }
+
+        // 同种月卡（同 tier）不允许重复购买（PENDING/PAID 且未过期），提示续费
+        // 不同种月卡（大小月卡）可以同时买，但 tier 显示高等级那个
+        if (isMonthlyCard(planTier)) {
+            LocalDateTime now = LocalDateTime.now();
+
+            // 检查用户是否已经是 ALL 状态（同时拥有大小月卡）
+            UserCredit account = creditService.ensureAccount(userId);
+            if (account.getSubscriptionTier() == SubscriptionTier.ALL
+                    && account.getSubscriptionExpiresAt() != null
+                    && account.getSubscriptionExpiresAt().isAfter(now)) {
+                throw new BizException(400, CreditErrorCode.ORDER_STATUS_INVALID,
+                        "您已同时拥有大小月卡（全功能版），无需再购买。");
+            }
+
+            List<SubscriptionOrder> sameActive = subscriptionOrderRepository.findActiveMonthlyCardsOfTier(
+                    userId, OrderStatus.PAID, planTier, now);
+            if (sameActive == null) sameActive = new ArrayList<>();
+            // 包含 PENDING 也提示（避免用户等下又支付一个，叠加不进去）
+            List<SubscriptionOrder> pendingSame = subscriptionOrderRepository
+                    .findRecentByUserAndPlan(userId, planTier, now.minusDays(30));
+            for (SubscriptionOrder o : pendingSame) {
+                if (o.getStatus() == OrderStatus.PENDING) sameActive.add(o);
+            }
+            if (!sameActive.isEmpty()) {
+                SubscriptionOrder activeOne = sameActive.get(0);
+                log.warn("同种月卡重复购买拦截 user={} tier={} activeOrderNo={} expiresAt={}",
+                        userId, planTier, activeOne.getOrderNo(), activeOne.getExpiresAt());
+                throw new BizException(400, CreditErrorCode.ORDER_STATUS_INVALID,
+                        "您已购买同档位月卡（有效期至 "
+                                + (activeOne.getExpiresAt() != null ? activeOne.getExpiresAt().toLocalDate() : "")
+                                + "），同种月卡不可重复购买。如需续期请联系管理员。");
             }
         }
 
@@ -135,19 +173,63 @@ public class SubscriptionService {
                 orderNo, null);
 
         UserCredit account = creditService.ensureAccount(order.getUserId());
-        SubscriptionTier currentTier = account.getSubscriptionTier();
-        LocalDateTime currentExpiresAt = account.getSubscriptionExpiresAt();
-        LocalDateTime baseTime = (currentExpiresAt != null && currentExpiresAt.isAfter(now))
-                ? currentExpiresAt : now;
 
-        if (isHigherTier(order.getPlanTier(), currentTier)
-                || (order.getPlanTier() == currentTier && currentTier != SubscriptionTier.FREE)) {
-            account.setSubscriptionTier(order.getPlanTier());
-            account.setSubscriptionExpiresAt(baseTime.plusDays(order.getDurationDays()));
+        if (isMonthlyCard(order.getPlanTier())) {
+            SubscriptionTier currentTier = account.getSubscriptionTier() != null
+                    ? account.getSubscriptionTier() : SubscriptionTier.FREE;
+            LocalDateTime currentExpiresAt = account.getSubscriptionExpiresAt();
+
+            // 先排除当前订单，检查其他历史有效月卡
+            boolean hasSmallCard = hasActiveMonthlyCard(order.getUserId(), SubscriptionTier.SMALL_MONTH_CARD, now, order.getOrderNo());
+            boolean hasLargeCard = hasActiveMonthlyCard(order.getUserId(), SubscriptionTier.LARGE_MONTH_CARD, now, order.getOrderNo());
+
+            // 当前正在支付的订单本身也算一张有效月卡，不能被排除
+            if (order.getPlanTier() == SubscriptionTier.SMALL_MONTH_CARD) {
+                hasSmallCard = true;
+            } else if (order.getPlanTier() == SubscriptionTier.LARGE_MONTH_CARD) {
+                hasLargeCard = true;
+            }
+
+            if (hasSmallCard && hasLargeCard) {
+                // 同时拥有大小月卡，设置为 ALL
+                LocalDateTime baseTime = (currentExpiresAt != null && currentExpiresAt.isAfter(now))
+                        ? currentExpiresAt : now;
+                account.setSubscriptionTier(SubscriptionTier.ALL);
+                account.setSubscriptionExpiresAt(baseTime.plusDays(order.getDurationDays()));
+                userCreditRepository.save(account);
+            } else if (tierRank(order.getPlanTier()) > tierRank(currentTier) && currentTier != SubscriptionTier.ALL) {
+                // 高等级月卡（升级）：在当前有效期基础上叠加 + 提升 tier
+                LocalDateTime baseTime = (currentExpiresAt != null && currentExpiresAt.isAfter(now))
+                        ? currentExpiresAt : now;
+                account.setSubscriptionTier(order.getPlanTier());
+                account.setSubscriptionExpiresAt(baseTime.plusDays(order.getDurationDays()));
+                userCreditRepository.save(account);
+            }
+            // 同档位月卡：不允许叠加（createOrder 已拦截重复购买，这里兜底不变更）
+            // 低等级月卡：不覆盖 tier（例如已有大月卡，又买小月卡，保持大月卡 tier 和有效期）
+            // ALL 状态：不再改变
+
+            // 购买/续费月卡成功，立即发放当日的月卡额外登录积分（与 grantMonthlyCardDailyBonus 幂等相同）
+            try {
+                int bonus = (order.getPlanTier() == SubscriptionTier.LARGE_MONTH_CARD) ? 300 : 100;
+                String relatedId = "MONTHLY_CARD_DAILY-" + java.time.LocalDate.now();
+                long exists = creditTransactionRepository.countByUserIdAndRelatedId(order.getUserId(), relatedId);
+                if (exists <= 0) {
+                    creditService.grantPoints(order.getUserId(), bonus,
+                            CreditTransactionType.MONTHLY_CARD_DAILY,
+                            "月卡每日登录奖励(" + order.getPlanTier() + "): +" + bonus + "(购买即发)",
+                            relatedId, null);
+                }
+            } catch (Exception e) {
+                log.warn("订单{} 月卡购买即发首天额外积分失败（忽略）: {}", orderNo, e.getMessage());
+            }
         }
+        // 直购积分：仅加积分，不改变账号 tier/expiresAt
 
         subscriptionOrderRepository.save(order);
-        log.info("订单已支付 orderNo={} plan={} credits={}", orderNo, order.getPlanTier(), order.getCreditAmount());
+        log.info("订单已支付 orderNo={} plan={} credits={} tier={} expiresAt={}",
+                orderNo, order.getPlanTier(), order.getCreditAmount(),
+                account.getSubscriptionTier(), account.getSubscriptionExpiresAt());
 
         return order;
     }
@@ -191,11 +273,11 @@ public class SubscriptionService {
                 .orElseThrow(() -> new BizException(404, CreditErrorCode.ORDER_NOT_FOUND, "订单不存在: " + orderNo));
 
         if (order.getStatus() == OrderStatus.REFUNDED) {
-            throw new BizException(400, CreditErrorCode.ALREADY_REFUNDED, "订单已退款");
+            throw new BizException(400, CreditErrorCode.ALREADY_REFUNDED, "订单已退款 (ALREADY_REFUNDED)");
         }
-        if (order.getStatus() != OrderStatus.PAID) {
+        if (order.getStatus() != OrderStatus.PAID && order.getStatus() != OrderStatus.PENDING_REFUND) {
             throw new BizException(400, CreditErrorCode.ORDER_STATUS_INVALID,
-                    "仅已支付订单可退款，当前状态: " + order.getStatus());
+                    "仅已支付或退款待审批订单可退款，当前状态: " + order.getStatus());
         }
 
         if (ratio <= 0 || ratio > 1.0) ratio = 1.0;
@@ -208,7 +290,7 @@ public class SubscriptionService {
         }
 
         int totalCredit = order.getCreditAmount() == null ? 0 : order.getCreditAmount();
-        int refundPoints = (int) Math.round(totalCredit * ratio);
+        int refundPoints = BigDecimal.valueOf(totalCredit).multiply(BigDecimal.valueOf(ratio)).setScale(0, RoundingMode.HALF_UP).intValue();
         if (refundPoints > 0) {
             creditService.spendPoints(order.getUserId(), refundPoints,
                     CreditTransactionType.REFUND,
@@ -231,24 +313,82 @@ public class SubscriptionService {
         return order;
     }
 
+    /**
+     * 计算退款应扣减的积分：取订单积分 x 退款比例和用户当前余额的最小值，防止扣减后余额为负。
+     * 安全策略：若用户已消费超过退款比例对应的积分，则只扣减剩余余额（可能为0）。
+     */
     public int refundedPointsLastRefund(SubscriptionOrder order, double ratio) {
         int totalCredit = order.getCreditAmount() == null ? 0 : order.getCreditAmount();
-        return (int) Math.round(totalCredit * (ratio <= 0 || ratio > 1.0 ? 1.0 : ratio));
+        double effectiveRatio = (ratio <= 0 || ratio > 1.0) ? 1.0 : ratio;
+        int refundPoints = BigDecimal.valueOf(totalCredit).multiply(BigDecimal.valueOf(effectiveRatio)).setScale(0, RoundingMode.HALF_UP).intValue();
+        // 防止余额为负：取 min(应退积分, 用户当前余额)
+        UserCredit account = creditService.ensureAccount(order.getUserId());
+        int userBalance = account.getBalance() != null ? account.getBalance() : 0;
+        return Math.min(refundPoints, userBalance);
     }
 
     private void downgradeTierAfterRefund(SubscriptionOrder order, double ratio) {
         UserCredit account = creditService.ensureAccount(order.getUserId());
         SubscriptionTier currentTier = account.getSubscriptionTier();
         LocalDateTime currentExpiresAt = account.getSubscriptionExpiresAt();
+        LocalDateTime now = LocalDateTime.now();
+        boolean dirty = false;
+
         if (currentTier == order.getPlanTier() && currentExpiresAt != null) {
             int daysToReduce = (int) Math.round(order.getDurationDays() * ratio);
             LocalDateTime rolledBack = currentExpiresAt.minusDays(daysToReduce);
-            if (rolledBack.isBefore(LocalDateTime.now())) {
+            if (rolledBack.isBefore(now)) {
                 account.setSubscriptionTier(SubscriptionTier.FREE);
                 account.setSubscriptionExpiresAt(null);
             } else {
                 account.setSubscriptionExpiresAt(rolledBack);
             }
+            dirty = true;
+        }
+
+        // 不论上面是否扣减了 tier/expiresAt，都要扫描所有有效月卡订单，恢复最高级（多买多退都正确）
+        try {
+            List<SubscriptionOrder> validPaid = subscriptionOrderRepository
+                    .findByUserIdAndStatusOrderByCreatedAtDesc(order.getUserId(), OrderStatus.PAID,
+                            PageRequest.of(0, 200))
+                    .getContent();
+            SubscriptionTier bestTier = account.getSubscriptionTier() != null
+                    ? account.getSubscriptionTier() : SubscriptionTier.FREE;
+            LocalDateTime bestExpires = account.getSubscriptionExpiresAt();
+            int bestRank = tierRank(bestTier);
+            if (bestExpires != null && bestExpires.isBefore(now)) {
+                bestTier = SubscriptionTier.FREE;
+                bestExpires = null;
+                bestRank = 0;
+            }
+
+            for (SubscriptionOrder o : validPaid) {
+                if (o.getExpiresAt() == null || o.getExpiresAt().isBefore(now)) continue;
+                if (!isMonthlyCard(o.getPlanTier())) continue;
+                SubscriptionTier t = o.getPlanTier();
+                int r = tierRank(t);
+                if (r > bestRank) {
+                    bestRank = r;
+                    bestTier = t;
+                    bestExpires = o.getExpiresAt();
+                } else if (r == bestRank && bestExpires != null && o.getExpiresAt().isAfter(bestExpires)) {
+                    bestExpires = o.getExpiresAt();
+                }
+            }
+
+            if (bestTier != account.getSubscriptionTier()
+                    || (bestExpires != null && !bestExpires.equals(account.getSubscriptionExpiresAt()))
+                    || (bestExpires == null && account.getSubscriptionExpiresAt() != null)) {
+                account.setSubscriptionTier(bestTier);
+                account.setSubscriptionExpiresAt(bestExpires);
+                dirty = true;
+            }
+        } catch (Exception e) {
+            log.warn("退款后重建用户月卡 tier 失败（忽略） orderNo={}: {}", order.getOrderNo(), e.getMessage());
+        }
+
+        if (dirty) {
+            userCreditRepository.save(account);
         }
     }
 
@@ -386,20 +526,161 @@ public class SubscriptionService {
                 order.getOrderNo(), adminUserId);
 
         UserCredit account = creditService.ensureAccount(userId);
-        SubscriptionTier currentTier = account.getSubscriptionTier();
-        LocalDateTime currentExpiresAt = account.getSubscriptionExpiresAt();
-        LocalDateTime baseTime = (currentExpiresAt != null && currentExpiresAt.isAfter(now))
-                ? currentExpiresAt : now;
 
-        if (isHigherTier(planTier, currentTier)
-                || (planTier == currentTier && currentTier != SubscriptionTier.FREE)) {
-            account.setSubscriptionTier(planTier);
-            account.setSubscriptionExpiresAt(baseTime.plusDays(durationDays));
+        if (isMonthlyCard(planTier)) {
+            SubscriptionTier currentTier = account.getSubscriptionTier() != null
+                    ? account.getSubscriptionTier() : SubscriptionTier.FREE;
+            LocalDateTime currentExpiresAt = account.getSubscriptionExpiresAt();
+
+            // 检查现有有效月卡（不包含当前补单的这张）
+            boolean hasSmallCard = hasActiveMonthlyCard(userId, SubscriptionTier.SMALL_MONTH_CARD, now, order.getOrderNo());
+            boolean hasLargeCard = hasActiveMonthlyCard(userId, SubscriptionTier.LARGE_MONTH_CARD, now, order.getOrderNo());
+
+            // 当前正在创建的补单本身也算一张月卡
+            if (planTier == SubscriptionTier.SMALL_MONTH_CARD) {
+                hasSmallCard = true;
+            } else if (planTier == SubscriptionTier.LARGE_MONTH_CARD) {
+                hasLargeCard = true;
+            }
+
+            if (hasSmallCard && hasLargeCard) {
+                // 同时拥有大小月卡 → ALL
+                LocalDateTime baseTime = (currentExpiresAt != null && currentExpiresAt.isAfter(now))
+                        ? currentExpiresAt : now;
+                account.setSubscriptionTier(SubscriptionTier.ALL);
+                account.setSubscriptionExpiresAt(baseTime.plusDays(durationDays));
+                userCreditRepository.save(account);
+            } else if (tierRank(planTier) > tierRank(currentTier)) {
+                // 高等级月卡（升级）：在当前有效期基础上叠加 + 提升 tier
+                LocalDateTime baseTime = (currentExpiresAt != null && currentExpiresAt.isAfter(now))
+                        ? currentExpiresAt : now;
+                account.setSubscriptionTier(planTier);
+                account.setSubscriptionExpiresAt(baseTime.plusDays(durationDays));
+                userCreditRepository.save(account);
+            }
+            // 同档位月卡：不允许叠加（createOrder 已拦截重复购买，这里兜底不变更）
+            // 低等级月卡：不覆盖 tier（例如已有大月卡，又买小月卡，保持大月卡 tier 和有效期）
+
+            // 补单也同步发放当日月卡额外积分（幂等）
+            try {
+                int bonus = (planTier == SubscriptionTier.LARGE_MONTH_CARD) ? 300 : 100;
+                String relatedId = "MONTHLY_CARD_DAILY-" + java.time.LocalDate.now();
+                long exists = creditTransactionRepository.countByUserIdAndRelatedId(userId, relatedId);
+                if (exists <= 0) {
+                    creditService.grantPoints(userId, bonus,
+                            CreditTransactionType.MONTHLY_CARD_DAILY,
+                            "月卡每日登录奖励(" + planTier + "): +" + bonus + "(管理员补单即发)",
+                            relatedId, adminUserId);
+                }
+            } catch (Exception e) {
+                log.warn("管理员补单{} 月卡首日积分发放失败（忽略）: {}", order.getOrderNo(), e.getMessage());
+            }
         }
+        // 直购积分：仅加积分，不改变账号 tier/expiresAt
 
         SubscriptionOrder saved = subscriptionOrderRepository.save(order);
-        log.info("管理员补单成功 admin={} user={} plan={} orderNo={}", adminUserId, userId, planTier, saved.getOrderNo());
+        log.info("管理员补单成功 admin={} user={} plan={} orderNo={} tier={} expiresAt={}",
+                adminUserId, userId, planTier, saved.getOrderNo(),
+                account.getSubscriptionTier(), account.getSubscriptionExpiresAt());
         return saved;
+    }
+
+    /**
+     * 用户申请退款：将 PAID 订单状态改为 PENDING_REFUND，记录退款原因到 metadata。
+     * 不扣积分、不退款，等待管理员审批。
+     * 限制：只有 PAID 状态的订单可以申请退款；PENDING_REFUND 状态不可重复申请。
+     */
+    @Transactional
+    public SubscriptionOrder requestRefund(String orderNo, String reason, Long userId) {
+        SubscriptionOrder order = subscriptionOrderRepository.findByOrderNo(orderNo)
+                .orElseThrow(() -> new BizException(404, CreditErrorCode.ORDER_NOT_FOUND, "订单不存在: " + orderNo));
+        if (userId != null && !order.getUserId().equals(userId)) {
+            throw new BizException(403, CreditErrorCode.FORBIDDEN_ORDER, "无权操作该订单");
+        }
+        if (order.getStatus() != OrderStatus.PAID) {
+            throw new BizException(400, CreditErrorCode.ORDER_STATUS_INVALID,
+                    "订单状态" + order.getStatus() + "不可申请退款，仅已支付订单可申请退款");
+        }
+        order.setStatus(OrderStatus.PENDING_REFUND);
+        order.setRefundReason(reason);
+        String meta = order.getMetadata() != null ? order.getMetadata() : "";
+        order.setMetadata(meta + ";refundRequestReason=" + reason +
+                ";refundRequestedAt=" + LocalDateTime.now() +
+                ";refundRequestedBy=" + userId);
+        subscriptionOrderRepository.save(order);
+        log.info("订单退款申请已提交 orderNo={} reason={} userId={}", orderNo, reason, userId);
+        return order;
+    }
+
+    /**
+     * 管理员驳回退款申请：将 PENDING_REFUND 订单恢复为 PAID，记录驳回原因。
+     */
+    @Transactional
+    public SubscriptionOrder rejectRefund(String orderNo, String reason, Long adminUserId) {
+        SubscriptionOrder order = subscriptionOrderRepository.findByOrderNo(orderNo)
+                .orElseThrow(() -> new BizException(404, CreditErrorCode.ORDER_NOT_FOUND, "订单不存在: " + orderNo));
+        if (order.getStatus() != OrderStatus.PENDING_REFUND) {
+            throw new BizException(400, CreditErrorCode.ORDER_STATUS_INVALID,
+                    "订单状态" + order.getStatus() + "不是退款待审批，无法驳回");
+        }
+        order.setStatus(OrderStatus.PAID);
+        String meta = order.getMetadata() != null ? order.getMetadata() : "";
+        order.setMetadata(meta + ";refundRejected=REJECTED;refundRejectReason=" + reason +
+                ";refundRejectedBy=" + adminUserId + ";refundRejectedAt=" + LocalDateTime.now());
+        subscriptionOrderRepository.save(order);
+        log.info("退款申请已驳回 orderNo={} reason={} admin={}", orderNo, reason, adminUserId);
+        return order;
+    }
+
+    /**
+     * 用户申诉/纠纷：将 PAID 订单标记为 DISPUTED，记录纠纷原因。
+     * 限制：只有 PAID 状态的订单可以被申诉；已退款/已取消/已过期的订单不可申诉。
+     */
+    @Transactional
+    public SubscriptionOrder disputeOrder(String orderNo, String reason, Long userId) {
+        SubscriptionOrder order = subscriptionOrderRepository.findByOrderNo(orderNo)
+                .orElseThrow(() -> new BizException(404, CreditErrorCode.ORDER_NOT_FOUND, "订单不存在: " + orderNo));
+        if (userId != null && !order.getUserId().equals(userId)) {
+            throw new BizException(403, CreditErrorCode.FORBIDDEN_ORDER, "无权操作该订单");
+        }
+        if (order.getStatus() != OrderStatus.PAID) {
+            throw new BizException(400, CreditErrorCode.ORDER_STATUS_INVALID,
+                    "订单状态" + order.getStatus() + "不可申诉，仅已支付订单可发起纠纷");
+        }
+        order.setStatus(OrderStatus.DISPUTED);
+        order.setDisputeReason(reason);
+        String meta = order.getMetadata() != null ? order.getMetadata() : "";
+        order.setMetadata(meta + ";disputeReason=" + reason + ";disputedAt=" + LocalDateTime.now());
+        subscriptionOrderRepository.save(order);
+        log.info("订单已申诉 orderNo={} reason={} userId={}", orderNo, reason, userId);
+        return order;
+    }
+
+    /**
+     * 管理员解决纠纷：同意退款 或 驳回纠纷恢复 PAID 状态。
+     * agree=true：走退款流程（PAID->REFUNDED）；agree=false：恢复 PAID 状态。
+     */
+    @Transactional
+    public SubscriptionOrder resolveDispute(String orderNo, boolean agree, String reason, Long adminUserId) {
+        SubscriptionOrder order = subscriptionOrderRepository.findByOrderNo(orderNo)
+                .orElseThrow(() -> new BizException(404, CreditErrorCode.ORDER_NOT_FOUND, "订单不存在: " + orderNo));
+        if (order.getStatus() != OrderStatus.DISPUTED) {
+            throw new BizException(400, CreditErrorCode.ORDER_STATUS_INVALID,
+                    "订单状态" + order.getStatus() + "不是纠纷中，无法处理");
+        }
+        if (agree) {
+            // 同意退款：全额退款
+            return refundOrderWithRatio(orderNo, "纠纷处理-同意退款: " + reason, adminUserId, 1.0);
+        } else {
+            // 驳回纠纷：恢复 PAID 状态
+            order.setStatus(OrderStatus.PAID);
+            String meta = order.getMetadata() != null ? order.getMetadata() : "";
+            order.setMetadata(meta + ";disputeResolved=REJECTED;disputeResolveReason=" + reason +
+                    ";resolvedBy=" + adminUserId + ";resolvedAt=" + LocalDateTime.now());
+            subscriptionOrderRepository.save(order);
+            log.info("纠纷已驳回 orderNo={} reason={} admin={}", orderNo, reason, adminUserId);
+            return order;
+        }
     }
 
     public List<OrderStatus> parseStatuses(String statusCsv) {
@@ -424,6 +705,9 @@ public class SubscriptionService {
             case "PRO", "PLAN_PRO" -> SubscriptionTier.PRO;
             case "PROPLUS", "PRO_PLUS", "PLAN_PROPLUS", "PLAN_PRO_PLUS" -> SubscriptionTier.PROPLUS;
             case "ULTRA", "PLAN_ULTRA" -> SubscriptionTier.ULTRA;
+            case "MEGA", "PLAN_MEGA" -> SubscriptionTier.MEGA;
+            case "SMALL_MONTH_CARD", "SMALL_CARD", "MONTH_SMALL" -> SubscriptionTier.SMALL_MONTH_CARD;
+            case "LARGE_MONTH_CARD", "LARGE_CARD", "MONTH_LARGE" -> SubscriptionTier.LARGE_MONTH_CARD;
             default -> throw new BizException(400, CreditErrorCode.PLAN_NOT_FOUND, "套餐不存在: " + planCode);
         };
     }
@@ -434,26 +718,66 @@ public class SubscriptionService {
         }
     }
 
-    private boolean isHigherTier(SubscriptionTier newTier, SubscriptionTier currentTier) {
-        return tierOrdinal(newTier) > tierOrdinal(currentTier);
+    private boolean isMonthlyCard(SubscriptionTier tier) {
+        return tier == SubscriptionTier.SMALL_MONTH_CARD || tier == SubscriptionTier.LARGE_MONTH_CARD
+                || tier == SubscriptionTier.ALL;
     }
 
-    private int tierOrdinal(SubscriptionTier tier) {
+    /**
+     * 检查用户是否有指定类型的有效月卡订单（已支付且未过期）
+     */
+    private boolean hasActiveMonthlyCard(Long userId, SubscriptionTier tier, LocalDateTime now, String excludeOrderNo) {
+        try {
+            List<SubscriptionOrder> orders = subscriptionOrderRepository
+                    .findByUserIdAndStatusOrderByCreatedAtDesc(userId, OrderStatus.PAID,
+                            org.springframework.data.domain.PageRequest.of(0, 50))
+                    .getContent();
+            for (SubscriptionOrder o : orders) {
+                // 排除当前正在支付的订单
+                if (excludeOrderNo != null && excludeOrderNo.equals(o.getOrderNo())) continue;
+                if (o.getPlanTier() == tier && o.getExpiresAt() != null && o.getExpiresAt().isAfter(now)) {
+                    return true;
+                }
+            }
+        } catch (Exception e) {
+            log.warn("查询有效月卡订单失败: {}", e.getMessage());
+        }
+        return false;
+    }
+
+    /**
+     * tier 排序值（用于比较升级/降级）。月卡排序值高于直购同级别。
+     * FREE:0, LITE:1, PRO:2, PROPLUS:3, ULTRA:4, MEGA:5, SMALL_MONTH_CARD:6, LARGE_MONTH_CARD:7, ALL:8
+     */
+    private int tierRank(SubscriptionTier tier) {
+        if (tier == null) return 0;
         return switch (tier) {
             case FREE -> 0;
             case LITE -> 1;
             case PRO -> 2;
             case PROPLUS -> 3;
             case ULTRA -> 4;
+            case MEGA -> 5;
+            case SMALL_MONTH_CARD -> 6;
+            case LARGE_MONTH_CARD -> 7;
+            case ALL -> 8;
         };
     }
 
+    /**
+     * 套餐价格唯一来源:四档直购积分(LITE/PRO/PROPLUS/ULTRA)读 credit_rule 数据库配置;
+     * MEGA 与月卡两档数据库无对应字段,保留硬编码(与 getPlans 的硬编码保持一致)。
+     * 管理员在后台修改积分规则后立即生效。
+     */
     public BigDecimal getPlanPrice(SubscriptionTier tier, CreditRule rule) {
         return switch (tier) {
             case LITE -> rule.getPlanLitePrice();
             case PRO -> rule.getPlanProPrice();
             case PROPLUS -> rule.getPlanProPlusPrice();
             case ULTRA -> rule.getPlanUltraPrice();
+            case MEGA -> new BigDecimal("648");
+            case SMALL_MONTH_CARD -> new BigDecimal("30");
+            case LARGE_MONTH_CARD -> new BigDecimal("68");
             default -> throw new BizException(400, CreditErrorCode.PLAN_NOT_FOUND, "无效套餐");
         };
     }
@@ -464,6 +788,9 @@ public class SubscriptionService {
             case PRO -> rule.getPlanProCredit();
             case PROPLUS -> rule.getPlanProPlusCredit();
             case ULTRA -> rule.getPlanUltraCredit();
+            case MEGA -> 100000;
+            case SMALL_MONTH_CARD -> 3000;
+            case LARGE_MONTH_CARD -> 8000;
             default -> throw new BizException(400, CreditErrorCode.PLAN_NOT_FOUND, "无效套餐");
         };
     }

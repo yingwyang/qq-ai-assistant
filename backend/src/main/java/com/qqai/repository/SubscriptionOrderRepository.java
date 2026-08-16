@@ -48,4 +48,28 @@ public interface SubscriptionOrderRepository extends JpaRepository<SubscriptionO
     @Query("SELECT o FROM SubscriptionOrder o WHERE o.status IN :statuses ORDER BY o.createdAt DESC")
     Page<SubscriptionOrder> findByStatusInOrderByCreatedAtDesc(@Param("statuses") List<OrderStatus> statuses,
                                                                Pageable pageable);
+
+    /**
+     * 查询用户未过期的月卡订单，按 tier 倒序（大月卡优先）。
+     * 用于每日登录奖励发放时判断用户是否有有效月卡及取最高档月卡奖励。
+     */
+    @Query("SELECT o FROM SubscriptionOrder o WHERE o.userId = :userId AND o.status = :status " +
+           "AND o.planTier IN :tiers AND o.expiresAt >= :now ORDER BY o.planTier DESC, o.expiresAt DESC")
+    List<SubscriptionOrder> findActiveMonthlyCards(@Param("userId") Long userId,
+                                                    @Param("status") OrderStatus status,
+                                                    @Param("tiers") List<SubscriptionTier> tiers,
+                                                    @Param("now") LocalDateTime now);
+
+    /**
+     * 查询用户某档位未过期的月卡订单（PAID状态，expiresAt>=now）。
+     * 用于同种月卡重复购买拦截。
+     */
+    @Query("SELECT o FROM SubscriptionOrder o WHERE o.userId = :userId AND o.status = :status " +
+           "AND o.planTier = :planTier AND o.expiresAt >= :now ORDER BY o.expiresAt DESC")
+    List<SubscriptionOrder> findActiveMonthlyCardsOfTier(@Param("userId") Long userId,
+                                                          @Param("status") OrderStatus status,
+                                                          @Param("planTier") SubscriptionTier planTier,
+                                                          @Param("now") LocalDateTime now);
+
+    long countByStatus(OrderStatus status);
 }
