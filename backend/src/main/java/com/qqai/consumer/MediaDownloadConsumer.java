@@ -68,7 +68,9 @@ public class MediaDownloadConsumer {
                 payload.getRawMessage(),
                 payload.getGroupId(),
                 payload.getMediaType(),
-                payload.getExtension());
+                payload.getExtension(),
+                payload.getFileId(),
+                payload.isTrustedSource());
 
         if (localUrl == null) {
             // 下载失败：抛异常触发重试，3 次后进 DLQ
@@ -110,11 +112,11 @@ public class MediaDownloadConsumer {
 
     private String resolveFailurePlaceholder(String mediaType) {
         if ("images".equals(mediaType)) {
-            return "[图片下载失败]";
+            return "[图片已过期]";
         }
         if ("video".equals(mediaType)) {
-            return "[视频下载失败]";
+            return "[视频已过期]";
         }
-        return "[媒体下载失败]";
+        return "[媒体已过期]";
     }
 }

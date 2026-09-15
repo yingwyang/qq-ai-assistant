@@ -630,8 +630,7 @@ public class NapCatService {
                 log.warn("获取群成员列表返回非预期状态: status={}, retcode={}", json.has("status") ? json.get("status").asText() : "null", json.has("retcode") ? json.get("retcode").asInt() : "null");
             }
         } catch (Exception e) {
-            log.error("获取群成员列表失败 (groupId={}): {}", groupId, e.getMessage());
-            e.printStackTrace();
+            log.error("获取群成员列表失败 (groupId={}): {}", groupId, e.getMessage(), e);
         }
         return objectMapper.createArrayNode();
     }
@@ -820,21 +819,45 @@ public class NapCatService {
         if (payload == null) {
             return null;
         }
+        // 1. 优先从 message 数组提取 (OneBot 11 标准格式)
         ArrayNode messageArray = (ArrayNode) payload.get("message");
-        if (messageArray == null || messageArray.isEmpty()) {
-            return null;
-        }
-        for (int i = 0; i < messageArray.size(); i++) {
-            ObjectNode segment = (ObjectNode) messageArray.get(i);
-            if (segment == null) {
-                continue;
+        if (messageArray != null && !messageArray.isEmpty()) {
+            for (int i = 0; i < messageArray.size(); i++) {
+                ObjectNode segment = (ObjectNode) messageArray.get(i);
+                if (segment == null) {
+                    continue;
+                }
+                if ("forward".equals(segment.get("type").asText())) {
+                    ObjectNode data = (ObjectNode) segment.get("data");
+                    if (data != null) {
+                        ArrayNode content = (ArrayNode) data.get("content");
+                        if (content != null && !content.isEmpty()) {
+                            return normalizeForwardMessages(content);
+                        }
+                    }
+                }
             }
-            if ("forward".equals(segment.get("type").asText())) {
-                ObjectNode data = (ObjectNode) segment.get("data");
-                if (data != null) {
-                    ArrayNode content = (ArrayNode) data.get("content");
-                    if (content != null && !content.isEmpty()) {
-                        return normalizeForwardMessages(content);
+        }
+        // 2. 回退:从 elements 数组提取 (NapCat 原生格式, elementType=5 表示合并转发)
+        ArrayNode elements = (ArrayNode) payload.get("elements");
+        if (elements != null && !elements.isEmpty()) {
+            for (int i = 0; i < elements.size(); i++) {
+                ObjectNode element = (ObjectNode) elements.get(i);
+                if (element == null) {
+                    continue;
+                }
+                if (element.has("elementType") && element.get("elementType").asInt() == 5) {
+                    // forwardElement 包含转发消息内容
+                    ObjectNode forwardElement = (ObjectNode) element.get("forwardElement");
+                    if (forwardElement == null) {
+                        forwardElement = element; // 部分版本数据可能直接在元素上
+                    }
+                    if (forwardElement != null) {
+                        ArrayNode content = (ArrayNode) forwardElement.get("content");
+                        if (content != null && !content.isEmpty()) {
+                            log.info("从 elements 数组解析到合并转发消息详情, 共 {} 条子消息", content.size());
+                            return normalizeForwardMessages(content);
+                        }
                     }
                 }
             }
@@ -951,15 +974,15 @@ public class NapCatService {
                 try {
                     switch (type) {
                         case "IMAGE":
-                            localUrl = mediaDownloadService.downloadMediaToLocal(content, groupId, "images", ".jpg");
+                            localUrl = mediaDownloadService.downloadMediaToLocal(content, groupId, "images", ".jpg", null, true);
                             break;
                         case "VIDEO":
-                            localUrl = mediaDownloadService.downloadMediaToLocal(content, groupId, "video", ".mp4");
+                            localUrl = mediaDownloadService.downloadMediaToLocal(content, groupId, "video", ".mp4", null, true);
                             break;
                         case "VOICE":
                         case "AUDIO":
                         case "RECORD":
-                            localUrl = mediaDownloadService.downloadMediaToLocal(content, groupId, "voice", ".amr");
+                            localUrl = mediaDownloadService.downloadMediaToLocal(content, groupId, "voice", ".amr", null, true);
                             break;
                         default:
                             break;
@@ -1042,6 +1065,49 @@ public class NapCatService {
         if (content.contains("[CQ:reply")) return "REPLY";
         if (content.contains("[CQ:face")) return "FACE";
         return "TEXT";
+    }
+
+    /**
+     * 通过 OneBot 11 get_file API 获取文件的实际下载地址或本地路径。
+     * 用于视频/语音等 QQ 客户端本地缓存文件无法直接访问的场景。
+     *
+     * @param fileId 消息段中的 file 字段值
+     * @return data 节点（可能包含 file/file_name/file_size/base64/url），失败返回 null
+     */
+    public JsonNode getFile(String fileId) {
+        if (fileId == null || fileId.isBlank()) {
+            return null;
+        }
+        String baseUrl = onebotApiUrl != null && !onebotApiUrl.isBlank() ? onebotApiUrl : napcatApiUrl;
+        CloseableHttpClient httpClient = this.httpClient;
+        HttpPost httpPost = new HttpPost(baseUrl + "/get_file");
+        httpPost.setHeader("Content-Type", "application/json");
+        httpPost.setHeader("Authorization", "Bearer " + napcatToken);
+
+        ObjectNode body = objectMapper.createObjectNode();
+        body.put("file_id", fileId);
+        httpPost.setEntity(new StringEntity(body.toString(), java.nio.charset.StandardCharsets.UTF_8));
+
+        try (CloseableHttpResponse response = httpClient.execute(httpPost)) {
+            BufferedReader reader = new BufferedReader(
+                new InputStreamReader(response.getEntity().getContent(), java.nio.charset.StandardCharsets.UTF_8)
+            );
+            StringBuilder responseContent = new StringBuilder();
+            String line;
+            while ((line = reader.readLine()) != null) {
+                responseContent.append(line);
+            }
+            String responseStr = responseContent.toString();
+            JsonNode json = objectMapper.readTree(responseStr);
+            if ("ok".equals(json.path("status").asText()) && json.has("data")) {
+                return json.get("data");
+            }
+            log.warn("get_file 返回非预期: fileId={}, response={}", fileId,
+                    responseStr.length() > 300 ? responseStr.substring(0, 300) : responseStr);
+        } catch (Exception e) {
+            log.error("get_file 调用失败 (fileId={}): {}", fileId, e.getMessage());
+        }
+        return null;
     }
 
     /**

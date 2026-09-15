@@ -110,12 +110,40 @@ public class MessageParserService {
         // 检查 raw_message 是否包含 CQ 码（NapCat 已经格式化好的消息）
         boolean hasRawMessage = result.getRawMessage() != null && !result.getRawMessage().isEmpty();
         boolean isImageFromRaw = hasRawMessage && result.getRawMessage().contains("[CQ:image");
+        boolean isVideoFromRaw = hasRawMessage && result.getRawMessage().contains("[CQ:video");
+        boolean isVoiceFromRaw = hasRawMessage && (result.getRawMessage().contains("[CQ:record") || result.getRawMessage().contains("[CQ:voice"));
 
         // 从 NapCat elements 数组中提取消息内容和类型
         // 但对于图片消息，优先使用 raw_message 中的完整 CQ 码
         if (!isImageFromRaw) {
             log.info("尝试从 elements 数组解析消息");
             parseElements(json, result);
+        } else {
+            log.info("跳过 elements 解析，使用 raw_message 中的 CQ 码");
+        }
+
+        // 如果 elements 中有视频/语音且 raw_message 中没有对应 CQ 码，从 elements 提取 fileId
+        if (json.has("elements")) {
+            ArrayNode elements = (ArrayNode) json.get("elements");
+            for (int i = 0; i < elements.size(); i++) {
+                ObjectNode element = (ObjectNode) elements.get(i);
+                if (element == null) continue;
+                Integer elementType = element.has("elementType") ? element.get("elementType").asInt() : null;
+                if (elementType == null) continue;
+                if (elementType == 4 && !isVideoFromRaw) { // 视频
+                    ObjectNode videoElement = (ObjectNode) element.get("videoElement");
+                    if (videoElement != null) {
+                        String fileId = null;
+                        if (videoElement.has("fileId")) fileId = videoElement.get("fileId").asText();
+                        else if (videoElement.has("fileUuid")) fileId = videoElement.get("fileUuid").asText();
+                        else if (videoElement.has("file_id")) fileId = videoElement.get("file_id").asText();
+                        if (fileId != null && !fileId.isBlank()) {
+                            result.setTempFileId(fileId);
+                            log.info("从 videoElement 提取 fileId: {}", fileId);
+                        }
+                    }
+                }
+            }
         }
 
         if (json.has("message")) {
@@ -210,13 +238,32 @@ public class MessageParserService {
                         if (videoUrl == null || videoUrl.isEmpty()) {
                             videoUrl = videoElement.has("fileName") ? videoElement.get("fileName").asText() : null;
                         }
+                        // NapCat videoElement 可能包含 fileId/fileUuid/file_id 等字段作为真正的文件 ID
+                        String videoFileId = null;
+                        if (videoElement.has("fileId")) videoFileId = videoElement.get("fileId").asText();
+                        else if (videoElement.has("fileUuid")) videoFileId = videoElement.get("fileUuid").asText();
+                        else if (videoElement.has("file_id")) videoFileId = videoElement.get("file_id").asText();
+                        else if (videoElement.has("fileName")) videoFileId = videoElement.get("fileName").asText();
+                        log.info("视频元素字段: fileId={}, fileUuid={}, filePath={}, fileName={}, 所有字段={}",
+                                videoElement.has("fileId") ? videoElement.get("fileId").asText() : "null",
+                                videoElement.has("fileUuid") ? videoElement.get("fileUuid").asText() : "null",
+                                videoElement.has("filePath") ? videoElement.get("filePath").asText() : "null",
+                                videoElement.has("fileName") ? videoElement.get("fileName").asText() : "null",
+                                videoElement.toString());
                         if (videoUrl != null && !videoUrl.isEmpty()) {
                             String fileName = videoElement.has("fileName") ? videoElement.get("fileName").asText() : null;
                             if (fileName == null) fileName = "video.mp4";
                             msgBuilder.append("[CQ:video,file=").append(fileName).append(",url=").append(videoUrl).append("]");
                             result.setMsgType(Message.MessageType.VIDEO);
+                            // 将 fileId 暂存到 result 供 addMediaTask 使用
+                            result.setTempFileId(videoFileId);
                         }
                     }
+                    break;
+                case 5: // 合并转发消息
+                    result.setMsgType(Message.MessageType.FORWARD);
+                    msgBuilder.append("[CQ:forward]");
+                    log.info("解析合并转发消息(elements), elementType=5");
                     break;
                 case 6: // 文件消息
                     result.setMsgType(Message.MessageType.FILE);
@@ -379,8 +426,16 @@ public class MessageParserService {
     private void addMediaTask(MessageParseResult result, String rawMessage, String groupId,
                               String mediaType, String extension) {
         String url = mediaDownloadService.extractUrlFromCQ(rawMessage);
-        result.getMediaTasks().add(new MediaTaskPayload(rawMessage, url, groupId, mediaType, extension));
-        log.info("收集媒体任务: type={}, ext={}, groupId={}, url={}", mediaType, extension, groupId, url);
+        String fileId = result.getTempFileId() != null ? result.getTempFileId() : mediaDownloadService.extractFileFromCQ(rawMessage);
+        MediaTaskPayload task = new MediaTaskPayload(rawMessage, url, groupId, mediaType, extension, fileId);
+        // 能走到这里说明 payload 的消息段已佐证媒体存在(hasMediaSegment 校验通过),
+        // 其中的本地路径由 NapCat/QQ 填充、群成员无法伪造 → 标记为可信来源,
+        // 允许直接复制 QQ 本地缓存视频(视频消息的 url 就是本地绝对路径)。
+        task.setTrustedSource(true);
+        result.getMediaTasks().add(task);
+        log.info("收集媒体任务: type={}, ext={}, groupId={}, url={}, fileId={}", mediaType, extension, groupId, url, fileId);
+        // 清除临时 fileId，避免影响下一条消息
+        result.setTempFileId(null);
     }
 
     private void handleForward(MessageParseResult result, ObjectNode json, String rawMessage, String groupId) {

@@ -32,6 +32,17 @@ public class MediaTaskPayload implements Serializable {
     /** 文件扩展名：.jpg / .amr / .mp4 */
     private String extension;
 
+    /** QQ 文件 ID（用于 get_file API 调用） */
+    private String fileId;
+
+    /**
+     * 来源是否可信（消息段已佐证该媒体段真实存在）。
+     * 视频消息的 url 往往是 QQ 本地缓存绝对路径（如 ...\Tencent Files\<qq>\nt_qq\nt_data\Video\...mp4），
+     * 这类路径不在 uploads 目录内,但来自 NapCat 的真实消息段,群成员无法伪造,
+     * 因此可信来源允许直接复制;来自未佐证 CQ 码的路径仍受 uploads 越界保护。
+     */
+    private boolean trustedSource;
+
     public MediaTaskPayload() {
     }
 
@@ -41,6 +52,15 @@ public class MediaTaskPayload implements Serializable {
         this.groupId = groupId;
         this.mediaType = mediaType;
         this.extension = extension;
+    }
+
+    public MediaTaskPayload(String rawMessage, String url, String groupId, String mediaType, String extension, String fileId) {
+        this.rawMessage = rawMessage;
+        this.url = url;
+        this.groupId = groupId;
+        this.mediaType = mediaType;
+        this.extension = extension;
+        this.fileId = fileId;
     }
 
     public Long getMessageId() {
@@ -91,12 +111,29 @@ public class MediaTaskPayload implements Serializable {
         this.extension = extension;
     }
 
+    public String getFileId() {
+        return fileId;
+    }
+
+    public void setFileId(String fileId) {
+        this.fileId = fileId;
+    }
+
+    public boolean isTrustedSource() {
+        return trustedSource;
+    }
+
+    public void setTrustedSource(boolean trustedSource) {
+        this.trustedSource = trustedSource;
+    }
+
     @Override
     public String toString() {
         return "MediaTaskPayload{messageId=" + messageId
                 + ", mediaType=" + mediaType
                 + ", extension=" + extension
                 + ", groupId=" + groupId
+                + ", fileId=" + fileId
                 + ", url=" + url + '}';
     }
 }

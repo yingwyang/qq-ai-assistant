@@ -2,8 +2,12 @@ package com.qqai.service;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
+
+import com.fasterxml.jackson.databind.JsonNode;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -40,13 +44,58 @@ public class MediaDownloadService {
     @Value("${python.silk-script:./scripts/convert_silk_to_mp3.py}")
     private String silkScriptPath;
 
+    @Value("${napcat.onebot-api-url:http://localhost:6100}")
+    private String napCatApiUrl;
+
+    @Value("${napcat.token:}")
+    private String napCatToken;
+
+    /** 普通媒体(图片等)最大下载体积,单位 MB */
+    @Value("${file.download.max-size-mb:100}")
+    private int defaultMaxSizeMb;
+
+    /** 视频最大下载体积,单位 MB(QQ 视频常超过 100MB) */
+    @Value("${file.download.max-video-size-mb:300}")
+    private int videoMaxSizeMb;
+
+    @Autowired
+    @Lazy
+    private NapCatService napCatService;
+
+    /**
+     * 解析 NapCat API URL 中的主机名，用于 SSRF 白名单
+     */
+    private String napCatHost;
+
+    @jakarta.annotation.PostConstruct
+    private void init() {
+        try {
+            URL url = new URL(napCatApiUrl);
+            this.napCatHost = url.getHost().toLowerCase();
+        } catch (Exception e) {
+            this.napCatHost = "localhost";
+        }
+        log.info("NapCat SSRF 白名单主机: {}", napCatHost);
+    }
+
     public String downloadMediaToLocal(String cqMessage, String groupId, String mediaType, String defaultExt) {
+        return downloadMediaToLocal(cqMessage, groupId, mediaType, defaultExt, null, false);
+    }
+
+    public String downloadMediaToLocal(String cqMessage, String groupId, String mediaType, String defaultExt, String fileId) {
+        return downloadMediaToLocal(cqMessage, groupId, mediaType, defaultExt, fileId, false);
+    }
+
+    /**
+     * @param trustedSource 消息段已佐证(true)时,允许复制 uploads 之外的 QQ 本地缓存文件
+     *                      (视频消息的 url 即为此类本地绝对路径)
+     */
+    public String downloadMediaToLocal(String cqMessage, String groupId, String mediaType, String defaultExt,
+                                       String fileId, boolean trustedSource) {
         try {
             String mediaUrl = extractUrlFromCQ(cqMessage);
-            if (mediaUrl == null || mediaUrl.isEmpty()) {
-                log.warn("无法从CQ码中提取URL或路径: {}", cqMessage);
-                return null;
-            }
+            String cqFileId = extractFileFromCQ(cqMessage);
+            String effectiveFileId = (fileId != null && !fileId.isBlank()) ? fileId : cqFileId;
 
             String dateFolder = LocalDateTime.now().toLocalDate().toString();
             Path groupDir = Paths.get(localImagePath, mediaType, groupId, dateFolder);
@@ -55,19 +104,73 @@ public class MediaDownloadService {
             String fileName = UUID.randomUUID() + defaultExt;
             Path localPath = groupDir.resolve(fileName);
 
-            if (isLocalFilePath(mediaUrl)) {
-                // 本地文件路径：直接复制。
-                // 安全:群成员可在文本中伪造 "[CQ:image,path=C:/敏感文件]" 触发任意本地文件拷贝,
-                // 因此必须同时满足:(1) 文件扩展名与媒体类型匹配;(2) 路径位于 uploads 目录之内
-                // (NapCat 上报的本地缓存路径通常位于 NapCat 安装目录,不在 uploads 内,
-                //  这类合法路径会改走 HTTP url 字段下载,一般不会走到本地复制分支)。
-                Path sourcePath = Paths.get(mediaUrl).toAbsolutePath().normalize();
-                if (!Files.exists(sourcePath)) {
-                    log.warn("本地媒体文件不存在: {}", mediaUrl);
+            // ===== 第 1 级:CQ 码中的 url/path 直连 =====
+            if (mediaUrl != null && !mediaUrl.isEmpty()) {
+                String result = trySource(mediaUrl, localPath, groupId, mediaType, dateFolder, fileName, trustedSource);
+                if (result != null) {
+                    return result;
+                }
+                log.warn("CQ 直连获取失败,改用 NapCat get_file 兜底: mediaType={}, fileId={}, url={}",
+                        mediaType, effectiveFileId, mediaUrl);
+            } else {
+                log.warn("CQ 码中无 url/path,直接使用 NapCat get_file: mediaType={}, fileId={}, cq={}",
+                        mediaType, effectiveFileId, cqMessage);
+            }
+
+            // ===== 第 2 级:NapCat get_file 兜底 =====
+            // 视频/语音常见:QQ 只上报 fileId,或 CDN url 已过期(群消息延迟消费时尤其明显)
+            if (effectiveFileId == null || effectiveFileId.isBlank()) {
+                log.error("无法获取媒体: CQ 码既无可用 url/path,也没有 fileId 可用于 get_file。cq={}", cqMessage);
+                return null;
+            }
+            String resolved = resolveFileViaNapCatApi(cqMessage, effectiveFileId);
+            if (resolved == null) {
+                log.error("NapCat get_file 未能解析出可下载地址: fileId={}, cq={}", effectiveFileId, cqMessage);
+                return null;
+            }
+            // get_file 返回的是 NapCat 可信结果,允许读取 uploads 之外的本地缓存文件
+            String result = trySource(resolved, localPath, groupId, mediaType, dateFolder, fileName, true);
+            if (result == null) {
+                log.error("get_file 解析出的地址仍无法获取媒体: fileId={}, resolved={}", effectiveFileId, resolved);
+            }
+            return result;
+        } catch (Exception e) {
+            log.error("下载{}到本地时出错: {}", mediaType, e.getMessage(), e);
+            return null;
+        }
+    }
+
+    /**
+     * 按来源类型获取媒体到本地路径。
+     *
+     * @param source  HTTP(S) URL 或本地绝对路径
+     * @param trusted true = 来自 NapCat get_file 的可信结果(允许 uploads 之外的本地缓存路径);
+     *                false = 来自消息 CQ 码(必须是 media 目录内且扩展名匹配,防任意文件拷贝)
+     * @return 相对访问路径,失败返回 null
+     */
+    private String trySource(String source, Path localPath, String groupId, String mediaType,
+                             String dateFolder, String fileName, boolean trusted) throws IOException {
+        if (isLocalFilePath(source)) {
+            Path sourcePath = Paths.get(source).toAbsolutePath().normalize();
+            if (!Files.exists(sourcePath)) {
+                log.warn("本地媒体文件不存在: {}", sourcePath);
+                return null;
+            }
+            boolean extOk = isAllowedExtensionForType(sourcePath.getFileName().toString(), mediaType);
+            if (trusted) {
+                // 可信来源(NapCat 消息段/ get_file 结果):QQ 本地缓存视频的可能路径
+                // 仍要求它落在已知媒体目录内,避免被诱导读取系统文件
+                if (!isKnownMediaPath(sourcePath)) {
+                    log.warn("【安全】可信来源但路径不在已知媒体目录内,拒绝复制: {}", sourcePath);
                     return null;
                 }
-                if (!isAllowedExtensionForType(sourcePath.getFileName().toString(), mediaType)) {
-                    log.warn("【安全】本地文件扩展名与媒体类型不符,拒绝复制: {}", mediaUrl);
+                if (!extOk && hasExtension(sourcePath.getFileName().toString())) {
+                    log.warn("【安全】可信来源扩展名与媒体类型不符,拒绝复制: {}", sourcePath);
+                    return null;
+                }
+            } else {
+                if (!extOk) {
+                    log.warn("【安全】本地文件扩展名与媒体类型不符,拒绝复制: {}", source);
                     return null;
                 }
                 Path uploadsRoot = Paths.get("uploads").toAbsolutePath().normalize();
@@ -76,71 +179,175 @@ public class MediaDownloadService {
                     log.warn("【安全】本地文件路径越界,拒绝复制: {}", sourcePath);
                     return null;
                 }
-                Files.copy(sourcePath, localPath, StandardCopyOption.REPLACE_EXISTING);
-                log.info("复制本地媒体文件: {} -> {}", mediaUrl, localPath);
-            } else {
-                // 远程 URL：走 HTTP 下载（含 SSRF 防护）
-                URL url = new URL(mediaUrl);
-                String protocol = url.getProtocol();
-                if (!"http".equalsIgnoreCase(protocol) && !"https".equalsIgnoreCase(protocol)) {
-                    log.warn("SSRF防护：拒绝非 HTTP/HTTPS 协议: {}", protocol);
-                    return null;
-                }
-                String host = url.getHost();
-                if (isBlockedHost(host)) {
-                    log.warn("SSRF防护：拒绝访问内网/敏感地址: {}", host);
-                    return null;
-                }
-                HttpURLConnection connection = (HttpURLConnection) url.openConnection();
-                connection.setRequestMethod("GET");
-                connection.setConnectTimeout(10000);
-                connection.setReadTimeout(60000);
-                connection.setRequestProperty("User-Agent", "Mozilla/5.0");
-
-                if (connection.getResponseCode() != HttpURLConnection.HTTP_OK) {
-                    log.warn("下载{}失败，HTTP状态码: {}", mediaType, connection.getResponseCode());
-                    return null;
-                }
-
-                // 检查 Content-Length 头，超过 100MB 拒绝
-                long contentLength = connection.getContentLengthLong();
-                final long MAX_DOWNLOAD_SIZE = 100L * 1024 * 1024; // 100MB
-                if (contentLength > MAX_DOWNLOAD_SIZE) {
-                    log.warn("下载{}失败，文件大小超过100MB限制: {} bytes", mediaType, contentLength);
-                    return null;
-                }
-
-                try (InputStream inputStream = connection.getInputStream();
-                     FileOutputStream outputStream = new FileOutputStream(localPath.toFile())) {
-                    byte[] buffer = new byte[4096];
-                    int bytesRead;
-                    long totalRead = 0;
-                    while ((bytesRead = inputStream.read(buffer)) != -1) {
-                        totalRead += bytesRead;
-                        if (totalRead > MAX_DOWNLOAD_SIZE) {
-                            throw new IOException("下载文件超过100MB限制");
-                        }
-                        outputStream.write(buffer, 0, bytesRead);
-                    }
-                }
             }
+            Files.copy(sourcePath, localPath, StandardCopyOption.REPLACE_EXISTING);
+            log.info("复制本地媒体文件{}: {} -> {}", trusted ? "(NapCat可信)" : "", source, localPath);
+            return finishLocalFile(localPath, groupId, mediaType, dateFolder, fileName);
+        }
+        return downloadFromUrl(source, localPath, groupId, mediaType, dateFolder, fileName);
+    }
 
-            // 语音文件统一尝试转换为浏览器可播放的 mp3
-            if ("voice".equals(mediaType)) {
-                String mp3Path = convertVoiceToMp3(localPath.toString());
-                if (mp3Path != null) {
-                    Path mp3FileName = Paths.get(mp3Path).getFileName();
-                    String relativePath = "/images/" + mediaType + "/" + groupId + "/" + dateFolder + "/" + mp3FileName;
-                    Files.deleteIfExists(localPath);
-                    return relativePath;
-                }
-            }
+    private boolean hasExtension(String fileName) {
+        if (fileName == null) return false;
+        int dot = fileName.lastIndexOf('.');
+        return dot > 0 && dot < fileName.length() - 1;
+    }
 
-            return "/images/" + mediaType + "/" + groupId + "/" + dateFolder + "/" + fileName;
+    /**
+     * 已知媒体目录判定:QQ(NT) 缓存 / NapCat 缓存 / 本服务 uploads。
+     * 用于放行可信来源的本地视频路径,同时排除系统文件等敏感位置。
+     */
+    private boolean isKnownMediaPath(Path path) {
+        String p = path.toString().toLowerCase().replace('\\', '/');
+        if (p.contains("/nt_qq/") || p.contains("/nt_data/") || p.contains("tencent files")) return true;
+        if (p.contains("/napcat")) return true;
+        try {
+            String uploadsRoot = Paths.get("uploads").toAbsolutePath().normalize().toString().toLowerCase().replace('\\', '/');
+            return p.startsWith(uploadsRoot);
         } catch (Exception e) {
-            log.error("下载{}到本地时出错: {}", mediaType, e.getMessage(), e);
+            return false;
+        }
+    }
+
+    /**
+     * 本地文件落盘后的收尾:语音转 mp3(可选),返回前端可访问的相对路径。
+     */
+    private String finishLocalFile(Path localPath, String groupId, String mediaType,
+                                   String dateFolder, String fileName) {
+        if ("voice".equals(mediaType)) {
+            String mp3Path = convertVoiceToMp3(localPath.toString());
+            if (mp3Path != null) {
+                Path mp3FileName = Paths.get(mp3Path).getFileName();
+                try {
+                    Files.deleteIfExists(localPath);
+                } catch (IOException ignored) {
+                }
+                return "/images/" + mediaType + "/" + groupId + "/" + dateFolder + "/" + mp3FileName;
+            }
+        }
+        return "/images/" + mediaType + "/" + groupId + "/" + dateFolder + "/" + fileName;
+    }
+
+    /**
+     * 从远程 URL 下载文件到本地路径，返回相对访问路径（成功）或 null（失败）。
+     */
+    private String downloadFromUrl(String mediaUrl, Path localPath, String groupId,
+                                   String mediaType, String dateFolder, String fileName) throws IOException {
+        if (isBlockedUrl(mediaUrl)) {
+            log.warn("SSRF防护：拒绝访问内网/敏感地址: {}", mediaUrl);
             return null;
         }
+        URL url = new URL(mediaUrl);
+        HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+        connection.setRequestMethod("GET");
+        connection.setConnectTimeout(15000);
+        connection.setReadTimeout(120000);
+        connection.setRequestProperty("User-Agent", "Mozilla/5.0");
+        // 仅对 NapCat 自身的文件服务附带 token;QQ CDN 等第三方地址不应带 Authorization,
+        // 否则部分 CDN 会因未知认证头拒绝请求(视频下载常见 403)。
+        String targetHost = url.getHost() == null ? "" : url.getHost().toLowerCase();
+        boolean isNapCatHost = targetHost.equals(napCatHost)
+                || ("localhost".equals(napCatHost) && ("127.0.0.1".equals(targetHost) || "0.0.0.0".equals(targetHost)));
+        if (isNapCatHost && napCatToken != null && !napCatToken.isBlank()) {
+            connection.setRequestProperty("Authorization", "Bearer " + napCatToken);
+        }
+
+        int code = connection.getResponseCode();
+        if (code != HttpURLConnection.HTTP_OK) {
+            log.warn("下载{}失败，HTTP状态码: {}, url={}", mediaType, code, mediaUrl);
+            return null;
+        }
+
+        long maxBytes = maxDownloadBytes(mediaType);
+        long contentLength = connection.getContentLengthLong();
+        if (contentLength > maxBytes) {
+            log.warn("下载{}失败，文件大小 {} bytes 超过限制 {} bytes", mediaType, contentLength, maxBytes);
+            return null;
+        }
+
+        try (InputStream inputStream = connection.getInputStream();
+             FileOutputStream outputStream = new FileOutputStream(localPath.toFile())) {
+            byte[] buffer = new byte[8192];
+            int bytesRead;
+            long totalRead = 0;
+            while ((bytesRead = inputStream.read(buffer)) != -1) {
+                totalRead += bytesRead;
+                if (totalRead > maxBytes) {
+                    throw new IOException("下载文件超过大小限制: " + maxBytes + " bytes");
+                }
+                outputStream.write(buffer, 0, bytesRead);
+            }
+        }
+
+        // 校验下载的文件是否为有效媒体（非 JSON 错误响应）
+        long fileSize = Files.size(localPath);
+        if (fileSize < 1024) {
+            // 文件太小，可能是错误响应，读取内容检查
+            String contentPreview = Files.readString(localPath, java.nio.charset.StandardCharsets.UTF_8);
+            if (contentPreview.trim().startsWith("{") || contentPreview.contains("\"status\":\"failed\"")) {
+                log.warn("下载{}失败，返回错误响应: {}", mediaType, contentPreview);
+                Files.deleteIfExists(localPath);
+                return null;
+            }
+        }
+
+        log.info("媒体下载完成: type={}, bytes={}, url={}", mediaType, fileSize, mediaUrl);
+        return finishLocalFile(localPath, groupId, mediaType, dateFolder, fileName);
+    }
+
+    /**
+     * 各媒体类型允许的最大下载体积(字节)。视频默认放宽到 300MB(可在配置中调整)。
+     */
+    private long maxDownloadBytes(String mediaType) {
+        if ("video".equals(mediaType)) {
+            return Math.max(1, videoMaxSizeMb) * 1024L * 1024L;
+        }
+        return Math.max(1, defaultMaxSizeMb) * 1024L * 1024L;
+    }
+
+    /**
+     * 通过 NapCat get_file API 解析文件对应的实际可下载地址。
+     * 适用于视频/语音等上报为 QQ 本地缓存路径、后端无法直接访问的场景。
+     */
+    private String resolveFileViaNapCatApi(String cqMessage, String fileId) {
+        // 优先使用传入的 fileId，否则从 CQ 码提取
+        String effectiveFileId = (fileId != null && !fileId.isBlank()) ? fileId : extractFileFromCQ(cqMessage);
+        if (effectiveFileId == null || effectiveFileId.isBlank()) {
+            return null;
+        }
+        log.info("调用 NapCat get_file: fileId={}", effectiveFileId);
+        try {
+            JsonNode data = napCatService.getFile(effectiveFileId);
+            if (data == null) return null;
+            // 优先使用 url 字段（HTTP 可下载地址）
+            if (data.has("url") && !data.get("url").isNull()) {
+                String url = data.get("url").asText().trim();
+                if (!url.isEmpty()) return url;
+            }
+            // 其次使用 file 字段（本地绝对路径，通常在 NapCat 工作目录下）
+            if (data.has("file") && !data.get("file").isNull()) {
+                String path = data.get("file").asText().trim();
+                if (!path.isEmpty()) return path;
+            }
+            log.warn("get_file 返回数据中无 url/file 字段: {}", data);
+        } catch (Exception e) {
+            log.error("通过 NapCat get_file 解析文件失败: {}", e.getMessage());
+        }
+        return null;
+    }
+
+    /**
+     * 从 CQ 码中提取 file 字段（文件 ID）。
+     */
+    public String extractFileFromCQ(String cqMessage) {
+        if (cqMessage == null) return null;
+        Pattern pattern = Pattern.compile("file=`([^`]+)`");
+        Matcher matcher = pattern.matcher(cqMessage);
+        if (matcher.find()) return matcher.group(1).trim();
+        pattern = Pattern.compile("file=([^,\\]]+)");
+        matcher = pattern.matcher(cqMessage);
+        if (matcher.find()) return matcher.group(1).trim();
+        return null;
     }
 
     public String downloadGroupAvatarToLocal(String groupId) {
@@ -291,6 +498,32 @@ public class MediaDownloadService {
             return outputPath;
         }
         return null;
+    }
+
+    /**
+     * 检查 URL 是否被 SSRF 防护拦截。
+     * NapCat 配置的主机名会被加入白名单（因为 NapCat 是可信的内部服务）。
+     */
+    public boolean isBlockedUrl(String urlStr) {
+        if (urlStr == null || urlStr.isEmpty()) return true;
+        try {
+            URL url = new URL(urlStr);
+            String protocol = url.getProtocol();
+            if (!"http".equalsIgnoreCase(protocol) && !"https".equalsIgnoreCase(protocol)) {
+                return true; // 拒绝非 HTTP/HTTPS
+            }
+            String host = url.getHost().toLowerCase();
+            // NapCat 主机白名单（localhost 同时允许 127.0.0.1 / 0.0.0.0）
+            if (host.equals(napCatHost)) {
+                return false;
+            }
+            if ("localhost".equals(napCatHost) && ("127.0.0.1".equals(host) || "0.0.0.0".equals(host))) {
+                return false;
+            }
+            return isBlockedHost(host);
+        } catch (Exception e) {
+            return true;
+        }
     }
 
     /**
