@@ -53,6 +53,8 @@ astrbot:
   api-url: ${ASTRBOT_API_URL:http://localhost:6185}
   token: ${ASTRBOT_TOKEN:}
   data-path: ${ASTRBOT_DATA_PATH:D:/ai/Documents/qq-web/Astrbot/data}
+  # 后台自动摘要使用的模型;留空 = 交给 AstrBot 用默认模型(不要硬编码模型名)
+  summary-model: ${ASTRBOT_SUMMARY_MODEL:}
 
 # NapCat配置
 napcat:

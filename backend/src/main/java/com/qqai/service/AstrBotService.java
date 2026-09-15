@@ -48,6 +48,13 @@ public class AstrBotService {
     @Value("${server.address:localhost}")
     private String serverAddress;
 
+    /**
+     * 摘要使用的模型名。留空表示不指定,交给 AstrBot 使用其默认模型
+     * (此前硬编码 "gpt-3.5-turbo",在只挂了 Kimi/DeepSeek 等模型的实例上会被拒或返回空)。
+     */
+    @Value("${astrbot.summary-model:}")
+    private String summaryModel;
+
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     private Process astrbotProcess;
@@ -117,8 +124,13 @@ public class AstrBotService {
 
         ObjectNode requestBody = objectMapper.createObjectNode();
         requestBody.put("message", message);
-        requestBody.put("model", "gpt-3.5-turbo");
+        // AstrBot /api/v1/chat 必填字段:缺失会直接返回 {"status":"error","message":"Missing key: username"}
+        requestBody.put("username", "summarizer");
+        requestBody.put("enable_streaming", false);   // 关流式,响应格式稳定(与控制台链路一致)
         requestBody.put("temperature", 0.7);
+        if (summaryModel != null && !summaryModel.isBlank()) {
+            requestBody.put("model", summaryModel.trim());
+        }
 
         httpPost.setEntity(new StringEntity(requestBody.toString(), java.nio.charset.StandardCharsets.UTF_8));
 
@@ -129,13 +141,86 @@ public class AstrBotService {
             StringBuilder responseContent = new StringBuilder();
             String line;
             while ((line = reader.readLine()) != null) {
-                responseContent.append(line);
+                responseContent.append(line).append('\n');
             }
 
-            JsonNode responseJson = objectMapper.readTree(responseContent.toString());
-            JsonNode responseNode = responseJson.get("response");
-            return responseNode != null ? responseNode.asText() : null;
+            String rawBody = responseContent.toString();
+            String reply = extractChatReply(rawBody);
+            if (reply == null || reply.isBlank()) {
+                // 打出发送内容与响应片段,便于下次直接定位(此前只看到"空摘要",无从下手)
+                log.warn("AI摘要响应为空: status={}, template={}, body前300字符={}",
+                        response.getCode(), templateKey,
+                        rawBody.length() > 300 ? rawBody.substring(0, 300) : rawBody);
+                return null;
+            }
+            return reply;
         }
+    }
+
+    /**
+     * 解析 AstrBot /api/v1/chat 的响应,返回纯文本回复。
+     *
+     * AstrBot 返回的是 SSE 文本流(每行一条 `data: {json}`),
+     * 内容位于 type=plain 的 data 字段中;老版本/兼容场景也可能是整段 JSON。
+     * 两种格式都兼容,解析不到时返回 null。
+     */
+    public String extractChatReply(String rawBody) {
+        if (rawBody == null || rawBody.isBlank()) {
+            return null;
+        }
+        // 1) SSE 文本流:逐行取 `data: {...}` 中 type=plain 的 data
+        StringBuilder reply = new StringBuilder();
+        for (String line : rawBody.split("\n")) {
+            String trimmed = line.trim();
+            if (!trimmed.startsWith("data:")) {
+                continue;
+            }
+            String jsonData = trimmed.substring(5).trim();
+            if (jsonData.isEmpty() || "[DONE]".equals(jsonData)) {
+                continue;
+            }
+            try {
+                JsonNode json = objectMapper.readTree(jsonData);
+                String type = json.has("type") ? json.get("type").asText() : null;
+                if ("plain".equals(type)) {
+                    JsonNode data = json.get("data");
+                    if (data != null && !data.isNull()) {
+                        reply.append(data.asText());
+                    }
+                }
+            } catch (Exception ignore) {
+                // 忽略单行解析失败,继续处理后续行
+            }
+        }
+        String text = reply.toString().trim();
+        if (!text.isEmpty()) {
+            return text;
+        }
+
+        // 2) 兼容整段 JSON:response / data / text 字段
+        //    注意:必须排除错误响应,否则会把 {"status":"error","message":"Missing key: username"}
+        //    这类报错当成摘要写进数据库(曾发生过)。
+        try {
+            JsonNode json = objectMapper.readTree(rawBody.trim());
+            String status = json.has("status") ? json.get("status").asText() : null;
+            if ("error".equalsIgnoreCase(status) || "failed".equalsIgnoreCase(status)) {
+                log.warn("AstrBot 返回错误响应: {}", json.has("message") ? json.get("message").asText() : rawBody.trim());
+                return null;
+            }
+            if (json.has("retcode") && json.get("retcode").asInt(0) != 0) {
+                log.warn("AstrBot 返回非 0 retcode: {}", json.get("retcode").asInt());
+                return null;
+            }
+            for (String field : new String[]{"response", "data", "text"}) {
+                JsonNode node = json.get(field);
+                if (node != null && !node.isNull() && !node.asText().isBlank()) {
+                    return node.asText().trim();
+                }
+            }
+        } catch (Exception ignore) {
+            // 非 JSON,交给调用方按"空响应"处理
+        }
+        return null;
     }
 
     public String getApiUrl() {

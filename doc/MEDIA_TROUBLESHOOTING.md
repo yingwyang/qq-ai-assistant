@@ -181,11 +181,26 @@ QQ 客户端
 
 ### 启动后端（带日志文件，便于排查）
 
+方式一（推荐，稳定常驻）：打成 jar 后以独立进程运行，日志重定向到文件
+
+```powershell
+cd D:\ai\Documents\qq-web\qq-ai-assistant\backend
+mvn -q -DskipTests package
+Start-Process -FilePath "java" -ArgumentList "-jar","target\qq-ai-assistant-1.0-SNAPSHOT.jar" `
+  -WorkingDirectory "D:\ai\Documents\qq-web\qq-ai-assistant\backend" `
+  -RedirectStandardOutput "app-run.log" -RedirectStandardError "app-run.err.log" -WindowStyle Hidden
+```
+
+方式二（开发调试）：`mvn spring-boot:run`，日志可重定向到 `backend-run.log`
+
 ```powershell
 cd D:\ai\Documents\qq-web\qq-ai-assistant\backend
 Start-Process -FilePath "cmd.exe" -ArgumentList "/c","mvn -q spring-boot:run 1> backend-run.log 2> backend-run.err.log" `
   -WorkingDirectory "D:\ai\Documents\qq-web\qq-ai-assistant\backend" -WindowStyle Hidden
 ```
+
+> 排查时以实际在用的日志文件为准（`app-run.log` 或 `backend-run.log`）。
+> 相关：**AI 摘要链路**的排查见 `doc/AI_SUMMARY_TROUBLESHOOTING.md`。
 
 ### 关键配置项
 
