@@ -144,6 +144,10 @@ app:
     allowed-origins: http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174,http://localhost:5175,http://127.0.0.1:5175,http://localhost:5176,http://127.0.0.1:5176
   admin:
     init-password: ${ADMIN_INIT_PASSWORD:}
+  debug:
+    # 媒体事件抓包开关:true 时打印图片/视频事件的完整载荷(含聊天内容),仅排查媒体链路时临时开启
+    # 媒体链路排查手册见 doc/MEDIA_TROUBLESHOOTING.md
+    log-media-payload: ${APP_DEBUG_LOG_MEDIA_PAYLOAD:false}
 
 ---
 # Dev profile: 开发环境覆盖
