@@ -24,6 +24,9 @@ public class MessageParseResult {
     /** 轻量解析阶段收集的媒体任务（图片/语音/视频），由 Controller 入库后投递到 MQ */
     private List<MediaTaskPayload> mediaTasks = new ArrayList<>();
 
+    /** 临时存储 NapCat 视频 fileId，供 addMediaTask 使用 */
+    private String tempFileId;
+
     public Long getGroupId() {
         return groupId;
     }
@@ -142,5 +145,13 @@ public class MessageParseResult {
 
     public void setMediaTasks(List<MediaTaskPayload> mediaTasks) {
         this.mediaTasks = mediaTasks;
+    }
+
+    public String getTempFileId() {
+        return tempFileId;
+    }
+
+    public void setTempFileId(String tempFileId) {
+        this.tempFileId = tempFileId;
     }
 }

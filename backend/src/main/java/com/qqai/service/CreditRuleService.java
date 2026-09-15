@@ -83,6 +83,24 @@ public class CreditRuleService {
         if (updates.getPlanUltraPrice() != null) existing.setPlanUltraPrice(updates.getPlanUltraPrice());
         if (updates.getPlanUltraCredit() != null) existing.setPlanUltraCredit(updates.getPlanUltraCredit());
         if (updates.getPlanDurationDays() != null) existing.setPlanDurationDays(updates.getPlanDurationDays());
+        // 精细化计费字段
+        if (updates.getModelRates() != null) existing.setModelRates(updates.getModelRates());
+        if (updates.getImageExtraCost() != null) existing.setImageExtraCost(updates.getImageExtraCost());
+        if (updates.getAnalyzeBaseCost() != null) existing.setAnalyzeBaseCost(updates.getAnalyzeBaseCost());
+        if (updates.getAnalyzeCostPerMsg() != null) existing.setAnalyzeCostPerMsg(updates.getAnalyzeCostPerMsg());
+        if (updates.getAnalyzeTypeRates() != null) existing.setAnalyzeTypeRates(updates.getAnalyzeTypeRates());
+        if (updates.getTtsCharsPerCredit() != null) existing.setTtsCharsPerCredit(updates.getTtsCharsPerCredit());
+        if (updates.getTtsMinCost() != null) existing.setTtsMinCost(updates.getTtsMinCost());
+        if (updates.getMonthlyFreeQuota() != null) existing.setMonthlyFreeQuota(updates.getMonthlyFreeQuota());
+        if (updates.getOvertaxRate() != null) existing.setOvertaxRate(updates.getOvertaxRate());
+        // 精细化扩展字段
+        if (updates.getSmallMonthCardDiscount() != null) existing.setSmallMonthCardDiscount(updates.getSmallMonthCardDiscount());
+        if (updates.getLargeMonthCardDiscount() != null) existing.setLargeMonthCardDiscount(updates.getLargeMonthCardDiscount());
+        if (updates.getAllTierDiscount() != null) existing.setAllTierDiscount(updates.getAllTierDiscount());
+        if (updates.getContextExtraCostPerMsg() != null) existing.setContextExtraCostPerMsg(updates.getContextExtraCostPerMsg());
+        if (updates.getContextFreeMsgCount() != null) existing.setContextFreeMsgCount(updates.getContextFreeMsgCount());
+        if (updates.getDailyCapCost() != null) existing.setDailyCapCost(updates.getDailyCapCost());
+        if (updates.getTieredDiscountThresholds() != null) existing.setTieredDiscountThresholds(updates.getTieredDiscountThresholds());
         CreditRule saved = creditRuleRepository.save(existing);
         cachedRule.set(saved);
         log.info("积分规则已更新 id={}", RULE_ID);
@@ -126,6 +144,24 @@ public class CreditRuleService {
         rule.setPlanUltraPrice(new BigDecimal("629"));
         rule.setPlanUltraCredit(40000);
         rule.setPlanDurationDays(30);
+        // 精细化计费默认值
+        rule.setModelRates("{\"default\":1.0}");
+        rule.setImageExtraCost(5);
+        rule.setAnalyzeBaseCost(10);
+        rule.setAnalyzeCostPerMsg(1);
+        rule.setAnalyzeTypeRates("{\"default\":1.0}");
+        rule.setTtsCharsPerCredit(50);
+        rule.setTtsMinCost(2);
+        rule.setMonthlyFreeQuota(0);
+        rule.setOvertaxRate(1.5);
+        // 精细化扩展默认值
+        rule.setSmallMonthCardDiscount(0.9);   // 小月卡9折
+        rule.setLargeMonthCardDiscount(0.8);   // 大月卡8折
+        rule.setAllTierDiscount(0.7);          // ALL状态7折
+        rule.setContextExtraCostPerMsg(1);     // 每条历史消息+1积分
+        rule.setContextFreeMsgCount(10);       // 前10条免费
+        rule.setDailyCapCost(0);               // 0=不限
+        rule.setTieredDiscountThresholds("{\"1000\":0.95,\"5000\":0.9,\"20000\":0.85}");
         return rule;
     }
 }

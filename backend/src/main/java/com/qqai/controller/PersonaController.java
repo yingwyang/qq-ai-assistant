@@ -248,8 +248,7 @@ public class PersonaController {
             log.debug("【调试】更新AstrBot默认人格配置完成");
         } catch (Exception e) {
             // 忽略更新失败，不影响主流程
-            log.error("【调试】更新AstrBot默认人格配置失败: {}", e.getMessage());
-            e.printStackTrace();
+            log.error("【调试】更新AstrBot默认人格配置失败: {}", e.getMessage(), e);
         }
     }
 
@@ -280,8 +279,7 @@ public class PersonaController {
 
             log.debug("【调试】AstrBot 配置保存 API 响应: {}", response.getBody());
         } catch (Exception e) {
-            log.error("【调试】调用 AstrBot 配置保存 API 失败: {}", e.getMessage());
-            e.printStackTrace();
+            log.error("【调试】调用 AstrBot 配置保存 API 失败: {}", e.getMessage(), e);
         }
     }
 

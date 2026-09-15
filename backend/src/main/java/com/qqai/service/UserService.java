@@ -3,8 +3,7 @@ package com.qqai.service;
 import com.qqai.common.AvatarResolver;
 import com.qqai.entity.User;
 import com.qqai.entity.UserQqBinding;
-import com.qqai.repository.UserQqBindingRepository;
-import com.qqai.repository.UserRepository;
+import com.qqai.repository.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -14,6 +13,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
@@ -34,6 +34,45 @@ public class UserService {
 
     @Autowired
     private UserQqBindingRepository userQqBindingRepository;
+
+    @Autowired
+    private UserCreditRepository userCreditRepository;
+
+    @Autowired
+    private UserSettingsRepository userSettingsRepository;
+
+    @Autowired
+    private CreditTransactionRepository creditTransactionRepository;
+
+    @Autowired
+    private SubscriptionOrderRepository subscriptionOrderRepository;
+
+    @Autowired
+    private SignInRecordRepository signInRecordRepository;
+
+    @Autowired
+    private MonthlyBonusRecordRepository monthlyBonusRecordRepository;
+
+    @Autowired
+    private AstrBotConversationRepository astrBotConversationRepository;
+
+    @Autowired
+    private AstrBotMessageRepository astrBotMessageRepository;
+
+    @Autowired
+    private GroupRepository groupRepository;
+
+    @Autowired
+    private MessageRepository messageRepository;
+
+    @Autowired
+    private FileRecordRepository fileRecordRepository;
+
+    @Autowired
+    private GroupReadStateRepository readStateRepository;
+
+    @Autowired
+    private FileStorageService fileStorageService;
 
     @Autowired
     private PasswordEncoder passwordEncoder;
@@ -65,8 +104,154 @@ public class UserService {
         return userRepository.save(user);
     }
 
+    @Transactional
     public void delete(User user) {
+        Long userId = user.getId();
+        log.info("级联删除用户关联数据, userId={}", userId);
+
+        // 0. 先获取用户绑定的 QQ 号（在删除绑定之前）
+        List<UserQqBinding> bindings = userQqBindingRepository.findByUserId(userId);
+        List<String> boundQqNumbers = bindings.stream()
+                .map(UserQqBinding::getQqNumber)
+                .filter(java.util.Objects::nonNull)
+                .collect(java.util.stream.Collectors.toList());
+
+        // 0.1 清理群聊、消息、文件（基于绑定的 QQ 号）
+        if (!boundQqNumbers.isEmpty()) {
+            cleanupGroupsAndMessages(userId, boundQqNumbers);
+        }
+
+        // 1. 删除 QQ 绑定
+        userQqBindingRepository.deleteAll(bindings);
+        log.info("已清理 QQ 绑定, userId={}", userId);
+
+        // 2. 删除积分流水
+        creditTransactionRepository.deleteByUserId(userId);
+        log.info("已清理积分流水, userId={}", userId);
+
+        // 3. 删除订阅订单
+        subscriptionOrderRepository.deleteByUserId(userId);
+        log.info("已清理订阅订单, userId={}", userId);
+
+        // 4. 删除签到记录
+        signInRecordRepository.deleteByUserId(userId);
+        log.info("已清理签到记录, userId={}", userId);
+
+        // 5. 删除月卡奖励记录
+        monthlyBonusRecordRepository.deleteByUserId(userId);
+        log.info("已清理月卡奖励, userId={}", userId);
+
+        // 6. 删除积分账户
+        userCreditRepository.findByUserId(userId).ifPresent(credit -> {
+            userCreditRepository.delete(credit);
+            log.info("已清理积分账户, userId={}", userId);
+        });
+
+        // 7. 删除用户设置
+        userSettingsRepository.findByUserId(String.valueOf(userId)).ifPresent(settings -> {
+            userSettingsRepository.delete(settings);
+            log.info("已清理用户设置, userId={}", userId);
+        });
+
+        // 8. 删除 AstrBot 对话及消息
+        List<com.qqai.entity.AstrBotConversation> conversations =
+                astrBotConversationRepository.findByUserIdOrderByTimeUpdatedDesc(userId);
+        if (!conversations.isEmpty()) {
+            List<String> convIds = conversations.stream()
+                    .map(com.qqai.entity.AstrBotConversation::getConversationId)
+                    .collect(java.util.stream.Collectors.toList());
+            // 先删消息（外键约束）
+            for (String convId : convIds) {
+                astrBotMessageRepository.deleteByConversationId(convId);
+            }
+            // 再删对话
+            astrBotConversationRepository.deleteAll(conversations);
+            log.info("已清理 AstrBot 对话及消息, userId={}, 对话数={}", userId, conversations.size());
+        }
+
+        // 9. 最后删除用户
         userRepository.delete(user);
+        log.info("用户已删除, userId={}", userId);
+    }
+
+    /**
+     * 清理用户 QQ 绑定对应的群聊、消息和文件
+     */
+    private void cleanupGroupsAndMessages(Long userId, List<String> boundQqNumbers) {
+        // a. 查找用户绑定 QQ 号对应的群聊
+        List<com.qqai.entity.Group> groups = groupRepository.findByOwnerQqIn(boundQqNumbers);
+        if (groups.isEmpty()) {
+            log.info("用户无对应群聊, userId={}", userId);
+            return;
+        }
+
+        List<String> groupIds = groups.stream()
+                .map(com.qqai.entity.Group::getGroupId)
+                .collect(java.util.stream.Collectors.toList());
+        log.info("准备清理群聊及消息, userId={}, 群数={}", userId, groups.size());
+
+        // b. 查找群聊中的所有消息
+        List<com.qqai.entity.Message> messages = messageRepository.findByGroupIdIn(groupIds);
+        if (!messages.isEmpty()) {
+            // c. 提取消息关联的 fileId
+            List<String> fileIds = messages.stream()
+                    .map(com.qqai.entity.Message::getFileId)
+                    .filter(java.util.Objects::nonNull)
+                    .distinct()
+                    .collect(java.util.stream.Collectors.toList());
+
+            // c.1 从 content 中提取文件路径（格式: /images/..., /videos/..., /audios/..., /files/...）
+            List<String> contentPaths = new ArrayList<>();
+            java.util.regex.Pattern pathPattern = java.util.regex.Pattern.compile(
+                    "/(images|videos|audios|files)/[^\\s\\[\\]\"'<>]+");
+            for (com.qqai.entity.Message msg : messages) {
+                if (msg.getContent() != null) {
+                    java.util.regex.Matcher matcher = pathPattern.matcher(msg.getContent());
+                    while (matcher.find()) {
+                        contentPaths.add(matcher.group());
+                    }
+                }
+            }
+
+            // d. 删除文件记录及实际文件（通过 fileId）
+            if (!fileIds.isEmpty()) {
+                List<com.qqai.entity.FileRecord> fileRecords = fileRecordRepository.findAllByFileIdIn(fileIds);
+                for (com.qqai.entity.FileRecord fr : fileRecords) {
+                    try {
+                        fileStorageService.deleteFile(fr.getFileId());
+                    } catch (Exception e) {
+                        log.warn("删除 MinIO 文件失败（继续清理数据库）, fileId={}, error={}",
+                                fr.getFileId(), e.getMessage());
+                    }
+                }
+                fileRecordRepository.deleteByFileIdIn(fileIds);
+                log.info("已清理 fileId 对应的文件记录, 文件数={}", fileRecords.size());
+            }
+
+            // d.1 删除 content 中路径对应的实际文件（无 FileRecord 的情况）
+            if (!contentPaths.isEmpty()) {
+                List<String> uniquePaths = contentPaths.stream().distinct().collect(java.util.stream.Collectors.toList());
+                for (String path : uniquePaths) {
+                    try {
+                        fileStorageService.deleteByPath(path);
+                    } catch (Exception e) {
+                        log.warn("删除 content 路径对应文件失败, path={}, error={}", path, e.getMessage());
+                    }
+                }
+                log.info("已清理 content 路径对应的文件, 文件数={}", uniquePaths.size());
+            }
+
+            // e. 删除消息
+            messageRepository.deleteByGroupIdIn(groupIds);
+            log.info("已清理群聊消息, 消息数={}", messages.size());
+        }
+
+        // f. 删除群聊阅读状态（无论是否有消息）
+        readStateRepository.deleteByUserIdAndGroupIdIn(userId, groupIds);
+
+        // g. 删除群聊
+        groupRepository.deleteAll(groups);
+        log.info("已清理群聊, 群数={}", groups.size());
     }
 
     public boolean existsByUsername(String username) {

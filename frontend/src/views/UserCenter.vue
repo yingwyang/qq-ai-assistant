@@ -194,128 +194,6 @@
           />
         </div>
 
-        <div v-if="activeTab === 'media'" class="tab-panel">
-          <div class="panel-title">
-            <Icon name="image" :size="20" />
-            <h2>媒体文件管理</h2>
-          </div>
-          <div class="section-card">
-            <div class="section-card-header">
-              <h4>我的媒体文件</h4>
-              <button class="collapse-toggle" @click="isMediaCollapsed = !isMediaCollapsed">
-                <Icon :name="isMediaCollapsed ? 'expand' : 'collapse'" :size="14" />
-                <span>{{ isMediaCollapsed ? '展开' : '收起' }}</span>
-              </button>
-            </div>
-            <div v-show="!isMediaCollapsed" class="media-manager-body">
-              <div class="media-manager-card">
-                <div class="media-summary">
-                  <span>共 {{ mediaFilesTotal }} 个文件，占用 {{ formatBytes(currentFilesTotalSize) }}</span>
-                  <span v-if="selectedMediaFilesCount > 0" class="media-selected">
-                    已选 {{ selectedMediaFilesCount }} 个，{{ formatBytes(selectedMediaFilesTotalSize) }}
-                  </span>
-                  <span v-else class="media-selected">已选 0 个，0 B</span>
-                </div>
-
-                <div class="media-filter">
-                  <button
-                    v-for="type in ['ALL', 'IMAGE', 'VIDEO', 'AUDIO']"
-                    :key="type"
-                    class="chart-btn"
-                    :class="{ active: mediaFileFilter === type }"
-                    @click="setMediaFileFilter(type)"
-                  >
-                    {{ { ALL: '全部', IMAGE: '图片', VIDEO: '视频', AUDIO: '音频' }[type] }}
-                  </button>
-                </div>
-
-                <div v-if="mediaFilesLoading" class="media-loading">
-                  <div class="loading-spinner"></div>
-                  <span>加载中...</span>
-                </div>
-
-                <div v-else-if="mediaFiles.length === 0" class="media-empty">暂无文件</div>
-
-                <table v-else class="media-table">
-                  <thead>
-                    <tr>
-                      <th class="col-checkbox">
-                        <input
-                          type="checkbox"
-                          :checked="selectedMediaFilesCount === mediaFiles.length && mediaFiles.length > 0"
-                          :disabled="mediaFilesLoading || isPurging"
-                          @change="selectedMediaFilesCount === mediaFiles.length ? clearMediaFileSelection() : selectAllMediaFiles()"
-                        />
-                      </th>
-                      <th>文件名</th>
-                      <th>类型</th>
-                      <th>大小</th>
-                      <th>创建时间</th>
-                      <th class="col-action">操作</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr v-for="file in mediaFiles" :key="file.id">
-                      <td class="col-checkbox">
-                        <input
-                          type="checkbox"
-                          :checked="selectedMediaFileIds.has(file.id)"
-                          :disabled="mediaFilesLoading || isPurging"
-                          @change="toggleMediaFileSelection(file.id)"
-                        />
-                      </td>
-                      <td :title="file.fileName" class="file-name-cell" @click="openPreview(file)">{{ file.fileName }}</td>
-                      <td>{{ file.fileType }}</td>
-                      <td>{{ formatBytes(file.fileSize) }}</td>
-                      <td>{{ formatDate(file.createdAt) }}</td>
-                      <td class="col-action">
-                        <button class="btn-preview" @click="openPreview(file)">预览</button>
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-
-                <div v-if="mediaFiles.length > 0" class="media-pagination">
-                  <button
-                    :disabled="mediaFilePage <= 0 || mediaFilesLoading || isPurging"
-                    @click="mediaFilePage--; loadMediaFiles()"
-                  >
-                    上一页
-                  </button>
-                  <span>{{ mediaFilePage + 1 }} / {{ totalMediaPages }}</span>
-                  <button
-                    :disabled="mediaFilePage >= totalMediaPages - 1 || mediaFilesLoading || isPurging"
-                    @click="mediaFilePage++; loadMediaFiles()"
-                  >
-                    下一页
-                  </button>
-                </div>
-
-                <div v-if="purgeResult" class="purge-result">
-                  成功清理 {{ purgeResult.totalDeleted }} 个文件（约 {{ purgeResult.freedMB }}）
-                </div>
-
-                <div class="media-actions">
-                  <button
-                    class="btn-preview"
-                    :disabled="mediaFilesLoading || isPurging || mediaFiles.length === 0"
-                    @click="previewAllFiles"
-                  >
-                    预览全部
-                  </button>
-                  <button
-                    class="btn-delete"
-                    :disabled="selectedMediaFileIds.size === 0 || mediaFilesLoading || isPurging"
-                    @click="confirmDeleteSelected"
-                  >
-                    {{ isPurging ? '处理中...' : '删除选中' }}
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
         <div v-if="activeTab === 'profile'" class="tab-panel">
           <div class="panel-title">
             <Icon name="user" :size="20" />
@@ -720,6 +598,7 @@ import { useMediaManager } from '../composables/useMediaManager';
 import { useUserDashboardData } from '../composables/useUserDashboardData';
 import { useUserCreditsStore } from '../composables/useUserCreditsStore';
 import { useImagePreview } from '../composables/useImagePreview';
+import logger from '../utils/logger';
 
 export default {
   name: 'UserCenter',
@@ -731,7 +610,6 @@ export default {
     const autoFocusSignIn = ref(false);
     const autoOpenUpgrade = ref(false);
     const autoRelatedId = ref('');
-    const isMediaCollapsed = ref(false);
     const dashboardLoaded = ref(false);
 
     const systemMessage = ref('');
@@ -809,11 +687,9 @@ export default {
       { key: 'profile', icon: 'user', label: '个人信息' },
       { key: 'credits', icon: 'star', label: '用量管理' },
       { key: 'subscription', icon: 'layers', label: '订阅管理' },
-      { key: 'media', icon: 'image', label: '媒体管理' },
     ];
 
     const handleNavClick = (key) => {
-      console.log('nav click:', key);
       activeTab.value = key;
       if (key === 'dashboard') {
         if (!dashboardLoaded.value) {
@@ -916,13 +792,15 @@ export default {
       try {
         const result = await userApi.uploadAvatar(file, 'user');
         if (result) {
-          const newInfo = { ...userInfo.value, avatar: result.avatar || result };
-          if (typeof result === 'string') {
-            newInfo.avatar = result;
+          const avatarUrl = result.avatarUrl || result.url || result.avatar || (typeof result === 'string' ? result : null);
+          if (avatarUrl) {
+            const newInfo = { ...userInfo.value, avatar: avatarUrl };
+            localStorage.setItem('user_info', JSON.stringify(newInfo));
+            userInfo.value = newInfo;
+            showSystemMsg('头像上传成功');
+          } else {
+            showSystemMsg('头像上传失败：返回数据异常', 'error');
           }
-          localStorage.setItem('user_info', JSON.stringify(newInfo));
-          userInfo.value = newInfo;
-          showSystemMsg('头像上传成功');
         }
       } catch (error) {
         showSystemMsg('头像上传失败：' + error.message, 'error');
@@ -1055,18 +933,6 @@ export default {
       }
     };
 
-    const currentFilesTotalSize = computed(() =>
-      media.mediaFiles.value.reduce((sum, f) => sum + (f.fileSize || 0), 0)
-    );
-    const totalMediaPages = computed(() =>
-      Math.ceil(media.mediaFilesTotal.value / media.mediaFileSize.value) || 1
-    );
-
-    const confirmDeleteSelected = () => {
-      if (!window.confirm(`确定删除选中的 ${media.selectedMediaFileIds.value.size} 个文件吗？`)) return;
-      media.deleteSelectedMediaFiles();
-    };
-
     const formatDate = (dateStr) => {
       if (!dateStr) return '-';
       return new Date(dateStr).toLocaleString('zh-CN');
@@ -1116,7 +982,7 @@ export default {
           autoRelatedId.value = String(relatedId);
         }
       } catch (e) {
-        console.warn('解析 URL query 失败:', e);
+        logger.warn('解析 URL query 失败:', e);
       }
     };
 
@@ -1148,7 +1014,6 @@ export default {
       componentCtrl.loadNapCatWebUiUrl();
       componentCtrl.refreshQrCode();
       if (componentCtrl.autoLogin.value) componentCtrl.checkNapCatLogin();
-      media.loadMediaFiles();
       window.addEventListener('keydown', media.onPreviewKeydown);
 
       loadUserInfo();
@@ -1191,7 +1056,7 @@ export default {
     const formatBytes = (bytes) => formatFileSize(bytes);
 
     return {
-      activeTab, navItems, isMediaCollapsed,
+      activeTab, navItems,
       formatDate, formatBytes, goHome, handleAvatarError,
       handleNavClick,
       systemMessage, systemMessageType,
@@ -1209,25 +1074,9 @@ export default {
       startNapCat: componentCtrl.startNapCat,
       stopNapCat: componentCtrl.stopNapCat,
       openNapCatWebUI: componentCtrl.openNapCatWebUI,
-      mediaFiles: media.mediaFiles,
-      mediaFilesTotal: media.mediaFilesTotal,
-      mediaFileFilter: media.mediaFileFilter,
-      mediaFilePage: media.mediaFilePage,
-      mediaFileSize: media.mediaFileSize,
-      mediaFilesLoading: media.isLoading,
-      isPurging: media.isPurging,
-      purgeResult: media.purgeResult,
       selectedMediaFileIds: media.selectedMediaFileIds,
-      selectedMediaFilesCount: media.selectedMediaFilesCount,
-      selectedMediaFilesTotalSize: media.selectedMediaFilesTotalSize,
-      setMediaFileFilter: media.setMediaFileFilter,
-      loadMediaFiles: media.loadMediaFiles,
-      toggleMediaFileSelection: media.toggleMediaFileSelection,
-      selectAllMediaFiles: media.selectAllMediaFiles,
-      clearMediaFileSelection: media.clearMediaFileSelection,
       openPreview: media.openPreview,
       closePreview: media.closePreview,
-      previewAllFiles: media.previewAllFiles,
       previewMode: media.previewMode,
       previewFiles: media.previewFiles,
       currentPreviewFile: media.currentPreviewFile,
@@ -1252,9 +1101,6 @@ export default {
       previewSearchQuery,
       onPreviewSearch,
       confirmDeleteSelectedFromPreview,
-      confirmDeleteSelected,
-      currentFilesTotalSize,
-      totalMediaPages,
       // Dashboard
       dashboardStats: dashboard.stats,
       dashboardLoading: dashboard.isLoading,
@@ -1723,36 +1569,6 @@ export default {
   color: #7f8c8d;
 }
 
-.media-manager-body {
-  animation: fadeIn 0.2s ease;
-}
-
-.media-manager-card {
-  background: #fafafa;
-  border-radius: 6px;
-  padding: 16px;
-}
-
-.media-summary {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 12px;
-  font-size: 13px;
-  color: #666;
-}
-
-.media-selected {
-  color: #3498db;
-  font-weight: 500;
-}
-
-.media-filter {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 16px;
-}
-
 .chart-btn {
   padding: 4px 12px;
   background-color: white;
@@ -1766,85 +1582,6 @@ export default {
   background-color: #3498db;
   color: white;
   border-color: #3498db;
-}
-
-.media-loading {
-  text-align: center;
-  padding: 40px;
-  color: #7f8c8d;
-}
-
-.loading-spinner {
-  width: 24px;
-  height: 24px;
-  border: 3px solid #f3f3f3;
-  border-top: 3px solid #3498db;
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
-  margin: 0 auto 10px;
-}
-
-@keyframes spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
-}
-
-.media-empty {
-  text-align: center;
-  padding: 40px;
-  color: #7f8c8d;
-}
-
-.media-table {
-  width: 100%;
-  border-collapse: collapse;
-  background: white;
-  border-radius: 6px;
-  overflow: hidden;
-}
-
-.media-table th, .media-table td {
-  padding: 10px 12px;
-  text-align: left;
-  border-bottom: 1px solid #eee;
-}
-
-.media-table th {
-  background-color: #f8f9fa;
-  font-weight: 600;
-  font-size: 12px;
-  color: #666;
-}
-
-.col-checkbox {
-  width: 40px;
-}
-
-.col-action {
-  width: 80px;
-}
-
-.file-name-cell {
-  cursor: pointer;
-  color: #3498db;
-}
-
-.file-name-cell:hover {
-  text-decoration: underline;
-}
-
-.btn-preview {
-  padding: 4px 10px;
-  background-color: #3498db;
-  color: white;
-  border: none;
-  border-radius: 3px;
-  cursor: pointer;
-  font-size: 12px;
-}
-
-.btn-preview:hover {
-  background-color: #2980b9;
 }
 
 .btn-delete {
@@ -1864,50 +1601,6 @@ export default {
 .btn-delete:disabled {
   background-color: #bdc3c7;
   cursor: not-allowed;
-}
-
-.media-pagination {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  gap: 15px;
-  margin-top: 15px;
-  font-size: 13px;
-  color: #666;
-}
-
-.media-pagination button {
-  padding: 4px 12px;
-  background-color: white;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-  cursor: pointer;
-}
-
-.media-pagination button:hover:not(:disabled) {
-  background-color: #f0f0f0;
-}
-
-.media-pagination button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.purge-result {
-  text-align: center;
-  padding: 10px;
-  background-color: #d4edda;
-  color: #155724;
-  border-radius: 4px;
-  margin-bottom: 15px;
-  font-size: 13px;
-}
-
-.media-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-  margin-top: 15px;
 }
 
 .profile-card {

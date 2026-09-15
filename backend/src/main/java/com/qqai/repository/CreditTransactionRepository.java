@@ -40,6 +40,8 @@ public interface CreditTransactionRepository extends JpaRepository<CreditTransac
 
     long countByUserIdAndRelatedId(Long userId, String relatedId);
 
+    long countByUserIdAndTypeAndCreatedAtAfter(Long userId, CreditTransactionType type, LocalDateTime after);
+
     @Query("SELECT COALESCE(SUM(CASE WHEN ct.direction = 'IN' THEN ct.amount ELSE 0 END), 0) " +
            "FROM CreditTransaction ct WHERE ct.userId = :userId " +
            "AND (:type IS NULL OR ct.type = :type) " +
@@ -67,4 +69,6 @@ public interface CreditTransactionRepository extends JpaRepository<CreditTransac
                            @Param("start") LocalDateTime start,
                            @Param("end") LocalDateTime end,
                            @Param("relatedId") String relatedId);
+
+    void deleteByUserId(Long userId);
 }

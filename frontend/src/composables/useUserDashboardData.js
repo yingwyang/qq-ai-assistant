@@ -1,6 +1,7 @@
 import { ref, computed } from 'vue';
 import { userDashboardApi } from '../services/api';
 import { chartColors } from '../config/echarts';
+import logger from '../utils/logger';
 
 export function useUserDashboardData({ showSystemMsg }) {
   const stats = ref({
@@ -27,7 +28,7 @@ export function useUserDashboardData({ showSystemMsg }) {
     try {
       stats.value = await userDashboardApi.getStats();
     } catch (error) {
-      console.error('加载用户统计数据失败:', error);
+      logger.error('加载用户统计数据失败:', error);
     }
   };
 
@@ -36,7 +37,7 @@ export function useUserDashboardData({ showSystemMsg }) {
     try {
       messageTrend.value = await userDashboardApi.getMessageTrend(trendDays.value, trendInterval.value);
     } catch (error) {
-      console.error('加载用户消息趋势失败:', error);
+      logger.error('加载用户消息趋势失败:', error);
     } finally {
       trendLoading.value = false;
     }
@@ -52,7 +53,7 @@ export function useUserDashboardData({ showSystemMsg }) {
     try {
       groupRanking.value = await userDashboardApi.getGroupRanking();
     } catch (error) {
-      console.error('加载用户群聊排行失败:', error);
+      logger.error('加载用户群聊排行失败:', error);
     }
   };
 
@@ -60,7 +61,7 @@ export function useUserDashboardData({ showSystemMsg }) {
     try {
       messageTypeDistribution.value = await userDashboardApi.getMessageTypeDistribution();
     } catch (error) {
-      console.error('加载用户消息分布失败:', error);
+      logger.error('加载用户消息分布失败:', error);
     }
   };
 
@@ -68,7 +69,7 @@ export function useUserDashboardData({ showSystemMsg }) {
     try {
       aiTrend.value = await userDashboardApi.getAiTrend();
     } catch (error) {
-      console.error('加载用户AI趋势失败:', error);
+      logger.error('加载用户AI趋势失败:', error);
     }
   };
 

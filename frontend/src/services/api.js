@@ -388,8 +388,12 @@ export const userApi = {
   uploadAvatar: (file, type = 'user') => {
     const formData = new FormData();
     formData.append('file', file);
-    formData.append('type', type);
-    return uploadRequest('/avatar/upload', formData);
+    // 用户头像走 /api/user/avatar（普通用户可用）；群头像等管理员场景走 /api/avatar/upload
+    if (type === 'group' || type === 'bot') {
+      formData.append('type', type);
+      return uploadRequest('/avatar/upload', formData);
+    }
+    return uploadRequest('/user/avatar', formData);
   },
   getQqBindings: () => request('/user/qq-bindings'),
   sendQqBindingCode: (qqNumber) => request('/user/qq-bindings/send-code', {

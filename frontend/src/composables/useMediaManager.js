@@ -1,5 +1,6 @@
 import { ref, computed } from 'vue';
 import { messageApi } from '../services/api';
+import logger from '../utils/logger';
 
 export function useMediaManager({ showSystemMsg, loadDiskUsage } = {}) {
   // 媒体文件管理状态
@@ -73,7 +74,7 @@ export function useMediaManager({ showSystemMsg, loadDiskUsage } = {}) {
         mediaFilesTotal.value = 0;
       }
     } catch (error) {
-      console.error('加载媒体文件失败:', error);
+      logger.error('加载媒体文件失败:', error);
       mediaFilesError.value = error.message || '加载媒体文件失败';
       mediaFiles.value = [];
       mediaFilesTotal.value = 0;
@@ -128,7 +129,7 @@ export function useMediaManager({ showSystemMsg, loadDiskUsage } = {}) {
       await loadMediaFiles();
       if (loadDiskUsage) await loadDiskUsage();
     } catch (error) {
-      console.error('删除媒体文件失败:', error);
+      logger.error('删除媒体文件失败:', error);
       if (showSystemMsg) showSystemMsg(`删除媒体文件失败: ${error.message}`, 'error');
     }
   };
@@ -157,7 +158,7 @@ export function useMediaManager({ showSystemMsg, loadDiskUsage } = {}) {
       mediaFileCache.value = newCache;
       return allFiles;
     } catch (error) {
-      console.error('加载全部媒体文件失败:', error);
+      logger.error('加载全部媒体文件失败:', error);
       mediaFilesError.value = error.message || '加载全部媒体文件失败';
       return [];
     } finally {
@@ -183,7 +184,7 @@ export function useMediaManager({ showSystemMsg, loadDiskUsage } = {}) {
       await loadMediaFiles();
       if (loadDiskUsage) await loadDiskUsage();
     } catch (error) {
-      console.error('清理媒体文件失败:', error);
+      logger.error('清理媒体文件失败:', error);
       if (showSystemMsg) showSystemMsg(`清理失败: ${error.message}`, 'error');
     } finally {
       isPurging.value = false;
@@ -239,7 +240,7 @@ export function useMediaManager({ showSystemMsg, loadDiskUsage } = {}) {
         previewPage.value = page;
       }
     } catch (error) {
-      console.error('加载预览页失败:', error);
+      logger.error('加载预览页失败:', error);
     } finally {
       previewLoadingPage.value = false;
     }

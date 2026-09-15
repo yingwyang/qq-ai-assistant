@@ -152,6 +152,7 @@ import Icon from './Icon.vue';
 import { userApi } from '../services/api';
 import { showToast } from './Toast.vue';
 import { showConfirm } from './ConfirmDialog.vue';
+import logger from '../utils/logger';
 
 export default {
   components: { Icon },
@@ -221,7 +222,7 @@ export default {
         Object.assign(userInfo, profile);
         editForm.nickname = profile.nickname || '';
       } catch (error) {
-        console.error('加载用户信息失败:', error);
+        logger.error('加载用户信息失败:', error);
       }
     };
 
@@ -231,7 +232,7 @@ export default {
         const bindings = await userApi.getQqBindings();
         qqBindings.value = bindings;
       } catch (error) {
-        console.error('加载QQ绑定失败:', error);
+        logger.error('加载QQ绑定失败:', error);
       }
     };
 
@@ -255,7 +256,7 @@ export default {
         isEditing.value = false;
         emit('profile-updated');
       } catch (error) {
-        console.error('保存失败:', error);
+        logger.error('保存失败:', error);
         showToast('保存失败: ' + error.message, 'error');
       } finally {
         isSaving.value = false;
@@ -282,7 +283,7 @@ export default {
         }, 1000);
         showToast('验证码已发送到QQ私信，请查收', 'success');
       } catch (error) {
-        console.error('发送验证码失败:', error);
+        logger.error('发送验证码失败:', error);
         showToast('发送失败: ' + error.message, 'error');
       } finally {
         isSendingCode.value = false;
@@ -326,7 +327,7 @@ export default {
         emit('profile-updated');
         showToast('QQ账号绑定成功', 'success');
       } catch (error) {
-        console.error('绑定失败:', error);
+        logger.error('绑定失败:', error);
         showToast('绑定失败: ' + error.message, 'error');
       } finally {
         isBinding.value = false;
@@ -353,7 +354,7 @@ export default {
         emit('profile-updated');
         showToast('QQ账号已解绑', 'success');
       } catch (error) {
-        console.error('解绑失败:', error);
+        logger.error('解绑失败:', error);
         showToast('解绑失败: ' + error.message, 'error');
       }
     };
@@ -366,7 +367,7 @@ export default {
         emit('profile-updated');
         showToast('默认QQ账号已设置', 'success');
       } catch (error) {
-        console.error('设置失败:', error);
+        logger.error('设置失败:', error);
         showToast('设置失败: ' + error.message, 'error');
       }
     };
@@ -404,7 +405,7 @@ export default {
         emit('profile-updated');
         showToast('头像上传成功', 'success');
       } catch (error) {
-        console.error('上传失败:', error);
+        logger.error('上传失败:', error);
         showToast('上传失败: ' + error.message, 'error');
       } finally {
         isUploading.value = false;

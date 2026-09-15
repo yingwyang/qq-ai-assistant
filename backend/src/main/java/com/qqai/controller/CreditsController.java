@@ -93,12 +93,16 @@ public class CreditsController {
         CreditTransactionType txType = null;
         if (type != null && !type.isBlank()) {
             try { txType = CreditTransactionType.valueOf(type); }
-            catch (Exception ignore) {}
+            catch (Exception ignore) {
+                // 忽略：补偿逻辑失败不影响主流程
+            }
         }
         CreditDirection dir = null;
         if (direction != null && !direction.isBlank()) {
             try { dir = CreditDirection.valueOf(direction); }
-            catch (Exception ignore) {}
+            catch (Exception ignore) {
+                // 忽略：补偿逻辑失败不影响主流程
+            }
         }
         LocalDateTime startDt = parseStart(start);
         LocalDateTime endDt = parseEnd(end);

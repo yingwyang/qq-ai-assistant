@@ -4,6 +4,7 @@ import com.qqai.entity.Message;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -352,4 +353,16 @@ public interface MessageRepository extends JpaRepository<Message, Long> {
         Long result = countActiveMessagesByGroupIdAndSelfQqIn(groupId, selfQqList);
         return result != null ? result : 0L;
     }
+
+    /**
+     * 根据多个群号删除消息
+     */
+    @Modifying
+    @Query("DELETE FROM Message m WHERE m.groupId IN :groupIds")
+    void deleteByGroupIdIn(@Param("groupIds") List<String> groupIds);
+
+    /**
+     * 根据多个群号查找消息（用于级联删除前提取文件引用）
+     */
+    List<Message> findByGroupIdIn(List<String> groupIds);
 }

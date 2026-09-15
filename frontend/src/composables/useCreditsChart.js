@@ -28,23 +28,28 @@ export function useCreditsChart(trendData) {
       },
       legend: {
         data: ['收入', '支出', '净额'],
-        top: 0,
-        textStyle: { color: '#666', fontSize: 12 },
+        bottom: 0,
+        textStyle: { color: '#666' },
       },
-      grid: { left: '3%', right: '4%', bottom: '3%', top: '16%', containLabel: true },
+      grid: {
+        left: '3%',
+        right: '4%',
+        bottom: '12%',
+        top: '5%',
+        containLabel: true,
+      },
       xAxis: {
         type: 'category',
+        boundaryGap: false,
         data: dates,
         axisLine: { lineStyle: { color: '#ddd' } },
-        axisLabel: { color: '#999', fontSize: 11 },
-        axisTick: { show: false },
+        axisLabel: { color: '#666' },
       },
       yAxis: {
         type: 'value',
-        axisLine: { show: false },
-        axisTick: { show: false },
-        splitLine: { lineStyle: { color: '#f5f5f5', type: 'dashed' } },
-        axisLabel: { color: '#999', fontSize: 11 },
+        axisLine: { lineStyle: { color: '#ddd' } },
+        axisLabel: { color: '#666' },
+        splitLine: { lineStyle: { color: '#f5f5f5' } },
       },
       series: [
         {
@@ -54,8 +59,17 @@ export function useCreditsChart(trendData) {
           smooth: true,
           symbol: 'circle',
           symbolSize: 6,
-          lineStyle: { width: 2.5, color: chartColors.success },
-          itemStyle: { color: chartColors.success },
+          lineStyle: { width: 2, color: chartColors.earned || '#2ecc71' },
+          itemStyle: { color: chartColors.earned || '#2ecc71' },
+          areaStyle: {
+            color: {
+              type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
+              colorStops: [
+                { offset: 0, color: 'rgba(46, 204, 113, 0.25)' },
+                { offset: 1, color: 'rgba(46, 204, 113, 0.01)' },
+              ],
+            },
+          },
         },
         {
           name: '支出',
@@ -64,8 +78,17 @@ export function useCreditsChart(trendData) {
           smooth: true,
           symbol: 'circle',
           symbolSize: 6,
-          lineStyle: { width: 2.5, color: chartColors.danger },
-          itemStyle: { color: chartColors.danger },
+          lineStyle: { width: 2, color: chartColors.spent || '#e74c3c' },
+          itemStyle: { color: chartColors.spent || '#e74c3c' },
+          areaStyle: {
+            color: {
+              type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
+              colorStops: [
+                { offset: 0, color: 'rgba(231, 76, 60, 0.25)' },
+                { offset: 1, color: 'rgba(231, 76, 60, 0.01)' },
+              ],
+            },
+          },
         },
         {
           name: '净额',
@@ -73,8 +96,13 @@ export function useCreditsChart(trendData) {
           data: netArr,
           barWidth: '30%',
           itemStyle: {
-            borderRadius: [4, 4, 0, 0],
-            color: 'rgba(149, 165, 166, 0.6)',
+            color: (params) => {
+              const v = params.value;
+              return v >= 0
+                ? (chartColors.earned || '#2ecc71')
+                : (chartColors.spent || '#e74c3c');
+            },
+            borderRadius: [3, 3, 0, 0],
           },
         },
       ],
@@ -83,5 +111,3 @@ export function useCreditsChart(trendData) {
 
   return { trendChartOption };
 }
-
-export default useCreditsChart;

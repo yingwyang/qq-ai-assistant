@@ -210,6 +210,7 @@ import { useTheme } from '../composables/useTheme';
 import { authApi, logout } from '../services/api';
 import { useAutoStartAfterLogin } from '../composables/useAutoStartAfterLogin';
 import { useUserCreditsStore } from '../composables/useUserCreditsStore';
+import logger from '../utils/logger';
 
 export default {
   name: 'HomeView',
@@ -374,12 +375,11 @@ export default {
               localStorage.setItem('user_role', userData.role);
             }
           } else {
-            console.log('登录验证失败，跳转登录页');
             router.replace('/login');
             return;
           }
         } catch (e) {
-          console.log('登录验证异常:', e);
+          logger.warn('登录验证异常:', e);
           router.replace('/login');
           return;
         }
@@ -417,7 +417,7 @@ export default {
 
     const handleNapCatStatusChanged = (status) => {
       // NapCat登录状态变化，可以在这里处理相关逻辑
-      console.log('NapCat登录状态:', status);
+      logger.debug('NapCat登录状态:', status);
     };
 
     const handleTabChange = (tab) => {
@@ -429,7 +429,7 @@ export default {
       try {
         await logout();
       } catch (e) {
-        console.warn('后端登出失败（忽略）:', e);
+        logger.warn('后端登出失败（忽略）:', e);
       }
 
       // 2. 清除状态和 localStorage
@@ -510,7 +510,7 @@ export default {
           avatar: userData.avatar
         };
       } catch (error) {
-        console.error('刷新用户信息失败:', error);
+        logger.error('刷新用户信息失败:', error);
       }
     };
 

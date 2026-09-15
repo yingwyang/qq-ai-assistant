@@ -341,6 +341,7 @@ import Icon from '../Icon.vue';
 import { subscriptionApi, creditsApi, authApi } from '../../services/api';
 import { showToast } from '../Toast.vue';
 import { showConfirm } from '../ConfirmDialog.vue';
+import logger from '../../utils/logger';
 
 // 后端 SubscriptionTier 枚举与 planCode 映射
 // 后端 tier: FREE / LITE / PRO / PROPLUS / ULTRA
@@ -555,7 +556,7 @@ export default {
           remainingDays.value = 0;
         }
       } catch (err) {
-        console.warn('加载积分余额失败:', err.message);
+        logger.warn('加载积分余额失败:', err.message);
         currentPlan.value = { planCode: 'FREE', tier: 'FREE', planName: '免费版', features: [] };
       }
     }

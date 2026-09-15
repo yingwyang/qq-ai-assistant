@@ -1,6 +1,7 @@
 import { ref, computed } from 'vue';
 import { creditsApi } from '../services/api';
 import { showToast } from '../components/Toast.vue';
+import logger from '../utils/logger';
 
 // ===== 全局单例状态（module-level ref，多组件共享同一引用）=====
 const balance = ref(0);
@@ -46,7 +47,7 @@ export function useUserCreditsStore() {
       loaded = true;  // 成功才标记，失败允许后续引用时重试
     } catch (error) {
       // 401 已由 api.js 统一处理（清 token + auth:logout），这里静默失败
-      console.error('加载积分余额失败:', error);
+      logger.error('加载积分余额失败:', error);
     } finally {
       loading.value = false;
     }

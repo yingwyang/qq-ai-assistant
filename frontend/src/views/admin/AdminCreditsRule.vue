@@ -66,6 +66,93 @@
       </div>
 
       <div class="section-card">
+        <h4>精细化计费</h4>
+        <div class="rule-form-grid">
+          <div class="rule-item">
+            <label>模型费率映射（JSON）</label>
+            <textarea v-model="ruleForm.modelRates" class="config-input json-textarea" rows="3"></textarea>
+            <small>如 {"default":1.0, "gpt-4":3.0}</small>
+          </div>
+          <div class="rule-item">
+            <label>每张图片额外费用</label>
+            <input type="number" v-model.number="ruleForm.imageExtraCost" min="0" class="config-input" />
+          </div>
+          <div class="rule-item">
+            <label>分析基础费用</label>
+            <input type="number" v-model.number="ruleForm.analyzeBaseCost" min="0" class="config-input" />
+          </div>
+          <div class="rule-item">
+            <label>分析每条消息增量</label>
+            <input type="number" v-model.number="ruleForm.analyzeCostPerMsg" min="0" class="config-input" />
+          </div>
+          <div class="rule-item">
+            <label>分析类型倍率（JSON）</label>
+            <textarea v-model="ruleForm.analyzeTypeRates" class="config-input json-textarea" rows="3"></textarea>
+            <small>如 {"default":1.0, "summary":1.0, "analysis":1.5}</small>
+          </div>
+          <div class="rule-item">
+            <label>TTS 每N字符扣1积分</label>
+            <input type="number" v-model.number="ruleForm.ttsCharsPerCredit" min="1" class="config-input" />
+          </div>
+          <div class="rule-item">
+            <label>TTS 最小消耗</label>
+            <input type="number" v-model.number="ruleForm.ttsMinCost" min="0" class="config-input" />
+          </div>
+          <div class="rule-item">
+            <label>月度免费配额（次）</label>
+            <input type="number" v-model.number="ruleForm.monthlyFreeQuota" min="0" class="config-input" />
+            <small>0=不免费，每月前N次AI聊天免费</small>
+          </div>
+          <div class="rule-item">
+            <label>超配额费率倍数</label>
+            <input type="number" v-model.number="ruleForm.overtaxRate" min="1" step="0.1" class="config-input" />
+            <small>1.0=不涨价，1.5=涨50%</small>
+          </div>
+        </div>
+      </div>
+
+      <div class="section-card">
+        <h4>月卡折扣 & 上下文增量 & 每日封顶 & 阶梯累计折扣</h4>
+        <div class="rule-form-grid">
+          <div class="rule-item">
+            <label>小月卡折扣（0.01~1.0）</label>
+            <input type="number" v-model.number="ruleForm.smallMonthCardDiscount" min="0.01" max="1" step="0.01" class="config-input" />
+            <small>0.9=9折，1.0=无折扣（仅月卡生效）</small>
+          </div>
+          <div class="rule-item">
+            <label>大月卡折扣（0.01~1.0）</label>
+            <input type="number" v-model.number="ruleForm.largeMonthCardDiscount" min="0.01" max="1" step="0.01" class="config-input" />
+            <small>0.8=8折，1.0=无折扣</small>
+          </div>
+          <div class="rule-item">
+            <label>ALL 状态折扣（0.01~1.0）</label>
+            <input type="number" v-model.number="ruleForm.allTierDiscount" min="0.01" max="1" step="0.01" class="config-input" />
+            <small>0.7=7折，大小月卡同时拥有时生效</small>
+          </div>
+          <div class="rule-item">
+            <label>上下文每条增量积分</label>
+            <input type="number" v-model.number="ruleForm.contextExtraCostPerMsg" min="0" class="config-input" />
+            <small>超过免费条数后每条历史消息+N积分</small>
+          </div>
+          <div class="rule-item">
+            <label>上下文免费条数</label>
+            <input type="number" v-model.number="ruleForm.contextFreeMsgCount" min="0" class="config-input" />
+            <small>前 N 条历史消息不额外计费</small>
+          </div>
+          <div class="rule-item">
+            <label>每日封顶消耗</label>
+            <input type="number" v-model.number="ruleForm.dailyCapCost" min="0" class="config-input" />
+            <small>单日累计达到后本次免费，0=不限</small>
+          </div>
+          <div class="rule-item grid-span-2">
+            <label>阶梯累计折扣阈值（JSON）</label>
+            <textarea v-model="ruleForm.tieredDiscountThresholds" class="config-input json-textarea" rows="2"></textarea>
+            <small>例 {"1000":0.95,"5000":0.9,"20000":0.85} 本月累计≥1000时95折，≥5000时9折</small>
+          </div>
+        </div>
+      </div>
+
+      <div class="section-card">
         <h4>套餐配置（4 档直购积分，价格/积分以数据库规则为准）</h4>
         <div class="plans-edit-grid">
           <div v-for="plan in planMeta" :key="plan.key" class="plan-edit-card">
@@ -138,4 +225,9 @@ export default {
 .rule-actions { display: flex; justify-content: flex-end; padding-top: 8px; }
 .rule-save-btn { min-width: 160px; }
 .readonly-tip { display: block; margin-top: 10px; color: #999; font-size: 12px; }
+.json-textarea { font-family: monospace; font-size: 12px; resize: vertical; min-height: 60px; }
+.grid-span-2 { grid-column: span 2; }
+@media (max-width: 600px) {
+  .grid-span-2 { grid-column: span 1; }
+}
 </style>

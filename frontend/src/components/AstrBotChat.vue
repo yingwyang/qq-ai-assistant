@@ -512,6 +512,7 @@ import { filterToolJson, processAstrBotResponse } from '../utils/messageFilter';
 import { showToast } from './Toast.vue';
 import PersonaManager from './PersonaManager.vue';
 import { formatMessageTime } from '../utils/formatTime';
+import logger from '../utils/logger';
 export default {
   name: 'AstrBotChat',
   components: { Icon, RichTextRenderer, PersonaManager },
@@ -812,7 +813,7 @@ export default {
                 ? llmModel.value
                 : (astrbotModels[0] ? astrbotModels[0].id : '');
               if (preferred && currentModel.value !== preferred) {
-                console.info('模型回退:', currentModel.value || '(空', '→', preferred);
+                logger.info('模型回退:', currentModel.value || '(空', '→', preferred);
                 currentModel.value = preferred;
                 // 同步更新 localStorage，避免下次又恢复到已禁用的模型
                 localStorage.setItem('astrbot_current_model', preferred);
@@ -823,7 +824,7 @@ export default {
             }
           }
         } catch (e) {
-          console.warn('AstrBot 模型接口请求失败:', e.message);
+          logger.warn('AstrBot 模型接口请求失败:', e.message);
           const raw = (e.message || '未知错误').toString();
           let tip = raw;
           if (/401|403|未授权|Unauthorized/i.test(raw)) {
@@ -870,7 +871,7 @@ export default {
           localStorage.setItem('llm_model', m);
         }
       } catch (e) {
-        console.warn('保存模型选择失败:', e);
+        logger.warn('保存模型选择失败:', e);
       }
     };
 
@@ -916,7 +917,7 @@ export default {
           showToast('获取模型列表失败', 'error');
         }
       } catch (error) {
-        console.error('获取模型列表失败:', error);
+        logger.error('获取模型列表失败:', error);
         showToast('获取模型列表失败', 'error');
       }
     };
@@ -960,7 +961,7 @@ export default {
           }
         }
       } catch (error) {
-        console.error('加载用户设置失败:', error);
+        logger.error('加载用户设置失败:', error);
       }
     };
     
@@ -989,7 +990,7 @@ export default {
         });
         showToast('设置已保存', 'success');
       } catch (error) {
-        console.error('保存用户设置到后端失败:', error);
+        logger.error('保存用户设置到后端失败:', error);
         showToast('设置保存失败', 'error');
       }
 
@@ -1036,21 +1037,13 @@ export default {
     const handleBotAvatarUpload = async (event) => {
       const file = event.target.files[0];
       if (file) {
-        const formData = new FormData();
-        formData.append('file', file);
-        formData.append('type', 'bot');
-        
-        console.log('准备上传文件:', file.name, '大小:', file.size);
-        console.log('FormData内容:', [...formData.entries()]);
-        
         try {
-          const response = await userApi.uploadAvatar(formData);
-          console.log('上传响应:', response);
-          if (response && response.url) {
-            botAvatar.value = response.url;
-            console.log('头像URL:', botAvatar.value);
+          const response = await userApi.uploadAvatar(file, 'bot');
+          const avatarUrl = response?.url || response?.avatarUrl;
+          if (avatarUrl) {
+            botAvatar.value = avatarUrl;
           } else {
-            console.error('头像上传失败:', response?.message || '未知错误');
+            logger.error('头像上传失败:', response?.message || '未知错误');
             // 降级为本地预览
             const reader = new FileReader();
             reader.onload = (e) => {
@@ -1059,7 +1052,7 @@ export default {
             reader.readAsDataURL(file);
           }
         } catch (error) {
-          console.error('头像上传失败:', error);
+          logger.error('头像上传失败:', error);
           // 降级为本地预览
           const reader = new FileReader();
           reader.onload = (e) => {
@@ -1078,7 +1071,7 @@ export default {
         const list = response?.data !== undefined ? response.data : (response || []);
         conversations.value = Array.isArray(list) ? list : [];
       } catch (error) {
-        console.error('加载对话列表失败:', error);
+        logger.error('加载对话列表失败:', error);
         conversations.value = [];
       }
     };
@@ -1137,7 +1130,7 @@ export default {
               currentModel.value = fallback.id;
               localStorage.setItem(`astrbot_current_model_${conversationId}`, fallback.id);
               localStorage.setItem('astrbot_current_model', fallback.id);
-              console.info('会话模型已禁用，回退:', candidateModel, '→', fallback.id);
+              logger.info('会话模型已禁用，回退:', candidateModel, '→', fallback.id);
             }
           }
         }
@@ -1147,14 +1140,14 @@ export default {
         const msg = error?.message || '';
         if (msg.includes('对话不存在') || msg.includes('不存在')) {
           // 对话已失效，清空当前对话并提示用户新建
-          console.warn('当前对话已失效:', conversationId);
+          logger.warn('当前对话已失效:', conversationId);
           currentConversationId.value = null;
           currentConversationTitle.value = '';
           messages.value = [];
           localStorage.removeItem('astrbot_current_conversation');
           showToast('当前对话已失效，请新建对话', 'warning');
         } else {
-          console.error('加载对话失败:', error);
+          logger.error('加载对话失败:', error);
         }
       } finally {
         isLoading.value = false;
@@ -1180,20 +1173,18 @@ export default {
           localStorage.setItem('astrbot_current_conversation', newConv.conversationId);
         }
       } catch (error) {
-        console.error('创建新对话失败:', error);
+        logger.error('创建新对话失败:', error);
       }
     };
 
     // 显示删除确认弹窗
     const showDeleteConfirm = (conversationId) => {
-      console.log('🗑️ 显示删除确认弹窗，conversationId:', conversationId);
       conversationToDelete.value = conversationId;
       showConfirmDialog.value = true;
     };
 
     // 取消删除
     const cancelDelete = () => {
-      console.log('❌ 用户取消删除');
       showConfirmDialog.value = false;
       conversationToDelete.value = null;
     };
@@ -1202,23 +1193,18 @@ export default {
     const confirmDelete = async () => {
       const conversationId = conversationToDelete.value;
       if (!conversationId) return;
-      
-      console.log('✅ 用户确认删除，开始执行删除操作');
+
       showConfirmDialog.value = false;
       isLoading.value = true;
-      
+
       try {
-        console.log('📡 调用 API 删除对话...');
         const response = await astrBotApi.deleteConversation(conversationId);
-        console.log('API 响应:', response);
-        
+
         if (!response || response.status === 'ok' || response.deleted) {
           // 从列表中移除
           const index = conversations.value.findIndex(c => c.conversationId === conversationId);
-          console.log('找到对话在列表中的索引:', index);
           if (index > -1) {
             conversations.value.splice(index, 1);
-            console.log('✅ 对话已从列表中移除');
           }
           // 如果删除的是当前对话，清空当前对话
           if (currentConversationId.value === conversationId) {
@@ -1228,11 +1214,11 @@ export default {
             localStorage.removeItem('astrbot_current_conversation');
           }
         } else {
-          console.error('❌ API 返回错误:', response);
+          logger.error('❌ API 返回错误:', response);
           showToast('删除失败: ' + (response?.message || '未知错误'), 'error');
         }
       } catch (error) {
-        console.error('❌ 删除对话失败:', error);
+        logger.error('❌ 删除对话失败:', error);
         showToast('删除对话失败: ' + error.message, 'error');
       } finally {
         isLoading.value = false;
@@ -1285,7 +1271,7 @@ export default {
           }
         }
       } catch (error) {
-        console.error('发送消息失败:', error);
+        logger.error('发送消息失败:', error);
         // 积分不足：自定义提示条
         if (error && error.errorCode === 'INSUFFICIENT_CREDITS') {
           const need = (error.details && error.details.need) || 0;
@@ -1373,7 +1359,7 @@ export default {
         }
         showToast('已复制到剪贴板', 'success');
       } catch (error) {
-        console.error('复制失败:', error);
+        logger.error('复制失败:', error);
         showToast('复制失败', 'error');
       }
     };
@@ -1429,7 +1415,7 @@ export default {
           showToast(result?.message || '语音生成失败', 'error');
         }
       } catch (error) {
-        console.error('语音生成失败:', error);
+        logger.error('语音生成失败:', error);
         showToast('语音生成失败: ' + (error.message || '未知错误'), 'error');
       } finally {
         message.voiceGenerating = false;
@@ -1519,11 +1505,10 @@ export default {
             params.conversationId = currentConversationId.value;
           }
 
-          console.log('[analyze-selected] 请求参数:', params);
+          logger.debug('[analyze-selected] 请求参数:', params);
           const raw = await astrBotApi.analyzeSelected(params);
           // 兼容两种返回包装：{status, analysis, ...} 或直接返回对象
           result = (raw && raw.status === 'ok') ? raw : (raw || {});
-          console.log('[analyze-selected] 响应:', result);
 
         // ============ 旧链路：没传 messageIds（老版本 ChatInterface）时 fallback 走 sendMessage ============
         } else if (data.prompt) {
@@ -1535,7 +1520,7 @@ export default {
           if (props.groupId) request.groupId = props.groupId;
           if (props.userId) request.userId = props.userId;
           if (props.userNickname) request.userNickname = props.userNickname;
-          console.log('[fallback sendMessage] 分析请求:', request);
+          logger.debug('[fallback sendMessage] 分析请求:', request);
           const response = await astrBotApi.sendMessage(request);
           result = response || {};
           if (response && response.conversationId) {
@@ -1594,7 +1579,7 @@ export default {
           showCreditHintBriefly(cost, balance);
         }
       } catch (error) {
-        console.error('分析失败:', error);
+        logger.error('分析失败:', error);
         if (error && error.errorCode === 'INSUFFICIENT_CREDITS') {
           const need = (error.details && error.details.need) || 0;
           const balance = (error.details && error.details.balance) || 0;
@@ -1660,7 +1645,7 @@ export default {
           }
         }
       } catch (e) {
-        console.warn('加载 TTS 角色列表失败:', e);
+        logger.warn('加载 TTS 角色列表失败:', e);
       }
     });
 
@@ -1671,7 +1656,7 @@ export default {
         localStorage.setItem('tts_character', selectedTtsCharacter.value);
         showToast(`已切换到 ${selectedTtsCharacter.value}`, 'success');
       } catch (e) {
-        console.error('切换 TTS 角色失败:', e);
+        logger.error('切换 TTS 角色失败:', e);
         showToast('切换角色失败: ' + (e.message || '未知错误'), 'error');
       }
     };

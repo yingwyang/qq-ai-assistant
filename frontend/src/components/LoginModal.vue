@@ -97,6 +97,7 @@
 <script>
 import { ref, onMounted, onUnmounted, watch } from 'vue';
 import { systemApi } from '../services/api';
+import logger from '../utils/logger';
 
 export default {
   name: 'LoginModal',
@@ -141,7 +142,7 @@ export default {
         const timestamp = new Date().getTime();
         qrCode.value = `http://localhost:8081/api/system/napcat/qrcode-image?timestamp=${timestamp}`;
       } catch (error) {
-        console.error('获取二维码失败:', error);
+        logger.error('获取二维码失败:', error);
         qrCodeError.value = true;
       }
     };
@@ -156,7 +157,7 @@ export default {
         serviceAvailable.value = response.napcat === 'available';
         return serviceAvailable.value;
       } catch (error) {
-        console.error('健康检查失败:', error);
+        logger.error('健康检查失败:', error);
         serviceAvailable.value = false;
         return false;
       }
@@ -179,12 +180,12 @@ export default {
               systemMessage.value = '登录成功，已自动配置 NapCat';
               systemMessageType.value = 'success';
             } catch (e) {
-              console.error('自动配置 NapCat 失败:', e);
+              logger.error('自动配置 NapCat 失败:', e);
             }
           }
         }
       } catch (error) {
-        console.error('检查登录状态失败:', error);
+        logger.error('检查登录状态失败:', error);
       }
     };
 
@@ -237,7 +238,7 @@ export default {
         const response = await systemApi.getComponentStatus();
         componentStatus.value = response;
       } catch (error) {
-        console.error('获取组件状态失败:', error);
+        logger.error('获取组件状态失败:', error);
       }
     };
 

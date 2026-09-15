@@ -80,6 +80,7 @@
 import { ref, onMounted } from 'vue';
 import { personaApi } from '../services/api';
 import { showToast } from './Toast.vue';
+import logger from '../utils/logger';
 
 export default {
   name: 'PersonaManager',
@@ -101,12 +102,10 @@ export default {
 
     const loadPersonas = async () => {
       try {
-        console.log('开始加载人格列表...');
         const list = await personaApi.list();
-        console.log('人格列表数据:', list);
         personas.value = Array.isArray(list) ? list : [];
       } catch (error) {
-        console.error('加载人格列表失败:', error);
+        logger.error('加载人格列表失败:', error);
         showToast('加载人格列表失败', 'error');
       }
     };
@@ -114,12 +113,11 @@ export default {
     const loadDefault = async () => {
       try {
         const result = await personaApi.getDefault();
-        console.log('默认人格响应:', result);
         if (result && typeof result === 'object') {
           defaultPersonaId.value = result.defaultPersonaId;
         }
       } catch (error) {
-        console.error('加载默认人格失败:', error);
+        logger.error('加载默认人格失败:', error);
       }
     };
 
@@ -129,7 +127,7 @@ export default {
         defaultPersonaId.value = personaId;
         showToast('默认人格设置成功', 'success');
       } catch (error) {
-        console.error('设置默认人格失败:', error);
+        logger.error('设置默认人格失败:', error);
         showToast('设置默认人格失败', 'error');
       }
     };
@@ -200,7 +198,7 @@ export default {
         closeForm();
         await loadPersonas();
       } catch (error) {
-        console.error('保存人格失败:', error);
+        logger.error('保存人格失败:', error);
         showToast('保存人格失败: ' + error.message, 'error');
       } finally {
         saving.value = false;
@@ -214,7 +212,7 @@ export default {
         showToast('人格删除成功', 'success');
         await loadPersonas();
       } catch (error) {
-        console.error('删除人格失败:', error);
+        logger.error('删除人格失败:', error);
         showToast('删除人格失败', 'error');
       }
     };

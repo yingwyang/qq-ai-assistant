@@ -1,5 +1,6 @@
 import { ref } from 'vue';
 import { adminApi } from '../services/api';
+import logger from '../utils/logger';
 
 export function useUserManagement({ showSystemMsg } = {}) {
   const users = ref([]);
@@ -25,7 +26,7 @@ export function useUserManagement({ showSystemMsg } = {}) {
       userTotalPages.value = pageData.totalPages;
       userCurrentPage.value = pageData.number;
     } catch (error) {
-      console.error('加载用户列表失败:', error);
+      logger.error('加载用户列表失败:', error);
     }
   };
 

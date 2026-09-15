@@ -192,6 +192,7 @@ import { showConfirm } from './ConfirmDialog.vue';
 import { useUserCreditsStore } from '../composables/useUserCreditsStore';
 import UserMenuPopover from './UserMenuPopover.vue';
 import GroupTypeSelector from './GroupTypeSelector.vue';
+import logger from '../utils/logger';
 
 // 群类型元数据（与后端/其他组件保持一致）
 const GT_MAP = {
@@ -259,7 +260,7 @@ export default {
         const qq = localStorage.getItem(STORAGE_KEY_QQ);
         if (qq) expandedQqBindings.value = new Set(JSON.parse(qq));
       } catch (e) {
-        console.error('读取侧边栏展开状态失败:', e);
+        logger.error('读取侧边栏展开状态失败:', e);
       }
     };
 
@@ -267,7 +268,7 @@ export default {
       try {
         localStorage.setItem(STORAGE_KEY_RECENT, String(isRecentExpanded.value));
       } catch (e) {
-        console.error('保存最近对话展开状态失败:', e);
+        logger.error('保存最近对话展开状态失败:', e);
       }
     };
 
@@ -275,7 +276,7 @@ export default {
       try {
         localStorage.setItem(STORAGE_KEY_QQ, JSON.stringify([...expandedQqBindings.value]));
       } catch (e) {
-        console.error('保存QQ分组展开状态失败:', e);
+        logger.error('保存QQ分组展开状态失败:', e);
       }
     };
 
@@ -443,7 +444,7 @@ export default {
         if (g) g.unreadCount = 0;
       } catch (e) {
         // 失败时不阻塞，刷新列表由后台定时任务完成
-        console.warn('标记群聊 ' + group.groupId + ' 为已读失败:', e);
+        logger.warn('标记群聊 ' + group.groupId + ' 为已读失败:', e);
       }
 
       emit('select-group', { groupId: group.groupId, ownerQq: group.ownerQq, groupName: group.groupName });
@@ -504,7 +505,7 @@ export default {
           showToast(result?.message || '删除失败', 'error');
         }
       } catch (error) {
-        console.error('删除消息失败:', error);
+        logger.error('删除消息失败:', error);
         showToast('删除失败: ' + error.message, 'error');
       }
     };
@@ -531,7 +532,7 @@ export default {
         // 通知父组件清空当前聊天视图
         emit('select-group', null);
       } catch (error) {
-        console.error('删除群聊失败:', error);
+        logger.error('删除群聊失败:', error);
         showToast('删除群聊失败: ' + error.message, 'error');
       }
     };
@@ -571,7 +572,7 @@ export default {
         qqBindings.value = bindings;
         saveQqExpanded();
       } catch (error) {
-        console.error('加载QQ绑定失败:', error);
+        logger.error('加载QQ绑定失败:', error);
         qqBindings.value = [];
       }
     };
@@ -620,13 +621,10 @@ export default {
 
       try {
         // 从 API 获取最近对话的群聊（后端从 JWT 自动获取用户ID，按 group_read_state 计算未读）
-        console.log('开始加载最近对话...');
         const res = await messageApi.getRecentGroups();
-        console.log('获取到的群聊数据:', res);
         recentGroups.value = Array.isArray(res) ? res : [];
-        console.log('recentGroups.value:', recentGroups.value);
       } catch (error) {
-        console.error('加载最近对话失败:', error);
+        logger.error('加载最近对话失败:', error);
         // 清空数据，确保只显示真实数据
         recentGroups.value = [];
       }
@@ -639,7 +637,7 @@ export default {
         try {
           expandedQqBindings.value = e.newValue ? new Set(JSON.parse(e.newValue)) : new Set();
         } catch (err) {
-          console.error('同步QQ展开状态失败:', err);
+          logger.error('同步QQ展开状态失败:', err);
         }
       }
     };
@@ -677,7 +675,7 @@ export default {
 
     // 监听登录状态变化，当登录状态改变时重新加载群聊列表和QQ绑定
     watch(() => props.isLoggedIn, (newValue) => {
-      console.log('登录状态变化:', newValue);
+      logger.debug('登录状态变化:', newValue);
       if (newValue) {
         loadRecentGroups();
         loadQqBindings();

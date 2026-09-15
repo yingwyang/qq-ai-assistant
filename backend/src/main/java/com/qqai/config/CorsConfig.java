@@ -1,5 +1,8 @@
 package com.qqai.config;
 
+import jakarta.annotation.PostConstruct;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.CorsRegistry;
@@ -16,8 +19,22 @@ import java.util.List;
 @Configuration
 public class CorsConfig implements WebMvcConfigurer {
 
-    @Value("${app.cors.allowed-origins:http://localhost:5173,http://127.0.0.1:5173}")
+    private static final Logger log = LoggerFactory.getLogger(CorsConfig.class);
+
+    @Value("${app.cors.allowed-origins:http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174,http://localhost:5175,http://127.0.0.1:5175,http://localhost:5176,http://127.0.0.1:5176}")
     private String allowedOrigins;
+
+    @PostConstruct
+    public void logConfig() {
+        List<String> origins = Arrays.stream(allowedOrigins.split(","))
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .toList();
+        log.info("========== CORS 白名单配置(启动时解析结果) ==========");
+        log.info("  原始字符串(allowedOrigins): '{}'", allowedOrigins);
+        log.info("  解析后的来源列表(count={}): {}", origins.size(), origins);
+        log.info("=====================================================");
+    }
 
     @Override
     public void addCorsMappings(CorsRegistry registry) {

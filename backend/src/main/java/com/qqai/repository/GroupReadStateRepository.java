@@ -47,4 +47,11 @@ public interface GroupReadStateRepository extends JpaRepository<GroupReadState, 
     @Modifying
     @Query("UPDATE GroupReadState g SET g.lastReadTime = :now, g.updatedAt = :now WHERE g.userId = :userId")
     int markAllAsRead(@Param("userId") Long userId, @Param("now") LocalDateTime now);
+
+    /**
+     * 根据用户ID和群号列表删除阅读状态
+     */
+    @Modifying
+    @Query("DELETE FROM GroupReadState g WHERE g.userId = :userId AND g.groupId IN :groupIds")
+    int deleteByUserIdAndGroupIdIn(@Param("userId") Long userId, @Param("groupIds") List<String> groupIds);
 }

@@ -62,6 +62,71 @@ public class CreditRule {
     @Column(nullable = false)
     private Integer planDurationDays = 30;
 
+    // ====== 模型分级费率（JSON：{"default":1.0, "gpt-4":3.0, "qwen-7b":1.0}） ======
+    @Column(length = 2000)
+    private String modelRates = "{\"default\":1.0}";
+
+    // ====== 多模态输入：每张图片额外消耗积分 ======
+    @Column(nullable = false)
+    private Integer imageExtraCost = 5;
+
+    // ====== AI 分析精细化 ======
+    // 分析基础费用（不含消息条数增量）
+    @Column(nullable = false)
+    private Integer analyzeBaseCost = 10;
+    // 每条消息增量费用（分析的消息条数 × 此值）
+    @Column(nullable = false)
+    private Integer analyzeCostPerMsg = 1;
+    // 分析类型倍率 JSON：{"default":1.0, "summary":1.0, "analysis":1.5}
+    @Column(length = 2000)
+    private String analyzeTypeRates = "{\"default\":1.0}";
+
+    // ====== TTS 语音合成 ======
+    // 每多少字符扣 1 积分
+    @Column(nullable = false)
+    private Integer ttsCharsPerCredit = 50;
+    // 每次 TTS 最小消耗积分
+    @Column(nullable = false)
+    private Integer ttsMinCost = 2;
+
+    // ====== 月度免费配额 + 阶梯定价 ======
+    // 每月免费次数（0=不免费），仅对 AI_CHAT 场景生效
+    @Column(nullable = false)
+    private Integer monthlyFreeQuota = 0;
+    // 超过免费配额后的费率倍数（1.0=不涨价，1.5=涨50%）
+    @Column(nullable = false)
+    private Double overtaxRate = 1.5;
+
+    // ====== 月卡消费折扣（按账号当前 tier 应用） ======
+    // 小月卡折扣（0.9=9折，1.0=无折扣）
+    @Column(nullable = false)
+    private Double smallMonthCardDiscount = 0.9;
+    // 大月卡折扣（0.8=8折）
+    @Column(nullable = false)
+    private Double largeMonthCardDiscount = 0.8;
+    // ALL 状态折扣（0.7=7折）
+    @Column(nullable = false)
+    private Double allTierDiscount = 0.7;
+
+    // ====== 会话上下文长度增量计费 ======
+    // 每条历史消息额外消耗积分（0=不增量）
+    @Column(nullable = false)
+    private Integer contextExtraCostPerMsg = 1;
+    // 前N条上下文消息免费（0=不免费，10=前10条不增量）
+    @Column(nullable = false)
+    private Integer contextFreeMsgCount = 10;
+
+    // ====== 每日封顶消费保护 ======
+    // 单日累计消耗上限（0=不限），超过则本次免费
+    @Column(nullable = false)
+    private Integer dailyCapCost = 0;
+
+    // ====== 月度阶梯累计折扣 ======
+    // JSON 阶梯映射，按累计消耗匹配最低阈值，取其折扣
+    // 例：{"1000":0.95,"5000":0.9,"20000":0.85} 表示累计消耗≥1000时95折，≥5000时9折，≥20000时85折
+    @Column(length = 2000)
+    private String tieredDiscountThresholds = "{\"1000\":0.95,\"5000\":0.9,\"20000\":0.85}";
+
     private LocalDateTime createdAt;
 
     private LocalDateTime updatedAt;
@@ -130,6 +195,54 @@ public class CreditRule {
 
     public Integer getPlanDurationDays() { return planDurationDays; }
     public void setPlanDurationDays(Integer planDurationDays) { this.planDurationDays = planDurationDays; }
+
+    public String getModelRates() { return modelRates; }
+    public void setModelRates(String modelRates) { this.modelRates = modelRates; }
+
+    public Integer getImageExtraCost() { return imageExtraCost; }
+    public void setImageExtraCost(Integer imageExtraCost) { this.imageExtraCost = imageExtraCost; }
+
+    public Integer getAnalyzeBaseCost() { return analyzeBaseCost; }
+    public void setAnalyzeBaseCost(Integer analyzeBaseCost) { this.analyzeBaseCost = analyzeBaseCost; }
+
+    public Integer getAnalyzeCostPerMsg() { return analyzeCostPerMsg; }
+    public void setAnalyzeCostPerMsg(Integer analyzeCostPerMsg) { this.analyzeCostPerMsg = analyzeCostPerMsg; }
+
+    public String getAnalyzeTypeRates() { return analyzeTypeRates; }
+    public void setAnalyzeTypeRates(String analyzeTypeRates) { this.analyzeTypeRates = analyzeTypeRates; }
+
+    public Integer getTtsCharsPerCredit() { return ttsCharsPerCredit; }
+    public void setTtsCharsPerCredit(Integer ttsCharsPerCredit) { this.ttsCharsPerCredit = ttsCharsPerCredit; }
+
+    public Integer getTtsMinCost() { return ttsMinCost; }
+    public void setTtsMinCost(Integer ttsMinCost) { this.ttsMinCost = ttsMinCost; }
+
+    public Integer getMonthlyFreeQuota() { return monthlyFreeQuota; }
+    public void setMonthlyFreeQuota(Integer monthlyFreeQuota) { this.monthlyFreeQuota = monthlyFreeQuota; }
+
+    public Double getOvertaxRate() { return overtaxRate; }
+    public void setOvertaxRate(Double overtaxRate) { this.overtaxRate = overtaxRate; }
+
+    public Double getSmallMonthCardDiscount() { return smallMonthCardDiscount; }
+    public void setSmallMonthCardDiscount(Double smallMonthCardDiscount) { this.smallMonthCardDiscount = smallMonthCardDiscount; }
+
+    public Double getLargeMonthCardDiscount() { return largeMonthCardDiscount; }
+    public void setLargeMonthCardDiscount(Double largeMonthCardDiscount) { this.largeMonthCardDiscount = largeMonthCardDiscount; }
+
+    public Double getAllTierDiscount() { return allTierDiscount; }
+    public void setAllTierDiscount(Double allTierDiscount) { this.allTierDiscount = allTierDiscount; }
+
+    public Integer getContextExtraCostPerMsg() { return contextExtraCostPerMsg; }
+    public void setContextExtraCostPerMsg(Integer contextExtraCostPerMsg) { this.contextExtraCostPerMsg = contextExtraCostPerMsg; }
+
+    public Integer getContextFreeMsgCount() { return contextFreeMsgCount; }
+    public void setContextFreeMsgCount(Integer contextFreeMsgCount) { this.contextFreeMsgCount = contextFreeMsgCount; }
+
+    public Integer getDailyCapCost() { return dailyCapCost; }
+    public void setDailyCapCost(Integer dailyCapCost) { this.dailyCapCost = dailyCapCost; }
+
+    public String getTieredDiscountThresholds() { return tieredDiscountThresholds; }
+    public void setTieredDiscountThresholds(String tieredDiscountThresholds) { this.tieredDiscountThresholds = tieredDiscountThresholds; }
 
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }

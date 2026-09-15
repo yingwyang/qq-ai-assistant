@@ -1,9 +1,11 @@
 package com.qqai.controller;
 
+import com.qqai.common.SecurityHelper;
 import com.qqai.dto.common.ApiResponse;
 import com.qqai.security.AuthPrincipal;
 import com.qqai.service.AstrBotService;
 import com.qqai.service.AuditLogService;
+import com.qqai.service.CreditService;
 import com.qqai.service.NapCatService;
 import com.qqai.service.GptSovitsService;
 import com.qqai.service.MediaDownloadService;
@@ -47,10 +49,16 @@ public class SystemController {
             userId = ((AuthPrincipal) auth.getPrincipal()).userId();
         }
 
+        // 调用 TTS 前先扣费（余额不足会抛 BizException）
+        boolean isAdmin = securityHelper.isAdmin();
+        CreditService.CreditCostResult ttsResult = creditService.spendForTts(userId, text, character, isAdmin);
+
         String audioUrl = gptSovitsService.generateVoice(text, userId, character);
         Map<String, Object> data = new HashMap<>();
         data.put("audioUrl", audioUrl);
         data.put("character", gptSovitsService.getUserCharacter(userId));
+        data.put("cost", ttsResult.getCost());
+        data.put("balance", ttsResult.getBalanceAfter());
         return ResponseEntity.ok(ApiResponse.success(data));
     }
 
@@ -116,6 +124,12 @@ public class SystemController {
 
     @Autowired
     private AuditLogService auditLogService;
+
+    @Autowired
+    private CreditService creditService;
+
+    @Autowired
+    private SecurityHelper securityHelper;
 
     /**
      * 获取当前登录管理员用户名（用于审计）

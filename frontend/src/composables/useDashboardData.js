@@ -1,6 +1,7 @@
 import { ref, computed } from 'vue';
 import { dashboardApi, systemApi } from '../services/api';
 import { chartColors } from '../config/echarts';
+import logger from '../utils/logger';
 
 export function useDashboardData() {
   const stats = ref({
@@ -36,7 +37,7 @@ export function useDashboardData() {
     try {
       stats.value = await dashboardApi.getStats();
     } catch (error) {
-      console.error('加载统计数据失败:', error);
+      logger.error('加载统计数据失败:', error);
     }
   };
 
@@ -44,7 +45,7 @@ export function useDashboardData() {
     try {
       messageTrend.value = await dashboardApi.getMessageTrend(trendDays.value, trendInterval.value);
     } catch (error) {
-      console.error('加载消息趋势失败:', error);
+      logger.error('加载消息趋势失败:', error);
     }
   };
 
@@ -58,7 +59,7 @@ export function useDashboardData() {
     try {
       groupRanking.value = await dashboardApi.getGroupRanking();
     } catch (error) {
-      console.error('加载群聊排行失败:', error);
+      logger.error('加载群聊排行失败:', error);
     }
   };
 
@@ -66,7 +67,7 @@ export function useDashboardData() {
     try {
       qqRanking.value = await dashboardApi.getQQRanking();
     } catch (error) {
-      console.error('加载QQ排行失败:', error);
+      logger.error('加载QQ排行失败:', error);
     }
   };
 
@@ -74,7 +75,7 @@ export function useDashboardData() {
     try {
       diskUsage.value = await systemApi.getDiskUsage();
     } catch (error) {
-      console.error('加载磁盘使用情况失败:', error);
+      logger.error('加载磁盘使用情况失败:', error);
     }
   };
 
@@ -82,7 +83,7 @@ export function useDashboardData() {
     try {
       messageTypeDistribution.value = await dashboardApi.getMessageTypeDistribution();
     } catch (error) {
-      console.error('加载消息分布失败:', error);
+      logger.error('加载消息分布失败:', error);
     }
   };
 
@@ -90,7 +91,7 @@ export function useDashboardData() {
     try {
       hourlyDistribution.value = await dashboardApi.getHourlyDistribution();
     } catch (error) {
-      console.error('加载时段分布失败:', error);
+      logger.error('加载时段分布失败:', error);
     }
   };
 
@@ -98,7 +99,7 @@ export function useDashboardData() {
     try {
       aiTrend.value = await dashboardApi.getAiTrend();
     } catch (error) {
-      console.error('加载AI趋势失败:', error);
+      logger.error('加载AI趋势失败:', error);
     }
   };
 

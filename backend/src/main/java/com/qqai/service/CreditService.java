@@ -181,6 +181,553 @@ public class CreditService {
         return tx;
     }
 
+    // ==================== 精细化统一扣费引擎 ====================
+
+    /**
+     * 统一扣费结果：封装扣费金额、扣费后余额、免费标记等，供 Controller 直接返回给前端。
+     */
+    public static class CreditCostResult {
+        private final int cost;
+        private final int balanceAfter;
+        private final boolean adminFree;
+        private final boolean quotaFree;
+        private final String remark;
+
+        public CreditCostResult(int cost, int balanceAfter, boolean adminFree, boolean quotaFree, String remark) {
+            this.cost = cost;
+            this.balanceAfter = balanceAfter;
+            this.adminFree = adminFree;
+            this.quotaFree = quotaFree;
+            this.remark = remark;
+        }
+
+        public int getCost() { return cost; }
+        public int getBalanceAfter() { return balanceAfter; }
+        public boolean isAdminFree() { return adminFree; }
+        public boolean isQuotaFree() { return quotaFree; }
+        public String getRemark() { return remark; }
+    }
+
+    /**
+     * AI 聊天扣费（兼容旧调用，contextMsgCount=0）。
+     */
+    @Transactional
+    public CreditCostResult spendForChat(Long userId, String model, Integer promptTokens,
+                                           Integer completionTokens, int imageCount,
+                                           String conversationId, boolean isAdmin) {
+        return spendForChat(userId, model, promptTokens, completionTokens, imageCount, 0, conversationId, isAdmin);
+    }
+
+    /**
+     * AI 聊天扣费：基于模型费率 × token 用量 + 多模态图片额外费用 + 上下文长度增量 + 月度免费配额，
+     * 并叠加月卡折扣 / 阶梯累计折扣 / 每日封顶保护。
+     *
+     * 计费公式：
+     *   baseCost      = max(minCost, ceil((p*promptRate + c*completionRate) / tokenUnit)) 或 defaultCostPerMsg
+     *   modelRate     = modelRates JSON 中对应模型的倍数（找不到用 default）
+     *   imageExtra    = imageCount × imageExtraCost
+     *   contextExtra  = max(0, contextMsgCount - contextFreeMsgCount) × contextExtraCostPerMsg
+     *   rawCost       = baseCost + imageExtra + contextExtra
+     *   overtaxRate   = 月度免费配额耗尽后的倍率
+     *   tierDiscount  = 按账号 SubscriptionTier 应用月卡折扣（小/大/ALL）
+     *   tieredDiscount= 按本月累计 OUT 金额匹配阶梯阈值
+     *   dailyCapFree  = 当日累计 OUT ≥ dailyCapCost 时本次免费
+     *   cost          = ceil(rawCost × modelRate × overtaxRate × tierDiscount × tieredDiscount)
+     *
+     * 月度免费配额：当月已用 AI_CHAT 次数 < monthlyFreeQuota 时本次免费（cost=0）。
+     *
+     * @param model            AI 模型名（如 "gpt-4", "qwen-7b"）
+     * @param promptTokens     输入 token 数（null/0 时回退 defaultCostPerMsg）
+     * @param completionTokens 输出 token 数
+     * @param imageCount       本次消息中包含的图片数量（0=纯文本）
+     * @param contextMsgCount  本次对话已有的历史消息条数（用于上下文长度增量）
+     * @param conversationId   会话 ID（写入 relatedId）
+     * @param isAdmin          是否管理员（配合 adminFree 规则）
+     */
+    @Transactional
+    public CreditCostResult spendForChat(Long userId, String model, Integer promptTokens,
+                                           Integer completionTokens, int imageCount, int contextMsgCount,
+                                           String conversationId, boolean isAdmin) {
+        CreditRule rule = creditRuleService.getRule();
+        UserCredit account = ensureAccount(userId);
+
+        // 管理员免费
+        if (isAdmin && Boolean.TRUE.equals(rule.getAdminFree())) {
+            writeZeroAmountTx(userId, CreditTransactionType.AI_CHAT,
+                    (model != null ? model : "unknown") + "/ADMIN_FREE", conversationId, account.getBalance());
+            return new CreditCostResult(0, account.getBalance(), true, false, "ADMIN_FREE");
+        }
+
+        // 1. 基础 token 费用
+        int baseCost = calculateTokenCost(rule, promptTokens, completionTokens);
+
+        // 2. 模型费率倍数
+        double modelRate = parseJsonRate(rule.getModelRates(), model);
+
+        // 3. 多模态图片额外费用
+        int imageExtra = imageCount > 0 ? imageCount * safeVal(rule.getImageExtraCost(), 5) : 0;
+
+        // 4. 上下文长度增量费用
+        int contextExtra = calculateContextCost(rule, contextMsgCount);
+
+        // 5. 合计基础费用
+        int rawCost = baseCost + imageExtra + contextExtra;
+
+        // 6. 月度免费配额检查
+        int monthlyQuota = safeVal(rule.getMonthlyFreeQuota(), 0);
+        boolean quotaFree = false;
+        if (monthlyQuota > 0) {
+            LocalDateTime monthStart = LocalDateTime.of(LocalDate.now().withDayOfMonth(1), LocalTime.MIN);
+            long monthlyCount = creditTransactionRepository
+                    .countByUserIdAndTypeAndCreatedAtAfter(userId, CreditTransactionType.AI_CHAT, monthStart);
+            if (monthlyCount < monthlyQuota) {
+                quotaFree = true;
+            }
+        }
+
+        // 7. 每日封顶保护
+        boolean dailyCapFree = checkDailyCapFree(userId, rule);
+
+        int finalCost;
+        String remark = (model != null ? model : "unknown")
+                + (imageCount > 0 ? "/img:" + imageCount : "")
+                + (contextExtra > 0 ? "/ctx:" + contextMsgCount : "")
+                + (quotaFree ? "/QUOTA_FREE" : "")
+                + (dailyCapFree ? "/DAILY_CAP_FREE" : "");
+
+        if (quotaFree || dailyCapFree) {
+            finalCost = 0;
+            writeZeroAmountTx(userId, CreditTransactionType.AI_CHAT, remark, conversationId, account.getBalance());
+            return new CreditCostResult(0, account.getBalance(), false, quotaFree || dailyCapFree, remark);
+        }
+
+        // 8. 超配额倍率
+        double overtaxRate = rule.getOvertaxRate() != null ? rule.getOvertaxRate() : 1.0;
+
+        // 9. 月卡折扣（按账号 tier）
+        double tierDiscount = getTierDiscount(account.getSubscriptionTier(), rule);
+
+        // 10. 阶梯累计折扣（按本月已消费）
+        double tieredDiscount = getTieredDiscount(userId, rule.getTieredDiscountThresholds());
+
+        double multiplier = modelRate * overtaxRate * tierDiscount * tieredDiscount;
+        finalCost = Math.max(1, (int) Math.ceil(rawCost * multiplier));
+
+        // 11. 扣费
+        CreditTransaction tx = spendPoints(userId, finalCost, CreditTransactionType.AI_CHAT, remark, conversationId);
+        return new CreditCostResult(finalCost, tx.getBalanceAfter(), false, false, remark);
+    }
+
+    /**
+     * 预估 AI 聊天费用（不实际扣费，用于前端展示"本次将消耗约 X 积分"）。
+     * 与 spendForChat 使用相同计算逻辑，但不写流水、不扣余额。
+     */
+    public CreditCostResult estimateChatCost(Long userId, String model, Integer promptTokens,
+                                              Integer completionTokens, int imageCount, int contextMsgCount,
+                                              boolean isAdmin) {
+        CreditRule rule = creditRuleService.getRule();
+        UserCredit account = ensureAccount(userId);
+
+        if (isAdmin && Boolean.TRUE.equals(rule.getAdminFree())) {
+            return new CreditCostResult(0, account.getBalance(), true, false, "ADMIN_FREE");
+        }
+        int baseCost = calculateTokenCost(rule, promptTokens, completionTokens);
+        double modelRate = parseJsonRate(rule.getModelRates(), model);
+        int imageExtra = imageCount > 0 ? imageCount * safeVal(rule.getImageExtraCost(), 5) : 0;
+        int contextExtra = calculateContextCost(rule, contextMsgCount);
+        int rawCost = baseCost + imageExtra + contextExtra;
+
+        int monthlyQuota = safeVal(rule.getMonthlyFreeQuota(), 0);
+        boolean quotaFree = false;
+        if (monthlyQuota > 0) {
+            LocalDateTime monthStart = LocalDateTime.of(LocalDate.now().withDayOfMonth(1), LocalTime.MIN);
+            long monthlyCount = creditTransactionRepository
+                    .countByUserIdAndTypeAndCreatedAtAfter(userId, CreditTransactionType.AI_CHAT, monthStart);
+            if (monthlyCount < monthlyQuota) quotaFree = true;
+        }
+        boolean dailyCapFree = checkDailyCapFree(userId, rule);
+        if (quotaFree || dailyCapFree) {
+            return new CreditCostResult(0, account.getBalance(), false, true, "QUOTA_OR_CAP_FREE");
+        }
+        double overtaxRate = rule.getOvertaxRate() != null ? rule.getOvertaxRate() : 1.0;
+        double tierDiscount = getTierDiscount(account.getSubscriptionTier(), rule);
+        double tieredDiscount = getTieredDiscount(userId, rule.getTieredDiscountThresholds());
+        int cost = Math.max(1, (int) Math.ceil(rawCost * modelRate * overtaxRate * tierDiscount * tieredDiscount));
+        return new CreditCostResult(cost, account.getBalance(), false, false, "ESTIMATE");
+    }
+
+    /**
+     * AI 聊天失败退费：根据原扣费流水 relatedId（conversationId）退回对应金额。
+     * 仅退该 conversationId 最近一次 AI_CHAT OUT 流水的金额，幂等性由 relatedId=refund:{cid} 保证。
+     */
+    @Transactional
+    public CreditCostResult refundForChat(Long userId, String conversationId, String reason) {
+        return refundByRelatedId(userId, CreditTransactionType.AI_CHAT, conversationId, reason);
+    }
+
+    /**
+     * AI 分析扣费：基础费用 + 每条消息增量 × 消息条数 × 分析类型倍率。
+     *
+     * 计费公式：
+     *   cost = ceil((analyzeBaseCost + messageCount × analyzeCostPerMsg) × typeRate)
+     *
+     * @param messageCount 分析的消息条数
+     * @param analysisType 分析类型（如 "summary", "analysis", "key-points"）
+     * @param groupId       群 ID（写入 relatedId）
+     * @param isAdmin      是否管理员
+     */
+    @Transactional
+    public CreditCostResult spendForAnalyze(Long userId, int messageCount, String analysisType,
+                                             String groupId, boolean isAdmin) {
+        CreditRule rule = creditRuleService.getRule();
+        UserCredit account = ensureAccount(userId);
+
+        // 管理员免费
+        if (isAdmin && Boolean.TRUE.equals(rule.getAdminFree())) {
+            String remark = "analyze:" + (analysisType != null ? analysisType : "default") + "/ADMIN_FREE";
+            writeZeroAmountTx(userId, CreditTransactionType.AI_ANALYZE, remark, groupId, account.getBalance());
+            return new CreditCostResult(0, account.getBalance(), true, false, remark);
+        }
+
+        // 每日封顶保护
+        boolean dailyCapFree = checkDailyCapFree(userId, rule);
+        if (dailyCapFree) {
+            String remark = "analyze:" + (analysisType != null ? analysisType : "default")
+                    + "/msgs:" + Math.max(0, messageCount) + "/DAILY_CAP_FREE";
+            writeZeroAmountTx(userId, CreditTransactionType.AI_ANALYZE, remark, groupId, account.getBalance());
+            return new CreditCostResult(0, account.getBalance(), false, true, remark);
+        }
+
+        // 计算费用
+        int base = safeVal(rule.getAnalyzeBaseCost(), 10);
+        int perMsg = safeVal(rule.getAnalyzeCostPerMsg(), 1);
+        double typeRate = parseJsonRate(rule.getAnalyzeTypeRates(), analysisType);
+
+        int rawCost = base + Math.max(0, messageCount) * perMsg;
+
+        // 月卡折扣 + 阶梯累计折扣
+        double tierDiscount = getTierDiscount(account.getSubscriptionTier(), rule);
+        double tieredDiscount = getTieredDiscount(userId, rule.getTieredDiscountThresholds());
+
+        int cost = Math.max(1, (int) Math.ceil(rawCost * typeRate * tierDiscount * tieredDiscount));
+
+        String remark = "analyze:" + (analysisType != null ? analysisType : "default")
+                + "/msgs:" + Math.max(0, messageCount);
+        CreditTransaction tx = spendPoints(userId, cost, CreditTransactionType.AI_ANALYZE, remark, groupId);
+        return new CreditCostResult(cost, tx.getBalanceAfter(), false, false, remark);
+    }
+
+    /**
+     * AI 分析失败退费：按 relatedId（groupId）退回最近一次 AI_ANALYZE 扣费。
+     */
+    @Transactional
+    public CreditCostResult refundForAnalyze(Long userId, String groupId, String reason) {
+        return refundByRelatedId(userId, CreditTransactionType.AI_ANALYZE, groupId, reason);
+    }
+
+    /**
+     * TTS 语音合成扣费：按字符数计费，叠加月卡折扣 + 阶梯累计折扣 + 每日封顶保护。
+     *
+     * 计费公式：
+     *   cost = max(ttsMinCost, ceil(textLength / ttsCharsPerCredit) × tierDiscount × tieredDiscount)
+     *
+     * @param text       待合成的文本
+     * @param character  角色名（写入 remark）
+     */
+    @Transactional
+    public CreditCostResult spendForTts(Long userId, String text, String character, boolean isAdmin) {
+        CreditRule rule = creditRuleService.getRule();
+        UserCredit account = ensureAccount(userId);
+
+        // 管理员免费
+        if (isAdmin && Boolean.TRUE.equals(rule.getAdminFree())) {
+            String remark = "tts:" + (character != null ? character : "default") + "/ADMIN_FREE";
+            writeZeroAmountTx(userId, CreditTransactionType.TTS_SYNTHESIS, remark, null, account.getBalance());
+            return new CreditCostResult(0, account.getBalance(), true, false, remark);
+        }
+
+        // 每日封顶保护
+        boolean dailyCapFree = checkDailyCapFree(userId, rule);
+        if (dailyCapFree) {
+            String remark = "tts:" + (character != null ? character : "default") + "/DAILY_CAP_FREE";
+            writeZeroAmountTx(userId, CreditTransactionType.TTS_SYNTHESIS, remark, null, account.getBalance());
+            return new CreditCostResult(0, account.getBalance(), false, true, remark);
+        }
+
+        int charCount = text != null ? text.length() : 0;
+        int charsPerCredit = safeVal(rule.getTtsCharsPerCredit(), 50);
+        int minCost = safeVal(rule.getTtsMinCost(), 2);
+
+        int rawCost = (int) Math.ceil((double) charCount / charsPerCredit);
+
+        // 月卡折扣 + 阶梯累计折扣
+        double tierDiscount = getTierDiscount(account.getSubscriptionTier(), rule);
+        double tieredDiscount = getTieredDiscount(userId, rule.getTieredDiscountThresholds());
+
+        int cost = Math.max(minCost, (int) Math.ceil(rawCost * tierDiscount * tieredDiscount));
+
+        String remark = "tts:" + (character != null ? character : "default") + "/chars:" + charCount;
+        CreditTransaction tx = spendPoints(userId, cost, CreditTransactionType.TTS_SYNTHESIS, remark, null);
+        return new CreditCostResult(cost, tx.getBalanceAfter(), false, false, remark);
+    }
+
+    /**
+     * TTS 失败退费：按 relatedId 退回最近一次 TTS_SYNTHESIS 扣费。
+     * 由于 TTS 没有业务 relatedId，使用 remark 中的时间戳特征进行匹配。
+     */
+    @Transactional
+    public CreditCostResult refundForTts(Long userId, String refundKey, String reason) {
+        // 通用退费：通过 refund:{key} 作为幂等键
+        return refundByRelatedId(userId, CreditTransactionType.TTS_SYNTHESIS, refundKey, reason);
+    }
+
+    /**
+     * 群类型识别扣费：固定 1 积分，管理员免费。
+     */
+    @Transactional
+    public CreditCostResult spendForGroupType(Long userId, String groupId, boolean isAdmin) {
+        CreditRule rule = creditRuleService.getRule();
+        UserCredit account = ensureAccount(userId);
+
+        if (isAdmin && Boolean.TRUE.equals(rule.getAdminFree())) {
+            writeZeroAmountTx(userId, CreditTransactionType.AI_CHAT,
+                    "群类型识别/ADMIN_FREE", "group:" + groupId, account.getBalance());
+            return new CreditCostResult(0, account.getBalance(), true, false, "ADMIN_FREE");
+        }
+
+        CreditTransaction tx = spendPoints(userId, 1, CreditTransactionType.AI_CHAT,
+                "群类型识别", "group:" + groupId);
+        return new CreditCostResult(1, tx.getBalanceAfter(), false, false, "群类型识别");
+    }
+
+    // ====== 精细化计费辅助方法 ======
+
+    /**
+     * 基础 token 计费（不含模型倍数和图片费用）。
+     */
+    private int calculateTokenCost(CreditRule rule, Integer promptTokens, Integer completionTokens) {
+        int p = (promptTokens != null) ? promptTokens : 0;
+        int c = (completionTokens != null) ? completionTokens : 0;
+
+        if (p == 0 && c == 0) {
+            return safeVal(rule.getDefaultCostPerMsg(), 10);
+        }
+
+        int tokenUnit = safeVal(rule.getTokenUnit(), 1000);
+        int promptRate = safeVal(rule.getPromptRate(), 2);
+        int completionRate = safeVal(rule.getCompletionRate(), 4);
+        int minCost = safeVal(rule.getMinCost(), 5);
+
+        long numerator = (long) p * promptRate + (long) c * completionRate;
+        int raw = (int) Math.ceil((double) numerator / tokenUnit);
+        return Math.max(minCost, raw);
+    }
+
+    /**
+     * 上下文长度增量计费：超过免费条数后，每条历史消息额外消耗 contextExtraCostPerMsg 积分。
+     */
+    private int calculateContextCost(CreditRule rule, int contextMsgCount) {
+        if (contextMsgCount <= 0) return 0;
+        int perMsg = safeVal(rule.getContextExtraCostPerMsg(), 0);
+        if (perMsg <= 0) return 0;
+        int freeMsgs = safeVal(rule.getContextFreeMsgCount(), 0);
+        int billable = Math.max(0, contextMsgCount - freeMsgs);
+        return billable * perMsg;
+    }
+
+    /**
+     * 根据账号 SubscriptionTier 返回对应的折扣倍数。
+     * FREE / LITE / PRO / PROPLUS / ULTRA / MEGA（直购积分）→ 1.0（无折扣，月卡专属权益）
+     * SMALL_MONTH_CARD → smallMonthCardDiscount
+     * LARGE_MONTH_CARD → largeMonthCardDiscount
+     * ALL → allTierDiscount
+     */
+    private double getTierDiscount(SubscriptionTier tier, CreditRule rule) {
+        if (tier == null) return 1.0;
+        switch (tier) {
+            case SMALL_MONTH_CARD:
+                return rule.getSmallMonthCardDiscount() != null ? rule.getSmallMonthCardDiscount() : 1.0;
+            case LARGE_MONTH_CARD:
+                return rule.getLargeMonthCardDiscount() != null ? rule.getLargeMonthCardDiscount() : 1.0;
+            case ALL:
+                return rule.getAllTierDiscount() != null ? rule.getAllTierDiscount() : 1.0;
+            default:
+                return 1.0;
+        }
+    }
+
+    /**
+     * 月度阶梯累计折扣：按本月累计 OUT 金额匹配阶梯阈值，取最大符合阈值的折扣。
+     * JSON 例：{"1000":0.95,"5000":0.9,"20000":0.85}
+     * 匹配规则：累计消费 ≥ 5000 时取 0.9，≥ 1000 时取 0.95，<1000 时返回 1.0。
+     */
+    private double getTieredDiscount(Long userId, String thresholdsJson) {
+        if (thresholdsJson == null || thresholdsJson.isBlank()) return 1.0;
+        long monthlySpent = getMonthlySpent(userId);
+        double bestDiscount = 1.0;
+        try {
+            // 解析所有 "阈值":折扣 对，找最大符合阈值的
+            java.util.regex.Pattern p = java.util.regex.Pattern.compile(
+                    "\"(\\d+)\"\\s*:\\s*([0-9.]+)");
+            java.util.regex.Matcher m = p.matcher(thresholdsJson);
+            while (m.find()) {
+                long threshold = Long.parseLong(m.group(1));
+                double discount = Double.parseDouble(m.group(2));
+                if (monthlySpent >= threshold && discount < bestDiscount) {
+                    bestDiscount = discount;
+                }
+            }
+        } catch (Exception e) {
+            log.warn("解析阶梯折扣JSON失败: {}", e.getMessage());
+        }
+        return bestDiscount;
+    }
+
+    /**
+     * 获取用户本月（自然月）累计 OUT 金额。
+     */
+    private long getMonthlySpent(Long userId) {
+        LocalDateTime monthStart = LocalDateTime.of(LocalDate.now().withDayOfMonth(1), LocalTime.MIN);
+        return creditTransactionRepository.sumSpendByFilters(
+                userId, null, CreditDirection.OUT, monthStart, null, null);
+    }
+
+    /**
+     * 获取用户今日累计 OUT 金额。
+     */
+    private long getTodaySpent(Long userId) {
+        LocalDateTime todayStart = LocalDateTime.of(LocalDate.now(), LocalTime.MIN);
+        return creditTransactionRepository.sumSpendByFilters(
+                userId, null, CreditDirection.OUT, todayStart, null, null);
+    }
+
+    /**
+     * 检查每日封顶：若 dailyCapCost > 0 且今日累计 OUT ≥ dailyCapCost，返回 true 表示本次应免费。
+     */
+    private boolean checkDailyCapFree(Long userId, CreditRule rule) {
+        int cap = safeVal(rule.getDailyCapCost(), 0);
+        if (cap <= 0) return false;
+        return getTodaySpent(userId) >= cap;
+    }
+
+    /**
+     * 通用退费方法：按 (userId, type, relatedId) 找出最近一次 OUT 流水，
+     * 等额回补余额并写 IN 方向的 REFUND 流水；幂等性通过 relatedId=refund:{originalRelatedId} 保证。
+     *
+     * @param userId     用户 ID
+     * @param type       原扣费类型（AI_CHAT/AI_ANALYZE/TTS_SYNTHESIS）
+     * @param relatedId  原流水 relatedId
+     * @param reason     退费原因（写入 remark）
+     */
+    @Transactional
+    public CreditCostResult refundByRelatedId(Long userId, CreditTransactionType type,
+                                                String relatedId, String reason) {
+        if (relatedId == null || relatedId.isBlank()) {
+            throw new BizException("退费失败：relatedId 不能为空");
+        }
+        // 幂等检查：已存在同 relatedId 的 REFUND 流水则直接返回
+        String refundRelatedId = "refund:" + relatedId;
+        if (creditTransactionRepository.countByUserIdAndRelatedId(userId, refundRelatedId) > 0) {
+            UserCredit account = ensureAccount(userId);
+            return new CreditCostResult(0, account.getBalance(), false, false, "REFUND_DUP");
+        }
+
+        // 查找最近一次对应的 OUT 流水
+        Page<CreditTransaction> page = creditTransactionRepository
+                .findByUserIdAndTypeOrderByCreatedAtDesc(userId, type, PageRequest.of(0, 50));
+        List<CreditTransaction> candidates = (page != null) ? page.getContent() : Collections.emptyList();
+        CreditTransaction target = null;
+        for (CreditTransaction tx : candidates) {
+            if (CreditDirection.OUT.equals(tx.getDirection())
+                    && relatedId.equals(tx.getRelatedId())
+                    && tx.getAmount() != null && tx.getAmount() > 0) {
+                target = tx;
+                break;
+            }
+        }
+        if (target == null) {
+            throw new BizException("退费失败：未找到匹配的原扣费流水 relatedId=" + relatedId);
+        }
+
+        int refundAmount = target.getAmount();
+        UserCredit account = userCreditRepository.findByUserIdWithLock(userId)
+                .orElseThrow(() -> new BizException("积分账户不存在"));
+        int newBalance = account.getBalance() + refundAmount;
+        account.setBalance(newBalance);
+        // 退费不回退 totalSpent（保留历史消费统计），但可考虑用 negative balance 的逻辑；
+        // 这里采用"退费不修改 totalSpent"的设计，便于审计实际消费量。
+        userCreditRepository.save(account);
+
+        CreditTransaction refundTx = new CreditTransaction();
+        refundTx.setUserId(userId);
+        refundTx.setType(CreditTransactionType.REFUND);
+        refundTx.setDirection(CreditDirection.IN);
+        refundTx.setAmount(refundAmount);
+        refundTx.setBalanceAfter(newBalance);
+        refundTx.setRemark("退费/" + (reason != null ? reason : type.name())
+                + "/原流水#" + target.getId());
+        refundTx.setRelatedId(refundRelatedId);
+        creditTransactionRepository.save(refundTx);
+        log.info("用户{} 退费成功 类型={} relatedId={} 金额={} 余额={}",
+                userId, type, relatedId, refundAmount, newBalance);
+        return new CreditCostResult(refundAmount, newBalance, false, false, "REFUND");
+    }
+
+    /**
+     * 从 JSON 格式的费率映射中查找指定 key 对应的倍数。
+     * JSON 格式：{"default":1.0, "gpt-4":3.0, "qwen-7b":1.0}
+     * 匹配规则：先精确匹配 key，找不到则用 "default"，都没有则返回 1.0。
+     */
+    private double parseJsonRate(String json, String key) {
+        if (json == null || json.isBlank()) return 1.0;
+        if (key == null || key.isEmpty()) return 1.0;
+        try {
+            // 轻量级 JSON 解析，不引入 Jackson 依赖
+            // 匹配 "key":number 格式
+            String normalized = key.replace("\"", "\\\"");
+            java.util.regex.Pattern p = java.util.regex.Pattern.compile(
+                    "\"" + java.util.regex.Pattern.quote(key) + "\"\\s*:\\s*([0-9.]+)");
+            java.util.regex.Matcher m = p.matcher(json);
+            if (m.find()) {
+                return Double.parseDouble(m.group(1));
+            }
+            // 回退到 default
+            java.util.regex.Pattern pd = java.util.regex.Pattern.compile(
+                    "\"default\"\\s*:\\s*([0-9.]+)");
+            java.util.regex.Matcher md = pd.matcher(json);
+            if (md.find()) {
+                return Double.parseDouble(md.group(1));
+            }
+        } catch (Exception e) {
+            log.warn("解析费率JSON失败 json={} key={}: {}", json, key, e.getMessage());
+        }
+        return 1.0;
+    }
+
+    /**
+     * 写一条 amount=0 的审计流水（用于管理员免费 / 配额免费场景）。
+     */
+    private void writeZeroAmountTx(Long userId, CreditTransactionType type,
+                                    String remark, String relatedId, int balanceAfter) {
+        try {
+            CreditTransaction tx = new CreditTransaction();
+            tx.setUserId(userId);
+            tx.setType(type);
+            tx.setDirection(CreditDirection.OUT);
+            tx.setAmount(0);
+            tx.setBalanceAfter(balanceAfter);
+            tx.setRemark(remark);
+            tx.setRelatedId(relatedId);
+            creditTransactionRepository.save(tx);
+        } catch (Exception e) {
+            log.warn("记录零额审计流水失败: {}", e.getMessage());
+        }
+    }
+
+    private int safeVal(Integer v, int def) {
+        return v != null ? v : def;
+    }
+
     /**
      * 每日签到：写入签到记录并发放签到积分，连续签到天数基于昨日记录累加。
      * 并发控制：依赖 SignInRecord 表的 UNIQUE(userId, signIn_date) 约束防重复签到，

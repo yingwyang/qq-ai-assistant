@@ -72,4 +72,6 @@ public interface SubscriptionOrderRepository extends JpaRepository<SubscriptionO
                                                           @Param("now") LocalDateTime now);
 
     long countByStatus(OrderStatus status);
+
+    void deleteByUserId(Long userId);
 }

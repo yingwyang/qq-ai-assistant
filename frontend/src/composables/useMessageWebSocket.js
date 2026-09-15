@@ -1,4 +1,5 @@
 import { ref, onUnmounted } from 'vue';
+import logger from '../utils/logger';
 
 function getWebSocketUrl() {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -33,7 +34,7 @@ export function useMessageWebSocket(onMessage) {
         if (data.type === 'subscribed') return;
         onMessage?.(data);
       } catch (e) {
-        console.warn('WebSocket 消息解析失败:', e);
+        logger.warn('WebSocket 消息解析失败:', e);
       }
     };
 

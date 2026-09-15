@@ -31,6 +31,24 @@ export function useAdminCreditsRule({ showSystemMsg } = {}) {
     planUltraPrice: 629,
     planUltraCredit: 40000,
     planDurationDays: 30,
+    // 精细化计费
+    modelRates: '{"default":1.0}',
+    imageExtraCost: 5,
+    analyzeBaseCost: 10,
+    analyzeCostPerMsg: 1,
+    analyzeTypeRates: '{"default":1.0}',
+    ttsCharsPerCredit: 50,
+    ttsMinCost: 2,
+    monthlyFreeQuota: 0,
+    overtaxRate: 1.5,
+    // 精细化扩展
+    smallMonthCardDiscount: 0.9,
+    largeMonthCardDiscount: 0.8,
+    allTierDiscount: 0.7,
+    contextExtraCostPerMsg: 1,
+    contextFreeMsgCount: 10,
+    dailyCapCost: 0,
+    tieredDiscountThresholds: '{"1000":0.95,"5000":0.9,"20000":0.85}',
   });
 
   // 4 档套餐展示元数据（planName 不存后端，仅前端固定）
@@ -60,6 +78,25 @@ export function useAdminCreditsRule({ showSystemMsg } = {}) {
     });
     if (rule.adminFree !== null && rule.adminFree !== undefined) form.adminFree = rule.adminFree;
     // allowOverdraft 后端无字段，保留默认
+    // 精细化计费字段
+    const strKeys = ['modelRates', 'analyzeTypeRates', 'tieredDiscountThresholds'];
+    strKeys.forEach((k) => {
+      if (rule[k] !== null && rule[k] !== undefined) form[k] = rule[k];
+    });
+    const numKeys2 = [
+      'imageExtraCost', 'analyzeBaseCost', 'analyzeCostPerMsg',
+      'ttsCharsPerCredit', 'ttsMinCost', 'monthlyFreeQuota',
+      'contextExtraCostPerMsg', 'contextFreeMsgCount', 'dailyCapCost',
+    ];
+    numKeys2.forEach((k) => {
+      if (rule[k] !== null && rule[k] !== undefined) form[k] = rule[k];
+    });
+    const discountKeys = [
+      'overtaxRate', 'smallMonthCardDiscount', 'largeMonthCardDiscount', 'allTierDiscount',
+    ];
+    discountKeys.forEach((k) => {
+      if (rule[k] !== null && rule[k] !== undefined) form[k] = rule[k];
+    });
   }
 
   // 数字校验：负数拦截、空值拦截
@@ -96,6 +133,52 @@ export function useAdminCreditsRule({ showSystemMsg } = {}) {
       ['planUltraPrice', 'Ultra 价格'],
     ];
     for (const [k, label] of priceChecks) {
+      const v = form[k];
+      if (v === '' || v === null || v === undefined || Number.isNaN(Number(v))) {
+        return `${label} 不能为空`;
+      }
+      if (Number(v) < 0) return `${label} 不能为负`;
+    }
+    const fineChecks = [
+      ['imageExtraCost', '图片额外费用'],
+      ['analyzeBaseCost', '分析基础费用'],
+      ['analyzeCostPerMsg', '分析每条消息费用'],
+      ['ttsCharsPerCredit', 'TTS字符数'],
+      ['ttsMinCost', 'TTS最小费用'],
+      ['monthlyFreeQuota', '月度免费配额'],
+    ];
+    for (const [k, label] of fineChecks) {
+      const v = form[k];
+      if (v === '' || v === null || v === undefined || Number.isNaN(Number(v))) {
+        return `${label} 不能为空`;
+      }
+      if (Number(v) < 0) return `${label} 不能为负`;
+    }
+    if (Number(form.ttsCharsPerCredit) <= 0) return 'TTS字符数必须大于0';
+    if (form.overtaxRate !== '' && form.overtaxRate !== null && Number(form.overtaxRate) < 1.0) {
+      return '超配额倍率不能小于1.0';
+    }
+    // 月卡折扣范围 0.01~1.0
+    const tierDiscountChecks = [
+      ['smallMonthCardDiscount', '小月卡折扣'],
+      ['largeMonthCardDiscount', '大月卡折扣'],
+      ['allTierDiscount', 'ALL状态折扣'],
+    ];
+    for (const [k, label] of tierDiscountChecks) {
+      const v = form[k];
+      if (v === '' || v === null || v === undefined || Number.isNaN(Number(v))) {
+        return `${label} 不能为空`;
+      }
+      const d = Number(v);
+      if (d < 0.01 || d > 1.0) return `${label} 必须在 0.01~1.0 之间`;
+    }
+    // 上下文 & 封顶校验（可 0）
+    const fine2 = [
+      ['contextExtraCostPerMsg', '上下文每条费用'],
+      ['contextFreeMsgCount', '上下文免费条数'],
+      ['dailyCapCost', '每日封顶消耗'],
+    ];
+    for (const [k, label] of fine2) {
       const v = form[k];
       if (v === '' || v === null || v === undefined || Number.isNaN(Number(v))) {
         return `${label} 不能为空`;
@@ -144,6 +227,22 @@ export function useAdminCreditsRule({ showSystemMsg } = {}) {
         planUltraPrice: Number(form.planUltraPrice),
         planUltraCredit: Number(form.planUltraCredit),
         planDurationDays: Number(form.planDurationDays),
+        modelRates: form.modelRates,
+        imageExtraCost: Number(form.imageExtraCost),
+        analyzeBaseCost: Number(form.analyzeBaseCost),
+        analyzeCostPerMsg: Number(form.analyzeCostPerMsg),
+        analyzeTypeRates: form.analyzeTypeRates,
+        ttsCharsPerCredit: Number(form.ttsCharsPerCredit),
+        ttsMinCost: Number(form.ttsMinCost),
+        monthlyFreeQuota: Number(form.monthlyFreeQuota),
+        overtaxRate: Number(form.overtaxRate),
+        smallMonthCardDiscount: Number(form.smallMonthCardDiscount),
+        largeMonthCardDiscount: Number(form.largeMonthCardDiscount),
+        allTierDiscount: Number(form.allTierDiscount),
+        contextExtraCostPerMsg: Number(form.contextExtraCostPerMsg),
+        contextFreeMsgCount: Number(form.contextFreeMsgCount),
+        dailyCapCost: Number(form.dailyCapCost),
+        tieredDiscountThresholds: form.tieredDiscountThresholds,
       };
       const saved = await adminCreditsApi.updateRule(payload);
       applyRule(saved);

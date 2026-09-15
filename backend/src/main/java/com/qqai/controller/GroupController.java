@@ -115,11 +115,13 @@ public class GroupController {
                 return ResponseEntity.status(401).body(Map.of("status", "error", "message", "未登录"));
             }
 
-            // 消耗积分（复用 AI_CHAT 规则，消耗 1 积分）
+            // 消耗积分（统一扣费入口）
+            int groupCost = 0;
             try {
-                creditService.spendPoints(userId, 1, com.qqai.entity.enums.CreditTransactionType.AI_CHAT,
-                        "群类型识别", "group:" + groupId);
-            } catch (Exception e) {
+                boolean isAdmin = securityHelper.isAdmin();
+                CreditService.CreditCostResult groupResult = creditService.spendForGroupType(userId, groupId, isAdmin);
+                groupCost = groupResult.getCost();
+            } catch (com.qqai.exception.BizException e) {
                 return ResponseEntity.status(402).body(Map.of(
                         "status", "error",
                         "errorCode", "INSUFFICIENT_CREDITS",
@@ -132,6 +134,7 @@ public class GroupController {
             Map<String, Object> response = new HashMap<>();
             response.put("status", "ok");
             response.putAll(result.toMap());
+            response.put("cost", groupCost);
             response.put("message", "识别完成，请确认是否采用此类型");
             return ResponseEntity.ok(response);
         } catch (Exception e) {

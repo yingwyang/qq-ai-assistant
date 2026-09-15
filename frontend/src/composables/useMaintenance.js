@@ -1,5 +1,6 @@
 import { ref } from 'vue';
 import { adminApi } from '../services/api';
+import logger from '../utils/logger';
 
 export function useMaintenance({ showSystemMsg } = {}) {
   const isBackingUp = ref(false);
@@ -24,7 +25,7 @@ export function useMaintenance({ showSystemMsg } = {}) {
     try {
       backupList.value = await adminApi.getBackupList();
     } catch (error) {
-      console.error('加载备份列表失败:', error);
+      logger.error('加载备份列表失败:', error);
     }
   };
 

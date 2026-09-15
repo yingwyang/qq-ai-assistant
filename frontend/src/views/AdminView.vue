@@ -3,6 +3,9 @@
     <!-- 顶部导航栏 -->
     <header class="admin-header">
       <div class="header-brand">
+        <button class="sidebar-toggle" @click="sidebarOpen = !sidebarOpen" aria-label="切换侧边栏">
+          <Icon name="menu" :size="20" />
+        </button>
         <Icon name="admin" :size="24" />
         <h1>系统管理中心</h1>
       </div>
@@ -17,8 +20,11 @@
     </header>
 
     <div class="admin-layout">
+      <!-- 移动端遮罩 -->
+      <div v-if="sidebarOpen" class="sidebar-overlay" @click="sidebarOpen = false"></div>
+
       <!-- 左侧导航 -->
-      <aside class="admin-sidebar">
+      <aside class="admin-sidebar" :class="{ open: sidebarOpen }">
         <nav class="admin-nav">
           <template v-for="item in navItems" :key="item.key">
             <div v-if="item.isGroup" class="nav-group-title">{{ item.label }}</div>
@@ -26,7 +32,7 @@
               v-else
               class="nav-item"
               :class="{ active: activeTab === item.key }"
-              @click="setActiveTab(item.key)"
+              @click="setActiveTab(item.key); sidebarOpen = false"
             >
               <Icon :name="item.icon" :size="18" />
               <span>{{ item.label }}</span>
@@ -520,6 +526,7 @@ import {
   orderStatusText as orderStatusLabel,
   planTierText as planTierLabel,
 } from '../composables/useAdminOrders';
+import logger from '../utils/logger';
 
 // 子组件映射（懒加载）
 const tabComponentMap = {
@@ -545,6 +552,7 @@ export default {
     const router = useRouter();
     const { theme: currentTheme } = useTheme();
     const activeTab = ref('dashboard');
+    const sidebarOpen = ref(false);
     const currentComponent = shallowRef(null);
 
     const systemMessage = ref('');
@@ -744,7 +752,7 @@ export default {
       try {
         await apiLogout();
       } catch (e) {
-        console.warn('后端登出失败（忽略）:', e);
+        logger.warn('后端登出失败（忽略）:', e);
       }
       localStorage.removeItem('user_role');
       localStorage.removeItem('user_info');
@@ -812,7 +820,7 @@ export default {
     provide('adminActiveTab', activeTab);
 
     return {
-      currentTheme, activeTab, currentComponent, navItems, systemMessage, systemMessageType,
+      currentTheme, activeTab, sidebarOpen, currentComponent, navItems, systemMessage, systemMessageType,
       formatDate, formatFileSize, goHome, logout, setActiveTab,
       // Shared dialogs (exposed to template)
       adjustModal: adminUserCredits.adjustModal,
@@ -933,11 +941,37 @@ export default {
 
 .admin-sidebar {
   width: 200px;
+  flex-shrink: 0;
   height: 100%;
   background: var(--sidebar-bg, #2c3e50);
   border-right: 1px solid var(--border-color, #34495e);
   padding: 16px 0;
   overflow-y: auto;
+  transition: transform 0.25s ease;
+}
+
+.sidebar-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 199;
+}
+
+.sidebar-toggle {
+  display: none;
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  padding: 4px;
+  margin-right: 4px;
+  border-radius: 4px;
+  transition: background 0.2s;
+}
+
+.sidebar-toggle:hover {
+  background: rgba(255, 255, 255, 0.1);
 }
 
 .admin-nav {
@@ -1671,7 +1705,53 @@ export default {
 .audit-failure { background: #ffebee; color: #c62828; }
 
 /* ===== 响应式 ===== */
+@media (max-width: 1024px) {
+  .admin-sidebar {
+    width: 180px;
+  }
+  .admin-main {
+    padding: 16px;
+  }
+  .nav-item {
+    padding: 8px 10px;
+    font-size: 13px;
+  }
+}
+
 @media (max-width: 768px) {
-  .admin-sidebar { display: none; }
+  .sidebar-toggle {
+    display: flex;
+    align-items: center;
+  }
+  .sidebar-overlay {
+    display: block;
+  }
+  .admin-sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 200px;
+    z-index: 200;
+    transform: translateX(-100%);
+    box-shadow: 2px 0 8px rgba(0, 0, 0, 0.15);
+  }
+  .admin-sidebar.open {
+    transform: translateX(0);
+  }
+  .admin-main {
+    padding: 12px;
+    width: 100%;
+  }
+  .admin-header {
+    padding: 0 12px;
+  }
+  .admin-header h1 {
+    font-size: 15px;
+  }
+  .btn-home span,
+  .btn-logout span {
+    display: none;
+  }
 }
 </style>

@@ -97,4 +97,14 @@ public interface GroupRepository extends JpaRepository<Group, Long> {
         List<Group> result = findByGroupId(groupId);
         return result != null ? result : java.util.Collections.emptyList();
     }
+
+    /**
+     * 根据多个 ownerQq 查找群聊
+     */
+    List<Group> findByOwnerQqIn(List<String> ownerQqList);
+
+    /**
+     * 根据多个 ownerQq 删除群聊
+     */
+    void deleteByOwnerQqIn(List<String> ownerQqList);
 }

@@ -1,5 +1,6 @@
 import { ref } from 'vue';
 import { systemApi } from '../services/api';
+import logger from '../utils/logger';
 
 const POLL_INTERVAL_MS = 5000;
 
@@ -26,7 +27,7 @@ export function useComponentControl({ showSystemMsg } = {}) {
     try {
       componentStatus.value = await systemApi.getComponentStatus();
     } catch (error) {
-      console.error('获取组件状态失败:', error);
+      logger.error('获取组件状态失败:', error);
     }
   };
 
@@ -48,7 +49,7 @@ export function useComponentControl({ showSystemMsg } = {}) {
         showSystemMsg(`NapCat 已自动登录: ${res.qq || ''}`, 'success');
       }
     } catch (error) {
-      console.error('检查 NapCat 登录状态失败:', error);
+      logger.error('检查 NapCat 登录状态失败:', error);
     } finally {
       isCheckingLogin.value = false;
     }
@@ -61,7 +62,7 @@ export function useComponentControl({ showSystemMsg } = {}) {
         napCatWebUiUrl.value = res.url;
       }
     } catch (error) {
-      console.error('获取 NapCat WebUI 地址失败:', error);
+      logger.error('获取 NapCat WebUI 地址失败:', error);
     }
   };
 

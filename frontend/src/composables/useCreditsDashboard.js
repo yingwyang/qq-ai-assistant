@@ -2,6 +2,7 @@ import { ref, computed, watch } from 'vue';
 import { creditsApi } from '../services/api';
 import { useUserCreditsStore } from './useUserCreditsStore';
 import { useCreditsChart } from './useCreditsChart';
+import logger from '../utils/logger';
 
 export const TX_TYPE_LABELS = {
   AI_CHAT: 'AI 对话',
@@ -107,7 +108,7 @@ export function useCreditsDashboard({ showSystemMsg, onOpenUpgrade, onSwitchTab 
       tier.value = data?.subscriptionTier || data?.tier || 'FREE';
       tierExpireAt.value = data?.subscriptionExpiresAt || data?.tierExpireAt || null;
     } catch (error) {
-      console.error('加载积分余额失败:', error);
+      logger.error('加载积分余额失败:', error);
     }
   };
 
@@ -121,7 +122,7 @@ export function useCreditsDashboard({ showSystemMsg, onOpenUpgrade, onSwitchTab 
         calendar: data?.calendar || [],
       };
     } catch (error) {
-      console.error('加载签到状态失败:', error);
+      logger.error('加载签到状态失败:', error);
     }
   };
 
@@ -130,7 +131,7 @@ export function useCreditsDashboard({ showSystemMsg, onOpenUpgrade, onSwitchTab 
     try {
       rewards.value = await creditsApi.getRewards() || [];
     } catch (error) {
-      console.error('加载奖励列表失败:', error);
+      logger.error('加载奖励列表失败:', error);
       rewards.value = [];
     } finally {
       rewardsLoading.value = false;
@@ -161,7 +162,7 @@ export function useCreditsDashboard({ showSystemMsg, onOpenUpgrade, onSwitchTab 
       txSpendTotal.value = data?.spendTotal ?? 0;
       txNet.value = data?.net ?? (txIncomeTotal.value - txSpendTotal.value);
     } catch (error) {
-      console.error('加载交易明细失败:', error);
+      logger.error('加载交易明细失败:', error);
       transactions.value = [];
       transactionsTotal.value = 0;
     } finally {
@@ -176,7 +177,7 @@ export function useCreditsDashboard({ showSystemMsg, onOpenUpgrade, onSwitchTab 
       // 后端返回 { series: [{ date, earned, spent, net }] }
       trendData.value = (data?.series || (Array.isArray(data) ? data : []));
     } catch (error) {
-      console.error('加载积分趋势失败:', error);
+      logger.error('加载积分趋势失败:', error);
       trendData.value = [];
     } finally {
       trendLoading.value = false;

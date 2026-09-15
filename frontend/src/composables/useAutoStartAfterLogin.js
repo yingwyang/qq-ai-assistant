@@ -1,5 +1,6 @@
 import { showToast } from '../components/Toast.vue';
 import { useComponentControl } from './useComponentControl';
+import logger from '../utils/logger';
 
 const COMPONENTS = [
   {
@@ -40,7 +41,7 @@ export function useAutoStartAfterLogin() {
     try {
       await componentCtrl.getComponentStatus();
     } catch (e) {
-      console.warn('刷新组件状态失败，继续执行启动流程:', e);
+      logger.warn('刷新组件状态失败，继续执行启动流程:', e);
     }
 
     const total = COMPONENTS.length;

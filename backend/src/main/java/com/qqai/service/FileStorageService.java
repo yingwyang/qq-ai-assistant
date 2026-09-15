@@ -191,6 +191,47 @@ public class FileStorageService {
     }
 
     /**
+     * 根据对象存储路径直接删除文件（无需 FileRecord 记录）
+     * 用于清理 content 中存储的文件路径
+     *
+     * @param path 文件路径，如 /images/images/1090875633/2026-08-27/xxx.jpg
+     */
+    public void deleteByPath(String path) {
+        if (path == null || path.isBlank()) return;
+        try {
+            // 路径格式: /images/... 或 /videos/... 或 /audios/... 或 /files/...
+            // MinIO object key 去掉前导 /
+            String objectKey = path.startsWith("/") ? path.substring(1) : path;
+
+            // 删除主文件
+            minioClient.removeObject(
+                RemoveObjectArgs.builder()
+                    .bucket(bucketName)
+                    .object(objectKey)
+                    .build()
+            );
+
+            // 尝试删除可能存在的缩略图
+            // images/xxx.jpg -> images/thumbs/xxx.jpg
+            String thumbKey = objectKey.replaceFirst("(/[^/]+)\\.([^/.]+)$", "/thumbs$1.$2");
+            if (!thumbKey.equals(objectKey)) {
+                try {
+                    minioClient.removeObject(
+                        RemoveObjectArgs.builder()
+                            .bucket(bucketName)
+                            .object(thumbKey)
+                            .build()
+                    );
+                } catch (Exception ignored) {
+                    // 缩略图可能不存在
+                }
+            }
+        } catch (Exception e) {
+            log.warn("删除 MinIO 文件失败, path={}, error={}", path, e.getMessage());
+        }
+    }
+
+    /**
      * 根据文件ID获取文件记录
      */
     public FileRecord getFileRecord(String fileId) {

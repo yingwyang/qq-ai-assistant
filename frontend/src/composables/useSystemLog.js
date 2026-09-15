@@ -1,5 +1,6 @@
 import { ref } from 'vue';
 import { adminApi } from '../services/api';
+import logger from '../utils/logger';
 
 /**
  * 系统日志管理 composable
@@ -43,7 +44,7 @@ export function useSystemLog({ showSystemMsg } = {}) {
       appLogTotal.value = data.totalElements || 0;
       appLogTotalPages.value = data.totalPages || 0;
     } catch (error) {
-      console.error('加载应用日志失败:', error);
+      logger.error('加载应用日志失败:', error);
       appLogsError.value = error.message || '加载应用日志失败';
       appLogs.value = [];
       appLogTotal.value = 0;
@@ -109,7 +110,7 @@ export function useSystemLog({ showSystemMsg } = {}) {
       auditTotal.value = data.totalElements || 0;
       auditTotalPages.value = data.totalPages || 0;
     } catch (error) {
-      console.error('加载审计日志失败:', error);
+      logger.error('加载审计日志失败:', error);
       auditLogsError.value = error.message || '加载审计日志失败';
       auditLogs.value = [];
       auditTotal.value = 0;

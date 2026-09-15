@@ -111,6 +111,44 @@ public class AdminCreditsController {
         if (updates.getPlanDurationDays() != null && updates.getPlanDurationDays() <= 0)
             throw new BizException("套餐时长必须大于0");
 
+        // 精细化计费字段校验
+        if (updates.getImageExtraCost() != null && updates.getImageExtraCost() < 0)
+            throw new BizException("图片额外费用不能为负");
+        if (updates.getAnalyzeBaseCost() != null && updates.getAnalyzeBaseCost() < 0)
+            throw new BizException("分析基础费用不能为负");
+        if (updates.getAnalyzeCostPerMsg() != null && updates.getAnalyzeCostPerMsg() < 0)
+            throw new BizException("分析每条消息费用不能为负");
+        if (updates.getTtsCharsPerCredit() != null && updates.getTtsCharsPerCredit() <= 0)
+            throw new BizException("TTS字符数必须大于0");
+        if (updates.getTtsMinCost() != null && updates.getTtsMinCost() < 0)
+            throw new BizException("TTS最小费用不能为负");
+        if (updates.getMonthlyFreeQuota() != null && updates.getMonthlyFreeQuota() < 0)
+            throw new BizException("月度免费配额不能为负");
+        if (updates.getOvertaxRate() != null && updates.getOvertaxRate() < 1.0)
+            throw new BizException("超配额倍率不能小于1.0");
+        // 月卡折扣校验（0.01~1.0 之间，>1 没有意义）
+        double d = 1.0;
+        if (updates.getSmallMonthCardDiscount() != null) {
+            d = updates.getSmallMonthCardDiscount();
+            if (d < 0.01 || d > 1.0) throw new BizException("小月卡折扣必须在 0.01~1.0 之间");
+        }
+        if (updates.getLargeMonthCardDiscount() != null) {
+            d = updates.getLargeMonthCardDiscount();
+            if (d < 0.01 || d > 1.0) throw new BizException("大月卡折扣必须在 0.01~1.0 之间");
+        }
+        if (updates.getAllTierDiscount() != null) {
+            d = updates.getAllTierDiscount();
+            if (d < 0.01 || d > 1.0) throw new BizException("ALL状态折扣必须在 0.01~1.0 之间");
+        }
+        // 上下文长度校验
+        if (updates.getContextExtraCostPerMsg() != null && updates.getContextExtraCostPerMsg() < 0)
+            throw new BizException("上下文每条费用不能为负");
+        if (updates.getContextFreeMsgCount() != null && updates.getContextFreeMsgCount() < 0)
+            throw new BizException("上下文免费条数不能为负");
+        // 每日封顶校验（0=不限）
+        if (updates.getDailyCapCost() != null && updates.getDailyCapCost() < 0)
+            throw new BizException("每日封顶消耗不能为负");
+
         CreditRule saved = creditRuleService.setRule(updates);
         creditRuleService.evictCache();
 

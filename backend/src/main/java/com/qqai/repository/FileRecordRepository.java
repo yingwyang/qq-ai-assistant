@@ -71,4 +71,9 @@ public interface FileRecordRepository extends JpaRepository<FileRecord, Long> {
         }
         return result;
     }
+
+    /**
+     * 根据 fileId 列表批量删除
+     */
+    void deleteByFileIdIn(java.util.Collection<String> fileIds);
 }

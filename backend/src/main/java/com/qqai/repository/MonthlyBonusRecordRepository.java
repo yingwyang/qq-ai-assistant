@@ -10,4 +10,6 @@ import java.time.LocalDate;
 public interface MonthlyBonusRecordRepository extends JpaRepository<MonthlyBonusRecord, Long> {
 
     boolean existsByUserIdAndBonusDate(Long userId, LocalDate date);
+
+    void deleteByUserId(Long userId);
 }

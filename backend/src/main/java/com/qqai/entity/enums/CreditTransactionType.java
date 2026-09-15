@@ -6,6 +6,7 @@ public enum CreditTransactionType {
     AI_CONSUMPTION,
     AI_CHAT,
     AI_ANALYZE,
+    TTS_SYNTHESIS,
     SUBSCRIPTION_PURCHASE,
     REFUND,
     ADMIN_GRANT,

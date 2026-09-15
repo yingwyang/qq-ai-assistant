@@ -29,4 +29,6 @@ public interface SignInRecordRepository extends JpaRepository<SignInRecord, Long
     long countByUserIdAndDateRange(@Param("userId") Long userId, @Param("start") LocalDate start, @Param("end") LocalDate end);
 
     List<SignInRecord> findByUserIdAndSignInDateBetweenOrderBySignInDateAsc(Long userId, LocalDate start, LocalDate end);
+
+    void deleteByUserId(Long userId);
 }

@@ -201,6 +201,7 @@ import { showToast } from './Toast.vue';
 import { useMessageWebSocket } from '../composables/useMessageWebSocket';
 import { extractForwardXmlTitles, extractForwardMessages } from '../utils/messageParser';
 import { formatMessageTime } from '../utils/formatTime';
+import logger from '../utils/logger';
 
 const PAGE_SIZE = 50;
 const FALLBACK_POLL_MS = 10000;
@@ -323,7 +324,7 @@ export default {
         });
         groupMemberMap.value = map;
       } catch (error) {
-        console.warn('加载群成员昵称映射失败:', error);
+        logger.warn('加载群成员昵称映射失败:', error);
       }
     };
 
@@ -390,7 +391,7 @@ export default {
           nextTick(scrollToBottom);
         }
       } catch (error) {
-        console.error('加载消息失败:', error);
+        logger.error('加载消息失败:', error);
         if (showLoading) showToast(`加载消息失败: ${error.message}`, 'error');
       } finally {
         if (showLoading) isLoading.value = false;
@@ -424,7 +425,7 @@ export default {
           }
         });
       } catch (error) {
-        console.error('加载更多消息失败:', error);
+        logger.error('加载更多消息失败:', error);
         currentPage.value -= 1;
       } finally {
         isLoadingMore.value = false;
@@ -443,7 +444,7 @@ export default {
         // 通知父组件：有新消息，触发 Sidebar 刷新，让新消息多的群移至顶层
         emit('new-message-arrived');
       } catch (error) {
-        console.warn('增量拉取失败:', error);
+        logger.warn('增量拉取失败:', error);
       }
     };
 
@@ -765,7 +766,7 @@ export default {
         clearSelection();
         isSelectionMode.value = false;
       } catch (error) {
-        console.error('删除消息失败:', error);
+        logger.error('删除消息失败:', error);
         showToast(`删除失败: ${error.message}`, 'error');
       }
     };

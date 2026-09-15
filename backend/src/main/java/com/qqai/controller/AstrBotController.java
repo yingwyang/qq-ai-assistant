@@ -360,8 +360,7 @@ public class AstrBotController {
             okResult.put("status", "ok");
             return ResponseEntity.ok(okResult);
         } catch (Exception e) {
-            log.error("处理AstrBot消息失败: {}", e.getMessage());
-            e.printStackTrace();
+            log.error("处理AstrBot消息失败: {}", e.getMessage(), e);
             Map<String, Object> errorResult = new HashMap<>();
             errorResult.put("status", "error");
             errorResult.put("message", e.getMessage());
@@ -561,46 +560,17 @@ public class AstrBotController {
             log.info("AstrBot 分析结果: {}", analysis);
 
             // 积分扣费（AI_ANALYZE）
+            // 统一走 CreditService.spendForAnalyze：内部处理管理员免费、消息条数计费、
+            // 余额不足抛 BizException（携带 need/balance 详情），事务+行锁防透支。
             Long userIdForAnalyze = securityHelper.getCurrentUserId();
             Integer analyzeCostDeducted = null;
             Integer analyzeBalanceAfter = null;
             if (userIdForAnalyze != null) {
-                CreditRule ruleForAnalyze = creditRuleService.getRule();
-                boolean isAdminForAnalyze = securityHelper.isAdmin();
-                if (isAdminForAnalyze && Boolean.TRUE.equals(ruleForAnalyze.getAdminFree())) {
-                    // 管理员免费：写一条 AI_ANALYZE 流水，金额为 0
-                    try {
-                        com.qqai.entity.UserCredit account = creditService.ensureAccount(userIdForAnalyze);
-                        com.qqai.entity.CreditTransaction tx = new com.qqai.entity.CreditTransaction();
-                        tx.setUserId(userIdForAnalyze);
-                        tx.setType(CreditTransactionType.AI_ANALYZE);
-                        tx.setDirection(com.qqai.entity.enums.CreditDirection.OUT);
-                        tx.setAmount(0);
-                        tx.setBalanceAfter(account.getBalance());
-                        tx.setRemark("analyze:" + analysisType + "/ADMIN_FREE");
-                        tx.setRelatedId(groupId);
-                        creditTransactionRepository.save(tx);
-                    } catch (Exception logEx) {
-                        log.warn("记录管理员免费分析流水失败: {}", logEx.getMessage());
-                    }
-                    analyzeCostDeducted = 0;
-                    analyzeBalanceAfter = creditService.ensureAccount(userIdForAnalyze).getBalance();
-                } else {
-                    int defaultCost = ruleForAnalyze.getDefaultCostPerMsg() != null ? ruleForAnalyze.getDefaultCostPerMsg() : 10;
-                    int analyzeCost = defaultCost * 2;
-                    int currentBalanceForAnalyze = creditService.ensureAccount(userIdForAnalyze).getBalance();
-                    if (currentBalanceForAnalyze < analyzeCost) {
-                        Map<String, Object> details = new HashMap<>();
-                        details.put("need", analyzeCost);
-                        details.put("balance", currentBalanceForAnalyze);
-                        throw new BizException(400, CreditErrorCode.INSUFFICIENT_CREDITS,
-                                "积分不足，需要 " + analyzeCost + " 积分，当前余额 " + currentBalanceForAnalyze, details);
-                    }
-                    com.qqai.entity.CreditTransaction spentTx = creditService.spendPoints(userIdForAnalyze, analyzeCost, CreditTransactionType.AI_ANALYZE,
-                            "analyze:" + analysisType, groupId);
-                    analyzeCostDeducted = analyzeCost;
-                    analyzeBalanceAfter = spentTx != null ? spentTx.getBalanceAfter() : (currentBalanceForAnalyze - analyzeCost);
-                }
+                int analyzedMessageCount = messages != null ? messages.size() : 0;
+                CreditService.CreditCostResult analyzeResult = creditService.spendForAnalyze(
+                        userIdForAnalyze, analyzedMessageCount, analysisType, groupId, securityHelper.isAdmin());
+                analyzeCostDeducted = analyzeResult.getCost();
+                analyzeBalanceAfter = analyzeResult.getBalanceAfter();
             }
 
             // 返回分析结果
@@ -619,8 +589,7 @@ public class AstrBotController {
                 .body(objectMapper.writeValueAsString(result));
             
         } catch (Exception e) {
-            log.error("AstrBot 分析请求失败: {}", e.getMessage());
-            e.printStackTrace();
+            log.error("AstrBot 分析请求失败: {}", e.getMessage(), e);
             try {
                 ObjectNode error = objectMapper.createObjectNode();
                 error.put("status", "error");
@@ -849,48 +818,19 @@ public class AstrBotController {
 
             log.info("analyze-selected 完成 groupId={} analysisType={} analysisLen={}", groupId, analysisType, analysis.length());
 
-            // 7. 积分扣费（AI_ANALYZE，与 analyzeGroupMessages 相同规则：defaultCost*2）
+            // 7. 积分扣费（AI_ANALYZE）
+            // 统一走 CreditService.spendForAnalyze：内部处理管理员免费、消息条数计费、
+            // 余额不足抛 BizException（携带 need/balance 详情），事务+行锁防透支。
             Long userId = securityHelper.getCurrentUserId();
             Integer costDeducted = null;
             Integer balanceAfter = null;
             if (userId != null) {
-                CreditRule rule = creditRuleService.getRule();
-                boolean isAdmin = securityHelper.isAdmin();
-                if (isAdmin && Boolean.TRUE.equals(rule.getAdminFree())) {
-                    try {
-                        com.qqai.entity.UserCredit account = creditService.ensureAccount(userId);
-                        com.qqai.entity.CreditTransaction tx = new com.qqai.entity.CreditTransaction();
-                        tx.setUserId(userId);
-                        tx.setType(CreditTransactionType.AI_ANALYZE);
-                        tx.setDirection(com.qqai.entity.enums.CreditDirection.OUT);
-                        tx.setAmount(0);
-                        tx.setBalanceAfter(account.getBalance());
-                        tx.setRemark("analyze-selected:" + analysisType + "/ADMIN_FREE");
-                        tx.setRelatedId(groupId != null ? groupId : "");
-                        creditTransactionRepository.save(tx);
-                    } catch (Exception logEx) {
-                        log.warn("记录管理员免费分析流水失败: {}", logEx.getMessage());
-                    }
-                    costDeducted = 0;
-                    balanceAfter = creditService.ensureAccount(userId).getBalance();
-                } else {
-                    int defaultCost = rule.getDefaultCostPerMsg() != null ? rule.getDefaultCostPerMsg() : 10;
-                    int cost = defaultCost * 2;
-                    int currentBalance = creditService.ensureAccount(userId).getBalance();
-                    if (currentBalance < cost) {
-                        Map<String, Object> details = new HashMap<>();
-                        details.put("need", cost);
-                        details.put("balance", currentBalance);
-                        throw new BizException(400, CreditErrorCode.INSUFFICIENT_CREDITS,
-                                "积分不足，需要 " + cost + " 积分，当前余额 " + currentBalance, details);
-                    }
-                    com.qqai.entity.CreditTransaction spentTx = creditService.spendPoints(userId, cost,
-                            CreditTransactionType.AI_ANALYZE,
-                            "analyze-selected:" + analysisType,
-                            groupId != null ? groupId : "");
-                    costDeducted = cost;
-                    balanceAfter = spentTx != null ? spentTx.getBalanceAfter() : (currentBalance - cost);
-                }
+                int analyzedMessageCount = messageIds != null ? messageIds.size() : 0;
+                CreditService.CreditCostResult analyzeResult = creditService.spendForAnalyze(
+                        userId, analyzedMessageCount, analysisType,
+                        groupId != null ? groupId : "", securityHelper.isAdmin());
+                costDeducted = analyzeResult.getCost();
+                balanceAfter = analyzeResult.getBalanceAfter();
             }
 
             // 8. 返回结果（同时按 groupType 推荐分析类型，便于前端展示默认推荐）
@@ -1025,6 +965,18 @@ public class AstrBotController {
 
             // 3. 保存用户消息到数据库
             conversationService.addUserMessage(currentConversationId, message, null);
+
+            // 3.5 先预估本次费用（基于当前已有的上下文消息数，传入 context.size()），
+            // 用于前端显示预估消耗；实际扣费放在成功拿到 AstrBot 回复之后，失败时不扣费。
+            Integer estimateCost = null;
+            Integer balanceBefore = null;
+            if (userId != null) {
+                // 仅预估，不扣费
+                CreditService.CreditCostResult estimated = creditService.estimateChatCost(
+                        userId, model, null, null, 0, context.size(), securityHelper.isAdmin());
+                estimateCost = estimated.getCost();
+                balanceBefore = estimated.getBalanceAfter();
+            }
 
             // 4. 调用 AstrBot HTTP API
             String url = astrBotApiUrl + "/api/v1/chat";
@@ -1168,70 +1120,17 @@ public class AstrBotController {
                     totalTokens, promptTokens, completionTokens);
 
             // 7. 积分扣费（AI_CHAT）
-            // 扣费规则：
-            //   - 管理员且 creditRule.adminFree=true：跳过扣费，仅写一条金额 0 的 AI_CHAT 流水用于审计。
-            //   - 普通用户：cost = max(minCost, ceil((p*promptRate + c*completionRate) / tokenUnit))，
-            //     其中 p=输入 token 数，c=输出 token 数；当 token 数为 0/null 时回退到 defaultCostPerMsg。
-            //   - 余额不足抛 INSUFFICIENT_CREDITS（携带 need/balance 详情）。
-            //   - 扣费调用 CreditService.spendPoints，事务+行锁防透支，与 AI_CHAT 流水同事务落库。
-            CreditRule creditRule = creditRuleService.getRule();
+            // 统一走 CreditService.spendForChat（带上下文消息数）：内部处理管理员免费、token 计费、
+            // 月度配额、月卡折扣、阶梯折扣、每日封顶、余额不足抛 BizException，事务+行锁防透支。
             Integer costDeducted = null;
             Integer balanceAfter = null;
 
             if (userId != null) {
-                boolean isAdmin = securityHelper.isAdmin();
-                if (isAdmin && Boolean.TRUE.equals(creditRule.getAdminFree())) {
-                    // 管理员免费：写一条 AI_CHAT 流水，金额为 0
-                    try {
-                        com.qqai.entity.UserCredit account = creditService.ensureAccount(userId);
-                        com.qqai.entity.CreditTransaction tx = new com.qqai.entity.CreditTransaction();
-                        tx.setUserId(userId);
-                        tx.setType(CreditTransactionType.AI_CHAT);
-                        tx.setDirection(com.qqai.entity.enums.CreditDirection.OUT);
-                        tx.setAmount(0);
-                        tx.setBalanceAfter(account.getBalance());
-                        tx.setRemark(model + "/ADMIN_FREE");
-                        tx.setRelatedId(currentConversationId);
-                        creditTransactionRepository.save(tx);
-                    } catch (Exception logEx) {
-                        log.warn("记录管理员免费流水失败: {}", logEx.getMessage());
-                    }
-                    costDeducted = 0;
-                    balanceAfter = creditService.ensureAccount(userId).getBalance();
-                } else {
-                    // 非管理员或 adminFree=false，计算并扣费
-                    int p = (promptTokens != null) ? promptTokens : 0;
-                    int c = (completionTokens != null) ? completionTokens : 0;
-                    int cost;
-                    if ((p == 0 && c == 0)
-                            || (promptTokens == null && completionTokens == null)) {
-                        cost = creditRule.getDefaultCostPerMsg() != null ? creditRule.getDefaultCostPerMsg() : 10;
-                    } else {
-                        int tokenUnit = creditRule.getTokenUnit() != null ? creditRule.getTokenUnit() : 1000;
-                        int promptRate = creditRule.getPromptRate() != null ? creditRule.getPromptRate() : 2;
-                        int completionRate = creditRule.getCompletionRate() != null ? creditRule.getCompletionRate() : 4;
-                        int minCost = creditRule.getMinCost() != null ? creditRule.getMinCost() : 5;
-                        long numerator = (long) p * promptRate + (long) c * completionRate;
-                        int raw = (int) Math.ceil((double) numerator / tokenUnit);
-                        cost = Math.max(minCost, raw);
-                    }
-
-                    // 查询当前余额用于异常 details
-                    int currentBalance = creditService.ensureAccount(userId).getBalance();
-                    if (currentBalance < cost) {
-                        Map<String, Object> details = new HashMap<>();
-                        details.put("need", cost);
-                        details.put("balance", currentBalance);
-                        throw new BizException(400, CreditErrorCode.INSUFFICIENT_CREDITS,
-                                "积分不足，需要 " + cost + " 积分，当前余额 " + currentBalance, details);
-                    }
-
-                    // 扣费（事务 + 行锁 + 写流水）
-                    com.qqai.entity.CreditTransaction tx = creditService.spendPoints(
-                            userId, cost, CreditTransactionType.AI_CHAT, model, currentConversationId);
-                    costDeducted = cost;
-                    balanceAfter = tx.getBalanceAfter();
-                }
+                CreditService.CreditCostResult chatResult = creditService.spendForChat(
+                        userId, model, promptTokens, completionTokens, 0, context.size(),
+                        currentConversationId, securityHelper.isAdmin());
+                costDeducted = chatResult.getCost();
+                balanceAfter = chatResult.getBalanceAfter();
             }
 
             // 8. 如果是新对话，自动生成标题
@@ -1245,6 +1144,9 @@ public class AstrBotController {
             result.put("data", finalReply);
             result.put("conversationId", currentConversationId);
             result.put("messageCount", conversation.getMessageCount() + 2); // +2 因为刚保存了两条消息
+            if (estimateCost != null) {
+                result.put("estimateCost", estimateCost);
+            }
             if (costDeducted != null) {
                 result.put("cost", costDeducted);
             }
@@ -1256,8 +1158,7 @@ public class AstrBotController {
             return ResponseEntity.ok(result);
 
         } catch (Exception e) {
-            log.error("发送消息到 AstrBot 失败: {}", e.getMessage());
-            e.printStackTrace();
+            log.error("发送消息到 AstrBot 失败: {}", e.getMessage(), e);
             
             String errorMsg = e.getMessage();
             String fallbackMessage = "AstrBot 服务暂时不可用，请稍后重试";

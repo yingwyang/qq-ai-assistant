@@ -10,6 +10,7 @@ public class ApiResponse<T> {
     private String status;
     private String errorCode;
     private Object details;
+    private String traceId;
 
     public ApiResponse() {
     }
@@ -50,6 +51,21 @@ public class ApiResponse<T> {
         resp.setStatus("error");
         resp.setErrorCode(errorCode);
         resp.setDetails(details);
+        return resp;
+    }
+
+    public static <T> ApiResponse<T> errorWithTrace(int code, String message, String traceId) {
+        ApiResponse<T> resp = new ApiResponse<>(code, message, null);
+        resp.setStatus("error");
+        resp.setTraceId(traceId);
+        return resp;
+    }
+
+    public static <T> ApiResponse<T> errorWithTrace(int code, String errorCode, String message, String traceId) {
+        ApiResponse<T> resp = new ApiResponse<>(code, message, null);
+        resp.setStatus("error");
+        resp.setErrorCode(errorCode);
+        resp.setTraceId(traceId);
         return resp;
     }
 
@@ -99,5 +115,13 @@ public class ApiResponse<T> {
 
     public void setDetails(Object details) {
         this.details = details;
+    }
+
+    public String getTraceId() {
+        return traceId;
+    }
+
+    public void setTraceId(String traceId) {
+        this.traceId = traceId;
     }
 }
