@@ -104,38 +104,98 @@ public class MediaDownloadService {
             String fileName = UUID.randomUUID() + defaultExt;
             Path localPath = groupDir.resolve(fileName);
 
-            // ===== 第 1 级:CQ 码中的 url/path 直连 =====
-            if (mediaUrl != null && !mediaUrl.isEmpty()) {
-                String result = trySource(mediaUrl, localPath, groupId, mediaType, dateFolder, fileName, trustedSource);
-                if (result != null) {
-                    return result;
-                }
-                log.warn("CQ 直连获取失败,改用 NapCat get_file 兜底: mediaType={}, fileId={}, url={}",
-                        mediaType, effectiveFileId, mediaUrl);
-            } else {
-                log.warn("CQ 码中无 url/path,直接使用 NapCat get_file: mediaType={}, fileId={}, cq={}",
-                        mediaType, effectiveFileId, cqMessage);
+            String result = downloadFromSources(cqMessage, mediaUrl, effectiveFileId, localPath,
+                    groupId, mediaType, dateFolder, fileName, trustedSource);
+            if (result != null) {
+                return result;
             }
 
-            // ===== 第 2 级:NapCat get_file 兜底 =====
-            // 视频/语音常见:QQ 只上报 fileId,或 CDN url 已过期(群消息延迟消费时尤其明显)
-            if (effectiveFileId == null || effectiveFileId.isBlank()) {
-                log.error("无法获取媒体: CQ 码既无可用 url/path,也没有 fileId 可用于 get_file。cq={}", cqMessage);
-                return null;
+            // ===== 第 3 级:视频缩略图兜底 =====
+            // QQ(NT) 默认不在本地保留视频原片(仅缩略图),NapCat 上报的本地路径往往已失效;
+            // 此时落盘 QQ 缩略图作为预览,避免前端只剩"[视频已过期]"。
+            if ("video".equals(mediaType)) {
+                String thumb = tryVideoThumbnailFallback(mediaUrl, groupDir, groupId, mediaType, dateFolder);
+                if (thumb != null) {
+                    return thumb;
+                }
             }
-            String resolved = resolveFileViaNapCatApi(cqMessage, effectiveFileId);
-            if (resolved == null) {
-                log.error("NapCat get_file 未能解析出可下载地址: fileId={}, cq={}", effectiveFileId, cqMessage);
-                return null;
-            }
-            // get_file 返回的是 NapCat 可信结果,允许读取 uploads 之外的本地缓存文件
-            String result = trySource(resolved, localPath, groupId, mediaType, dateFolder, fileName, true);
-            if (result == null) {
-                log.error("get_file 解析出的地址仍无法获取媒体: fileId={}, resolved={}", effectiveFileId, resolved);
-            }
-            return result;
+            return null;
         } catch (Exception e) {
             log.error("下载{}到本地时出错: {}", mediaType, e.getMessage(), e);
+            return null;
+        }
+    }
+
+    /**
+     * 依次尝试:CQ 直连 → NapCat get_file 兜底。返回相对路径或 null。
+     */
+    private String downloadFromSources(String cqMessage, String mediaUrl, String effectiveFileId, Path localPath,
+                                       String groupId, String mediaType, String dateFolder, String fileName,
+                                       boolean trustedSource) throws IOException {
+        // ===== 第 1 级:CQ 码中的 url/path 直连 =====
+        if (mediaUrl != null && !mediaUrl.isEmpty()) {
+            String result = trySource(mediaUrl, localPath, groupId, mediaType, dateFolder, fileName, trustedSource);
+            if (result != null) {
+                return result;
+            }
+            log.warn("CQ 直连获取失败,改用 NapCat get_file 兜底: mediaType={}, fileId={}, url={}",
+                    mediaType, effectiveFileId, mediaUrl);
+        } else {
+            log.warn("CQ 码中无 url/path,直接使用 NapCat get_file: mediaType={}, fileId={}, cq={}",
+                    mediaType, effectiveFileId, cqMessage);
+        }
+
+        // ===== 第 2 级:NapCat get_file 兜底 =====
+        if (effectiveFileId == null || effectiveFileId.isBlank()) {
+            log.error("无法获取媒体: CQ 码既无可用 url/path,也没有 fileId 可用于 get_file。cq={}", cqMessage);
+            return null;
+        }
+        String resolved = resolveFileViaNapCatApi(cqMessage, effectiveFileId);
+        if (resolved == null) {
+            log.error("NapCat get_file 未能解析出可下载地址: fileId={}, cq={}", effectiveFileId, cqMessage);
+            return null;
+        }
+        String result = trySource(resolved, localPath, groupId, mediaType, dateFolder, fileName, true);
+        if (result == null) {
+            log.error("get_file 解析出的地址仍无法获取媒体: fileId={}, resolved={}", effectiveFileId, resolved);
+        }
+        return result;
+    }
+
+    /**
+     * 视频缩略图兜底:由视频原片路径推导 QQ 缩略图路径
+     * (...\Video\<yyyy-MM>\Ori\<uuid>.mp4 → ...\Video\<yyyy-MM>\Thumb\<uuid>_0.png)。
+     *
+     * @return 缩略图相对访问路径,找不到返回 null
+     */
+    private String tryVideoThumbnailFallback(String mediaUrl, Path groupDir, String groupId,
+                                             String mediaType, String dateFolder) {
+        try {
+            if (mediaUrl == null || mediaUrl.isBlank() || !isLocalFilePath(mediaUrl)) {
+                return null;
+            }
+            String normalized = mediaUrl.replace('\\', '/');
+            int oriIdx = normalized.toLowerCase().lastIndexOf("/ori/");
+            if (oriIdx < 0) {
+                return null;
+            }
+            String prefix = normalized.substring(0, oriIdx);           // .../Video/2026-09
+            String fileName = normalized.substring(oriIdx + 5);        // <uuid>.mp4
+            int dot = fileName.lastIndexOf('.');
+            String base = dot > 0 ? fileName.substring(0, dot) : fileName;
+            Path thumbPath = Paths.get(prefix + "/Thumb/" + base + "_0.png");
+            if (!Files.exists(thumbPath)) {
+                log.warn("视频原片缺失且未找到缩略图: {}", thumbPath);
+                return null;
+            }
+            String thumbName = UUID.randomUUID() + ".png";
+            Path target = groupDir.resolve(thumbName);
+            Files.copy(thumbPath, target, StandardCopyOption.REPLACE_EXISTING);
+            String relative = "/images/" + mediaType + "/" + groupId + "/" + dateFolder + "/" + thumbName;
+            log.info("视频原片不可用,已落盘 QQ 缩略图作为预览: {} -> {}", thumbPath, relative);
+            return relative;
+        } catch (Exception e) {
+            log.warn("视频缩略图兜底失败: {}", e.getMessage());
             return null;
         }
     }

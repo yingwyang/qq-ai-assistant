@@ -72,7 +72,9 @@
         </div>
       </div>
       <div v-if="isForwardExpanded && forwardMessages.length === 0" class="forward-empty" @click.stop>
-        暂无聊天记录详情
+        <div v-if="forwardFallbackText" class="forward-fallback">{{ forwardFallbackText }}</div>
+        <div v-else>暂无聊天记录详情</div>
+        <div class="forward-hint">合并转发消息详情需 NapCat 在线时同步拉取</div>
       </div>
       <button
         v-if="forwardMessages.length > 0"
@@ -113,8 +115,18 @@
     
     <!-- 视频消息 -->
     <div v-else-if="isVideoMessage" class="message-video">
+      <!-- 原视频未被 QQ 缓存的场景:后端落盘的是 QQ 缩略图,直接展示预览图 -->
+      <div v-if="videoUrl && videoPreviewImage" class="video-preview-wrap">
+        <img
+          :src="videoUrl"
+          class="video-preview-img"
+          alt="视频预览"
+          @click="openImage(videoUrl)"
+        />
+        <span class="video-preview-label">原视频未缓存，仅预览</span>
+      </div>
       <video
-        v-if="videoUrl && !videoError"
+        v-else-if="videoUrl && !videoError"
         :src="videoUrl"
         controls
         class="video-player"
@@ -176,6 +188,7 @@ import RichTextRenderer from './RichTextRenderer.vue';
 import { systemApi, formatFileSize } from '../services/api';
 import { useImagePreview } from '../composables/useImagePreview';
 import { extractForwardXmlTitles, extractForwardMessages } from '../utils/messageParser';
+import logger from '../utils/logger';
 
 export default {
   name: 'MessageContent',
@@ -365,6 +378,16 @@ export default {
       return '合并转发消息';
     });
 
+    // 合并转发内容不可用时的回退文本（显示 forward ID）
+    const forwardFallbackText = computed(() => {
+      const c = content.value;
+      const idMatch = c.match(/\[CQ:forward,id=([^\]]+)\]/);
+      if (idMatch && idMatch[1]) {
+        return `合并转发消息 (ID: ${idMatch[1]})`;
+      }
+      return '';
+    });
+
     // 切换聊天记录展开/收起
     const toggleForwardExpanded = () => {
       isForwardExpanded.value = !isForwardExpanded.value;
@@ -486,10 +509,9 @@ export default {
         };
       }
       
-      console.log('解析出的小程序数据:', result);
       return result;
     };
-    
+
     // 解析小程序数据
     const miniAppData = computed(() => {
       let miniAppContent = props.message.miniAppContent;
@@ -499,12 +521,10 @@ export default {
         const dataMatch = content.value.match(/data=({.+})/);
         if (dataMatch && dataMatch[1]) {
           miniAppContent = dataMatch[1];
-          console.log('从 content 提取到小程序JSON数据, 长度:', miniAppContent.length);
         }
       }
-      
+
       if (!miniAppContent) {
-        console.log('miniAppContent为空, 尝试从content提取...');
         // 如果 content 中包含 json 字符串，尝试提取
         if (content.value) {
           const jsonMatch = content.value.match(/{.+}/);
@@ -522,9 +542,8 @@ export default {
       
       try {
         let jsonStr = decodeHtmlEntities(miniAppContent);
-        console.log('解码后的小程序JSON长度:', jsonStr.length);
-        console.log('解码后的小程序JSON片段:', jsonStr.substring(0, 300));
-        
+        logger.debug('解码后的小程序JSON长度:', jsonStr.length);
+
         // 尝试解析 JSON，如果失败则尝试提取第一个有效的 JSON 对象
         let json = null;
         try {
@@ -547,7 +566,7 @@ export default {
             }
             if (endPos > firstBrace) {
               const extracted = jsonStr.substring(firstBrace, endPos + 1);
-              console.log('尝试提取第一个JSON对象:', extracted.substring(0, 200));
+              logger.debug('尝试提取第一个JSON对象:', extracted.substring(0, 200));
               json = JSON.parse(extracted);
             }
           }
@@ -555,17 +574,16 @@ export default {
         }
         return extractMiniAppInfo(json);
       } catch (e) {
-        console.error('解析小程序数据失败:', e);
-        console.error('原始数据前200字符:', miniAppContent.substring(0, 200));
-        console.error('原始数据长度:', miniAppContent.length);
+        logger.error('解析小程序数据失败:', e);
+        logger.error('原始数据前200字符:', miniAppContent.substring(0, 200));
+        logger.error('原始数据长度:', miniAppContent.length);
         return {};
       }
     });
     
     const openMiniAppUrl = () => {
-      console.log('点击小程序卡片', miniAppData.value);
       let url = miniAppData.value.url;
-      
+
       if (!url) {
         url = content.value.match(/url=([^,\]]+)/);
         if (url && url[1]) {
@@ -574,16 +592,15 @@ export default {
           url = '';
         }
       }
-      
-      console.log('小程序URL:', url);
+
+      logger.debug('小程序URL:', url);
       if (url) {
         if (!url.startsWith('http://') && !url.startsWith('https://')) {
           url = 'https://' + url;
         }
-        console.log('打开链接:', url);
         window.open(url, '_blank');
       } else {
-        console.warn('小程序URL为空');
+        logger.warn('小程序URL为空');
         showToast('无法获取小程序链接', 'info');
       }
     };
@@ -741,6 +758,9 @@ export default {
       return '';
     });
     
+    // 判断视频内容是否其实是预览图(后端在视频原片缺失时落盘 QQ 缩略图)
+    const videoPreviewImage = computed(() => /\.(png|jpe?g|webp|gif|bmp)(\?.*)?$/i.test(videoUrl.value || ''));
+
     // 提取视频文件大小
     const videoSize = computed(() => {
       const c = content.value;
@@ -779,7 +799,6 @@ export default {
     const convertedVoiceUrl = ref('');
     const toggleVoicePlay = async () => {
       let url = voiceUrl.value;
-      console.log('语音播放点击, voiceUrl:', url);
       if (!url) {
         showToast('音频地址为空', 'error');
         return;
@@ -825,7 +844,7 @@ export default {
               return;
             }
           } catch (err) {
-            console.error('语音转码失败:', err);
+            logger.error('语音转码失败:', err);
             showToast('语音转码失败: ' + (err.message || '未知错误'), 'error');
             isConverting.value = false;
             return;
@@ -848,7 +867,7 @@ export default {
 
       audio.addEventListener('error', (e) => {
         const errorCode = audio.error?.code;
-        console.warn('语音加载错误:', url, 'code:', errorCode);
+        logger.warn('语音加载错误:', url, 'code:', errorCode);
         if (errorCode === 2 || errorCode === 4 || errorCode === 1) {
           showToast('音频已删除', 'info');
         } else {
@@ -859,11 +878,10 @@ export default {
       });
 
       audio.play().then(() => {
-        console.log('播放成功');
         isPlaying.value = true;
       }).catch(e => {
-        console.error('播放失败:', e);
-        console.error('音频URL:', url);
+        logger.error('播放失败:', e);
+        logger.error('音频URL:', url);
         showToast('语音播放失败: ' + e.message, 'error');
         isPlaying.value = false;
         currentAudio = null;
@@ -887,6 +905,7 @@ export default {
       replyText,
       onReplyClick,
       forwardSummary,
+      forwardFallbackText,
       forwardMessages,
       isForwardExpanded,
       toggleForwardExpanded,
@@ -912,6 +931,7 @@ export default {
       voiceDuration,
       videoUrl,
       videoSize,
+      videoPreviewImage,
       faceUrl,
       faceId,
       displayContent,
@@ -1051,6 +1071,18 @@ export default {
   background-color: rgba(0, 0, 0, 0.03);
   border-radius: 6px;
   text-align: center;
+}
+
+.forward-fallback {
+  color: #666;
+  font-weight: 500;
+  margin-bottom: 2px;
+}
+
+.forward-hint {
+  font-size: 11px;
+  color: #bbb;
+  margin-top: 4px;
 }
 
 .forward-header {
@@ -1227,6 +1259,33 @@ export default {
   width: 100%;
   border-radius: 8px;
   display: block;
+}
+
+/* 视频原片未缓存时展示 QQ 缩略图预览 */
+.message-video .video-preview-wrap {
+  position: relative;
+  display: block;
+}
+
+.message-video .video-preview-img {
+  width: 100%;
+  max-height: 320px;
+  object-fit: contain;
+  border-radius: 8px;
+  display: block;
+  cursor: zoom-in;
+  background-color: #000;
+}
+
+.message-video .video-preview-label {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.55);
 }
 
 .message-video .video-placeholder {

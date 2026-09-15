@@ -75,6 +75,10 @@ public class RootWebhookController {
         // 日志脱敏:不打印原始消息内容与认证头,仅记录长度
         int payloadLen = payload != null ? payload.length() : 0;
         log.info("【根路径】收到NapCat消息, payload长度={}", payloadLen);
+        // 视频调试抓包:临时输出视频事件的完整载荷,用于确认 NapCat 是否上报 CDN 直链
+        if (payload != null && (payload.contains("\"video\"") || payload.contains("videoElement"))) {
+            log.info("【视频调试】完整载荷: {}", payload.length() > 4000 ? payload.substring(0, 4000) : payload);
+        }
         long webhookStartMs = System.currentTimeMillis();
 
         // 验证 Webhook Token（支持多种头格式和URL参数）。
