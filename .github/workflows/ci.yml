@@ -1,0 +1,86 @@
+name: CI
+
+# 什么时候跑：
+#  - 推到 main / 向 main 提 PR 时（只在这些路径有改动时触发，改文档不会白跑）
+#  - 也可以在 GitHub 的 Actions 页面手动点 "Run workflow"
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - 'frontend/**'
+      - '.github/workflows/**'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - 'frontend/**'
+      - '.github/workflows/**'
+  workflow_dispatch:
+
+# 同一分支连续推送时，取消上一次还没跑完的任务
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------- 后端：编译 + 跑测试 + 打包 ----------
+  backend:
+    name: 后端（Maven / JDK 17）
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: temurin
+          cache: maven
+
+      # 测试用 H2 内存库（见 backend/src/test/resources/application.yml），
+      # 不需要 MySQL / RabbitMQ / MinIO，也不需要任何密钥
+      - name: 构建并测试
+        run: mvn -B -ntp package
+
+      - name: 上传可执行 jar
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-jar
+          path: backend/target/*.jar
+          if-no-files-found: warn
+          retention-days: 7
+
+  # ---------- 前端：依赖安装 + 生产构建 ----------
+  frontend:
+    name: 前端（Vite / Node 22）
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 生产构建
+        run: npm run build
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist
+          if-no-files-found: warn
+          retention-days: 7
