@@ -43,6 +43,112 @@ public class MessageController {
     @Autowired
     private AuditLogService auditLogService;
 
+    @Autowired
+    private com.qqai.service.AstrBotService astrBotService;
+
+    @Autowired
+    private com.qqai.service.AiSummaryParser aiSummaryParser;
+
+    @Autowired
+    private com.qqai.common.RateLimiterService rateLimiterService;
+
+    @Autowired
+    private com.qqai.service.MessageBroadcastService messageBroadcastService;
+
+
+    /**
+     * 单条按需摘要（阶段 1）：POST /api/messages/{id}/summarize?force=false
+     *
+     * <ul>
+     *   <li>权限：登录用户 + 该消息所属群对当前用户可见；管理员不受限</li>
+     *   <li>限流：每用户 10 次/分钟（超出 429）</li>
+     *   <li>幂等：已有摘要且 force=false 时直接返回 {@code cached:true}，不再调用大模型、不计额度</li>
+     *   <li>同步返回：单条通常 2–16 秒</li>
+     * </ul>
+     */
+    @PostMapping("/{id}/summarize")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> summarizeMessage(
+            @PathVariable Long id,
+            @RequestParam(defaultValue = "false") boolean force) {
+
+        Long userId = securityHelper.getCurrentUserId();
+        if (userId == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(ApiResponse.error(401, "未登录"));
+        }
+
+        Optional<Message> opt = messageService.getMessageById(id);
+        if (opt.isEmpty()) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ApiResponse.error(404, "消息不存在"));
+        }
+        Message message = opt.get();
+
+        // 群可见性校验（管理员不受限）
+        if (!securityHelper.isAdmin()) {
+            List<String> userQqList = securityHelper.getCurrentUserQqBindings();
+            if (userQqList.isEmpty()) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(ApiResponse.error(403, "请先绑定QQ账号"));
+            }
+            if (!securityHelper.hasGroupAccess(message.getGroupId(), userQqList)) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(ApiResponse.error(403, "无权访问该群聊"));
+            }
+        }
+
+        // 幂等：已有摘要直接返回缓存
+        if (!force && aiSummaryParser.hasSummary(message)) {
+            Map<String, Object> data = new LinkedHashMap<>();
+            data.put("status", "cached");
+            data.put("cached", true);
+            data.put("summary", aiSummaryParser.toView(message));
+            return ResponseEntity.ok(ApiResponse.success(data));
+        }
+
+        // 限流：每用户 10 次/分钟（缓存命中不计入，放在幂等判断之后）
+        if (!rateLimiterService.isAllowed("summarize:" + userId, 10, 1)) {
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                    .body(ApiResponse.error(429, "操作过于频繁，请稍后再试（每分钟最多 10 条）"));
+        }
+
+        String rendered = astrBotService.renderMessageForSummary(message);
+        if (rendered == null || rendered.trim().isEmpty()) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(ApiResponse.error(400, "该消息没有可摘要的文本内容"));
+        }
+
+        String summary;
+        try {
+            summary = astrBotService.summarizeMessageStructured(rendered, null, resolveGroupType(message.getGroupId()));
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                    .body(ApiResponse.error(503, "AI 服务暂不可用：" + e.getMessage()));
+        }
+        if (summary == null || summary.isBlank()) {
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                    .body(ApiResponse.error(503, "AI 服务返回为空，请稍后重试"));
+        }
+
+        message.setAiSummary(summary);
+        aiSummaryParser.applyStructured(message, summary);
+        message.setProcessed(true);
+        Message updated = messageService.saveMessage(message);
+        messageBroadcastService.broadcastMessageUpdate(updated);
+
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("status", "ok");
+        data.put("cached", false);
+        data.put("summary", aiSummaryParser.toView(updated));
+        return ResponseEntity.ok(ApiResponse.success(data));
+    }
+
+    /** 从消息所属群解析 groupType（与 AI 分析消费者口径一致） */
+    private String resolveGroupType(String groupId) {
+        if (groupId == null || groupId.isBlank()) return null;
+        try {
+            return messageService.getGroupTypeByGroupId(groupId);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
 
 
     @PostMapping

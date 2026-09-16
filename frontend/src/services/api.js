@@ -218,6 +218,15 @@ export const messageApi = {
 
   processAllMessages: () => request('/messages/process', { method: 'POST' }),
 
+  /**
+   * 单条按需 AI 摘要（阶段 1）
+   * @param {number} messageId 消息 id
+   * @param {boolean} force 已有摘要时是否强制重新生成（默认 false → 命中缓存直接返回）
+   * @returns {Promise<{status:string, cached:boolean, summary:{tags:string[],summary:string,sentiment:string}}>}
+   */
+  summarize: (messageId, force = false) =>
+    request(`/messages/${messageId}/summarize?force=${force ? 'true' : 'false'}`, { method: 'POST' }),
+
   uploadFile: (file, fileType) => {
     const formData = new FormData();
     formData.append('file', file);

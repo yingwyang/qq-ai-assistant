@@ -426,6 +426,15 @@ public class MessageService {
         return messageRepository.findById(id);
     }
 
+    /** 取群类型（按需摘要接口复用，口径与 AI 分析消费者一致；取不到返回 null） */
+    public String getGroupTypeByGroupId(String groupId) {
+        if (groupId == null || groupId.isBlank()) return null;
+        List<Group> groups = groupRepository.safeFindByGroupId(groupId);
+        if (groups.isEmpty()) return null;
+        String gt = groups.get(0).getGroupType();
+        return (gt != null && !gt.isBlank()) ? gt : null;
+    }
+
     /**
      * 单条删除消息（软删除：deleted=true，deletedAt=NOW，记录删除者）
      * 保留 archived 原值（后台归档与用户删除两套独立语义）。

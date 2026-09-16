@@ -158,6 +158,19 @@
               </div>
               <!-- 消息内容 -->
               <MessageContent :message="message" :qq-nickname-map="qqNicknameMap" :gallery="chatImageGallery" @navigate-to-message="handleNavigateToMessage" />
+              <!-- 按需摘要按钮（悬停显示） -->
+              <div class="msg-actions" @click.stop>
+                <button
+                  class="msg-action-btn"
+                  :disabled="isSummarizing(message.id)"
+                  :title="message.aiSummaryView ? '重新生成摘要' : '为这条消息生成 AI 摘要'"
+                  @click="summarizeOne(message)"
+                >
+                  <span v-if="isSummarizing(message.id)" class="msg-action-spinner"></span>
+                  <Icon v-else name="robot" :size="12" />
+                  {{ isSummarizing(message.id) ? '生成中…' : (message.aiSummaryView ? '重新摘要' : 'AI 摘要') }}
+                </button>
+              </div>
               <!-- AI 摘要（结构化：标签 + 情感 + 一句话摘要） -->
               <div v-if="message.aiSummaryView" class="ai-summary">
                 <div class="ai-summary-header">
@@ -189,6 +202,19 @@
               </div>
               <!-- 消息内容 -->
               <MessageContent :message="message" :qq-nickname-map="qqNicknameMap" :gallery="chatImageGallery" @navigate-to-message="handleNavigateToMessage" />
+              <!-- 按需摘要按钮（悬停显示） -->
+              <div class="msg-actions" @click.stop>
+                <button
+                  class="msg-action-btn"
+                  :disabled="isSummarizing(message.id)"
+                  :title="message.aiSummaryView ? '重新生成摘要' : '为这条消息生成 AI 摘要'"
+                  @click="summarizeOne(message)"
+                >
+                  <span v-if="isSummarizing(message.id)" class="msg-action-spinner"></span>
+                  <Icon v-else name="robot" :size="12" />
+                  {{ isSummarizing(message.id) ? '生成中…' : (message.aiSummaryView ? '重新摘要' : 'AI 摘要') }}
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -277,6 +303,37 @@ export default {
     const renderMessages = computed(() =>
       (messages.value || []).map(m => ({ ...m, aiSummaryView: buildSummaryView(m) }))
     );
+
+    // ===== 阶段 1：单条按需摘要 =====
+    const summarizingIds = ref(new Set());
+    const isSummarizing = id => summarizingIds.value.has(id);
+
+    const summarizeOne = async (message) => {
+      if (!message || isSummarizing(message.id)) return;
+      const force = !!message.aiSummaryView;   // 已有摘要时按钮含义是"重新摘要"
+      const mark = (set, id) => { const n = new Set(set); n.add(id); return n; };
+      const unmark = (set, id) => { const n = new Set(set); n.delete(id); return n; };
+      summarizingIds.value = mark(summarizingIds.value, message.id);
+      try {
+        const res = await messageApi.summarize(message.id, force);
+        const view = res?.summary;
+        if (!view) {
+          showToast('摘要返回为空，请稍后重试', 'warning');
+          return;
+        }
+        // 就地更新，卡片会立刻出现（renderMessages 是 computed，会自动重算）
+        message.aiSummaryShort = view.summary || '';
+        message.aiSentiment = view.sentiment || '';
+        message.aiTags = Array.isArray(view.tags) ? view.tags.join(',') : (message.aiTags || '');
+        showToast(res?.cached ? '已使用已有摘要' : '摘要生成完成', 'success');
+      } catch (err) {
+        const msg = err?.message || '摘要生成失败';
+        showToast(msg, 'error');
+        logger.warn('[summarize] 失败 messageId=', message.id, msg);
+      } finally {
+        summarizingIds.value = unmark(summarizingIds.value, message.id);
+      }
+    };
     const currentGroupName = ref('');
     const messagesContainer = ref(null);
     const currentPage = ref(0);
@@ -828,6 +885,8 @@ export default {
       messages,
       chatImageGallery,
       renderMessages,
+      isSummarizing,
+      summarizeOne,
       isLoading,
       currentGroupName,
       messagesContainer,
@@ -1131,6 +1190,46 @@ export default {
 .theme-dark .ai-sentiment.st-negative { background: rgba(239, 154, 154, 0.18); color: #ef9a9a; }
 .theme-dark .ai-sentiment.st-neutral { background: rgba(176, 190, 197, 0.18); color: #b0bec5; }
 .theme-dark .ai-tag { background: rgba(144, 202, 249, 0.16); color: #90caf9; }
+
+/* 按需摘要按钮（平时隐藏，鼠标悬停消息时出现） */
+.msg-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 4px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.message-wrapper:hover .msg-actions,
+.message-wrapper:focus-within .msg-actions { opacity: 1; }
+
+.msg-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--border-color, #d8dee9);
+  background: var(--card-bg, #fff);
+  color: var(--text-secondary, #666);
+  font-size: 11.5px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.msg-action-btn:hover:not(:disabled) {
+  border-color: var(--accent-color, #3498db);
+  color: var(--accent-color, #3498db);
+}
+.msg-action-btn:disabled { cursor: progress; opacity: 0.75; }
+
+.msg-action-spinner {
+  width: 10px;
+  height: 10px;
+  border: 2px solid rgba(52, 152, 219, 0.35);
+  border-top-color: #3498db;
+  border-radius: 50%;
+  animation: msg-action-spin 0.7s linear infinite;
+}
+@keyframes msg-action-spin { to { transform: rotate(360deg); } }
 
 /* 滚动条样式 */
 .messages-area::-webkit-scrollbar {
