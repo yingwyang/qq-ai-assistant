@@ -90,6 +90,11 @@ public class SubscriptionsController {
         data.put("plans", directPlans);
         data.put("directPlans", directPlans);
         data.put("monthlyCards", cardPlans);
+        // 同时持有大小月卡（ALL 全功能版）时实际生效的折扣，取自 credit_rule.all_tier_discount。
+        // 前端用它渲染"双持折扣"，避免界面写死"8 折"而实际按另一个数值计费。
+        data.put("allTierDiscount", rule.getAllTierDiscount());
+        data.put("smallCardDiscount", rule.getSmallMonthCardDiscount());
+        data.put("largeCardDiscount", rule.getLargeMonthCardDiscount());
         data.put("groups", Arrays.asList(
                 groupMap("DIRECT", "直购积分", "按档购买，立即到账", directPlans),
                 groupMap("MONTHLY_CARD", "会员月卡", "30 天权益，超值更省", cardPlans)

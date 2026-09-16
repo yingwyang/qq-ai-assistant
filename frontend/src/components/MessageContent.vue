@@ -40,7 +40,7 @@
               @click.stop="openImage(replyMediaUrl)"
               @error="onReplyImageError"
             />
-            <span v-else-if="replyPreviewType === 'image' && replyImageError" class="reply-preview-placeholder">[图片已删除]</span>
+            <span v-else-if="replyPreviewType === 'image' && replyImageError" class="reply-preview-placeholder">[图片已过期或未缓存]</span>
             <span v-else>{{ replyPreview }}</span>
           </div>
         </div>
@@ -99,7 +99,7 @@
           <circle cx="20" cy="28" r="4"/>
           <path d="M52 50 L36 34 L24 46 L8 30 L8 52 L52 52 Z"/>
         </svg>
-        <span class="placeholder-label">图片已删除</span>
+        <span class="placeholder-label">{{ mediaPlaceholderLabel('图片') }}</span>
       </div>
     </div>
     
@@ -137,7 +137,7 @@
           <rect x="6" y="12" width="36" height="40" rx="4"/>
           <polygon points="42,20 58,12 58,52 42,44" fill="none"/>
         </svg>
-        <span class="placeholder-label">视频已删除</span>
+        <span class="placeholder-label">{{ mediaPlaceholderLabel('视频') }}</span>
       </div>
     </div>
     
@@ -243,8 +243,24 @@ export default {
     const content = computed(() => decodeHtmlEntities(props.message.content || '').trim());
 
     // 媒体下载/转码失败检测（DLQ 消费者回填的占位符）
-    const FAILURE_PLACEHOLDERS = ['[图片下载失败]', '[视频下载失败]', '[语音转码失败]', '[媒体下载失败]'];
+    const FAILURE_PLACEHOLDERS = [
+      '[图片下载失败]', '[视频下载失败]', '[语音转码失败]', '[媒体下载失败]',
+      // 后端 DLQ 兜底写入的"过期"占位符（此前没列进来，界面上会显示成"已删除"，与事实不符）
+      '[图片已过期]', '[视频已过期]', '[媒体已过期]'
+    ];
     const isMediaFailed = computed(() => FAILURE_PLACEHOLDERS.includes(content.value));
+
+    /**
+     * 媒体占位文案：区分"没下载成功"与"QQ 侧链接已过期"，
+     * 不再一律显示"已删除"（那会让人以为文件被删了）。
+     */
+    const mediaPlaceholderLabel = (kind) => {
+      const c = content.value || '';
+      if (c.includes('已过期')) return `${kind}已过期（未缓存到本地）`;
+      if (c.includes('下载失败') || c.includes('转码失败')) return `${kind}下载失败`;
+      if (c.includes('已删除')) return `${kind}已删除`;
+      return `${kind}不可用`;
+    };
     const mediaFailLabel = computed(() => content.value);
 
     // 媒体加载中提示文案（根据消息类型）
@@ -934,6 +950,7 @@ export default {
       isReplyMessage,
       isForwardMessage,
       isMediaFailed,
+      mediaPlaceholderLabel,
       mediaFailLabel,
       mediaLoadingLabel,
       replyTarget,

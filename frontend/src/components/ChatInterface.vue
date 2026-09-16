@@ -122,7 +122,7 @@
       
       <div v-else class="messages-list">
         <div
-          v-for="message in messages"
+          v-for="message in renderMessages"
           :key="message.id"
           :id="'msg-' + message.id"
           class="message-wrapper"
@@ -158,13 +158,19 @@
               </div>
               <!-- 消息内容 -->
               <MessageContent :message="message" :qq-nickname-map="qqNicknameMap" :gallery="chatImageGallery" @navigate-to-message="handleNavigateToMessage" />
-              <!-- AI 总结（左对齐） -->
-              <div v-if="message.aiSummary" class="ai-summary">
+              <!-- AI 摘要（结构化：标签 + 情感 + 一句话摘要） -->
+              <div v-if="message.aiSummaryView" class="ai-summary">
                 <div class="ai-summary-header">
                   <span class="ai-icon"><Icon name="robot" :size="14" /></span>
-                  <span>AI 总结</span>
+                  <span>AI 摘要</span>
+                  <span v-if="message.aiSummaryView.sentimentLabel" class="ai-sentiment" :class="'st-' + message.aiSummaryView.sentiment">
+                    {{ message.aiSummaryView.sentimentLabel }}
+                  </span>
                 </div>
-                <div class="ai-summary-content">{{ message.aiSummary }}</div>
+                <div class="ai-summary-content">{{ message.aiSummaryView.text }}</div>
+                <div v-if="message.aiSummaryView.tags.length" class="ai-summary-tags">
+                  <span v-for="tag in message.aiSummaryView.tags" :key="tag" class="ai-tag">#{{ tag }}</span>
+                </div>
               </div>
             </div>
           </div>
@@ -228,6 +234,48 @@ export default {
     // 当前会话已加载消息里的全部图片（按消息顺序）→ 供图片预览左右切换
     const chatImageGallery = computed(() =>
       (messages.value || []).map(extractImageUrl).filter(Boolean)
+    );
+
+    const SENTIMENT_LABELS = { positive: '积极', neutral: '中性', negative: '消极' };
+
+    /**
+     * 结构化摘要视图模型。
+     * 优先用后端解析好的字段（aiSummaryShort / aiTags / aiSentiment）；
+     * 老数据只有 aiSummary 原始 JSON，这里兼容解析一次（去掉 ```json 围栏），
+     * 避免页面上直接显示一坨 JSON。
+     */
+    const buildSummaryView = (message) => {
+      const tagsOf = raw => (typeof raw === 'string' && raw ? raw.split(',').map(s => s.trim()).filter(Boolean) : []);
+      const withLabel = view => ({
+        ...view,
+        sentimentLabel: SENTIMENT_LABELS[view.sentiment] || ''
+      });
+
+      if (message.aiSummaryShort || message.aiTags || message.aiSentiment) {
+        return withLabel({
+          tags: tagsOf(message.aiTags),
+          sentiment: message.aiSentiment || '',
+          text: message.aiSummaryShort || ''
+        });
+      }
+      const raw = message.aiSummary;
+      if (!raw) return null;
+      let text = String(raw).trim().replace(/^```[a-zA-Z]*\s*/, '').replace(/\s*```$/, '');
+      try {
+        const obj = JSON.parse(text);
+        return withLabel({
+          tags: Array.isArray(obj?.tags) ? obj.tags.filter(Boolean).map(String) : [],
+          sentiment: obj?.sentiment || '',
+          text: obj?.summary || text
+        });
+      } catch (e) {
+        return withLabel({ tags: [], sentiment: '', text });
+      }
+    };
+
+    /** 渲染用消息列表：带上结构化摘要视图（只算一次，避免模板里反复解析） */
+    const renderMessages = computed(() =>
+      (messages.value || []).map(m => ({ ...m, aiSummaryView: buildSummaryView(m) }))
     );
     const currentGroupName = ref('');
     const messagesContainer = ref(null);
@@ -779,6 +827,7 @@ export default {
       groupId,
       messages,
       chatImageGallery,
+      renderMessages,
       isLoading,
       currentGroupName,
       messagesContainer,
@@ -1030,7 +1079,7 @@ export default {
 
 .ai-summary {
   margin-top: 8px;
-  padding: 10px;
+  padding: 10px 12px;
   background-color: #e3f2fd;
   border-radius: 8px;
   font-size: 14px;
@@ -1046,9 +1095,42 @@ export default {
 }
 
 .ai-summary-content {
-  line-height: 1.4;
+  line-height: 1.5;
   color: var(--text-primary, #333);
 }
+
+/* 情感徽章 */
+.ai-sentiment {
+  margin-left: auto;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 600;
+  background: rgba(25, 118, 210, 0.12);
+  color: #1565c0;
+}
+.ai-sentiment.st-positive { background: rgba(46, 125, 50, 0.14); color: #2e7d32; }
+.ai-sentiment.st-negative { background: rgba(198, 40, 40, 0.14); color: #c62828; }
+.ai-sentiment.st-neutral { background: rgba(96, 125, 139, 0.16); color: #546e7a; }
+
+/* 标签 */
+.ai-summary-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.ai-tag {
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  background: rgba(25, 118, 210, 0.1);
+  color: #1565c0;
+}
+
+/* 暗色主题 */
+.theme-dark .ai-summary { background-color: rgba(25, 118, 210, 0.16); }
+.theme-dark .ai-summary-header { color: #90caf9; }
+.theme-dark .ai-sentiment { background: rgba(144, 202, 249, 0.18); color: #90caf9; }
+.theme-dark .ai-sentiment.st-positive { background: rgba(165, 214, 167, 0.18); color: #a5d6a7; }
+.theme-dark .ai-sentiment.st-negative { background: rgba(239, 154, 154, 0.18); color: #ef9a9a; }
+.theme-dark .ai-sentiment.st-neutral { background: rgba(176, 190, 197, 0.18); color: #b0bec5; }
+.theme-dark .ai-tag { background: rgba(144, 202, 249, 0.16); color: #90caf9; }
 
 /* 滚动条样式 */
 .messages-area::-webkit-scrollbar {

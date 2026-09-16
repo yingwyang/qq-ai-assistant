@@ -35,6 +35,9 @@ public class AiAnalysisConsumer {
 
     private static final Logger log = LoggerFactory.getLogger(AiAnalysisConsumer.class);
 
+    /** 解析模型输出的结构化摘要（tags / sentiment / summary） */
+    private final com.fasterxml.jackson.databind.ObjectMapper objectMapper = new com.fasterxml.jackson.databind.ObjectMapper();
+
     @Autowired
     private AstrBotService astrBotService;
 
@@ -96,12 +99,54 @@ public class AiAnalysisConsumer {
             throw new RuntimeException("AI分析返回空摘要: " + payload);
         }
 
-        // 分析成功：回填 aiSummary + processed=true（JPA save 自带事务）
+        // 分析成功：回填 aiSummary（原始输出）+ 结构化字段 + processed=true
         message.setAiSummary(summary);
+        applyStructuredSummary(message, summary);
         message.setProcessed(true);
         Message updated = messageRepository.save(message);
         messageBroadcastService.broadcastMessageUpdate(updated);
-        log.info("AI分析完成: messageId={}, summaryLen={}", payload.getMessageId(), summary.length());
+        log.info("AI分析完成: messageId={}, summaryLen={}, tags={}, sentiment={}",
+                payload.getMessageId(), summary.length(), message.getAiTags(), message.getAiSentiment());
+    }
+
+    /**
+     * 把模型输出的 JSON 解析进结构化字段（阶段 0：不改提示词、不增加 LLM 调用）。
+     * 解析失败不影响主流程：只把去围栏后的文本截断写入 aiSummaryShort，原始输出始终保留在 aiSummary。
+     */
+    private void applyStructuredSummary(Message message, String raw) {
+        String text = raw == null ? "" : raw.trim();
+        // 去掉 markdown 代码块围栏
+        if (text.startsWith("```")) {
+            text = text.replaceAll("^```[a-zA-Z]*\\s*", "").replaceAll("\\s*```$", "").trim();
+        }
+        try {
+            com.fasterxml.jackson.databind.JsonNode node = objectMapper.readTree(text);
+            if (node != null && node.isObject()) {
+                com.fasterxml.jackson.databind.JsonNode tags = node.get("tags");
+                if (tags != null && tags.isArray()) {
+                    StringBuilder sb = new StringBuilder();
+                    for (com.fasterxml.jackson.databind.JsonNode t : tags) {
+                        if (sb.length() > 0) sb.append(',');
+                        sb.append(t.asText());
+                    }
+                    message.setAiTags(sb.length() > 255 ? sb.substring(0, 255) : sb.toString());
+                }
+                com.fasterxml.jackson.databind.JsonNode sentiment = node.get("sentiment");
+                if (sentiment != null && !sentiment.isNull()) {
+                    message.setAiSentiment(sentiment.asText());
+                }
+                com.fasterxml.jackson.databind.JsonNode summaryNode = node.get("summary");
+                String shortText = (summaryNode != null && !summaryNode.isNull()) ? summaryNode.asText() : text;
+                message.setAiSummaryShort(shortText.length() > 500 ? shortText.substring(0, 500) : shortText);
+                message.setAiSummarizedAt(java.time.LocalDateTime.now());
+                return;
+            }
+        } catch (Exception e) {
+            log.debug("摘要输出不是 JSON，按纯文本处理: messageId={}", message.getId());
+        }
+        // 非 JSON：截断原文作为展示文本，仍标记处理时间
+        message.setAiSummaryShort(text.length() > 500 ? text.substring(0, 500) : text);
+        message.setAiSummarizedAt(java.time.LocalDateTime.now());
     }
 
     /**

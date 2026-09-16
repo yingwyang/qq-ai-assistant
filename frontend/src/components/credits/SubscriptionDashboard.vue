@@ -470,6 +470,10 @@ export default {
 
     const showUpgradeDialog = ref(false);
     const plans = ref([]);
+    // 折扣真值（来自 credit_rule，随套餐接口下发）：用于双持权益文案，避免写死折数
+    const allTierDiscount = ref(null);
+    const smallCardDiscount = ref(null);
+    const largeCardDiscount = ref(null);
     const purchasingPlan = ref(null);
     const highlightOrderNo = ref(null);
 
@@ -596,7 +600,10 @@ export default {
         .filter(Boolean)
         .map(m => Number(m[1]))
         .sort((a, b) => a - b);
-      if (discounts.length) out.push(`专属折扣 ${discounts[0]} 折`);
+      // 双持折扣以 credit_rule.all_tier_discount 为准（接口下发），没有时退回卡片文案里的较优档
+      const allText = formatDiscount(allTierDiscount.value);
+      if (allText) out.push(`专属折扣 ${allText}`);
+      else if (discounts.length) out.push(`专属折扣 ${discounts[0]} 折`);
 
       // 其余权益（优先响应队列 / 30 天有效 等）去重追加
       all.forEach(f => {
@@ -628,6 +635,7 @@ export default {
       }).catch(() => {});
       // 套餐列表先加载，再加载余额（便于 features 查找）
       subscriptionApi.getPlans().then(data => {
+        applyDiscounts(data);
         let list;
         if (Array.isArray(data)) {
           list = data;
@@ -651,6 +659,25 @@ export default {
       }).finally(() => {
         loadBalanceAndTier();
       });
+    }
+
+    /**
+     * 折扣显示：接口下发的 allTierDiscount/smallCardDiscount/largeCardDiscount 来自
+     * credit_rule，是实际计费用的值；前端不再写死"8 折"。
+     */
+    function formatDiscount(rate) {
+      const n = Number(rate);
+      if (!Number.isFinite(n) || n <= 0 || n >= 1) return '';
+      const tenths = Math.round(n * 100) / 10;   // 0.7 → 7，0.85 → 8.5
+      return `${Number.isInteger(tenths) ? tenths : tenths.toFixed(1)} 折`;
+    }
+
+    /** 保存接口下发的折扣（credit_rule 真值） */
+    function applyDiscounts(data) {
+      if (!data || Array.isArray(data)) return;
+      if (data.allTierDiscount != null) allTierDiscount.value = Number(data.allTierDiscount);
+      if (data.smallCardDiscount != null) smallCardDiscount.value = Number(data.smallCardDiscount);
+      if (data.largeCardDiscount != null) largeCardDiscount.value = Number(data.largeCardDiscount);
     }
 
     function mockPlans() {
@@ -684,6 +711,7 @@ export default {
     function openUpgradeDialog() {
       if (plans.value.length === 0) {
         subscriptionApi.getPlans().then(data => {
+          applyDiscounts(data);
           let list;
           if (Array.isArray(data)) list = data;
           else if (Array.isArray(data?.groups)) {

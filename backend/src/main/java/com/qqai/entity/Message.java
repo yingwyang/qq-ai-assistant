@@ -67,7 +67,18 @@ public class Message {
     private String miniAppContent;  // 小程序分享消息的原始内容（JSON）
 
     @Column(columnDefinition = "TEXT")
-    private String aiSummary;  // AI总结内容
+    private String aiSummary;  // AI 原始输出（保留用于回溯；前端展示用下面三个结构化字段）
+
+    // ===== AI 摘要结构化字段（2026-09-16 阶段 0：由 AiAnalysisConsumer 解析模型 JSON 后回填）=====
+    @Column(length = 255)
+    private String aiTags;           // 逗号分隔标签
+    @Column(length = 16)
+    private String aiSentiment;      // positive / neutral / negative
+    @Column(length = 500)
+    private String aiSummaryShort;   // 一句话摘要（前端展示）
+    private LocalDateTime aiSummarizedAt;  // 摘要生成时间
+    @Column(length = 64)
+    private String aiModel;          // 生成摘要的模型标识（可空）
     
     @Column(nullable = false)
     private LocalDateTime sendTime;  // 发送时间（展示时间，优先取自 OneBot time 转换）
@@ -193,6 +204,21 @@ public class Message {
 
     public String getAiSummary() { return aiSummary; }
     public void setAiSummary(String aiSummary) { this.aiSummary = aiSummary; }
+
+    public String getAiTags() { return aiTags; }
+    public void setAiTags(String aiTags) { this.aiTags = aiTags; }
+
+    public String getAiSentiment() { return aiSentiment; }
+    public void setAiSentiment(String aiSentiment) { this.aiSentiment = aiSentiment; }
+
+    public String getAiSummaryShort() { return aiSummaryShort; }
+    public void setAiSummaryShort(String aiSummaryShort) { this.aiSummaryShort = aiSummaryShort; }
+
+    public LocalDateTime getAiSummarizedAt() { return aiSummarizedAt; }
+    public void setAiSummarizedAt(LocalDateTime aiSummarizedAt) { this.aiSummarizedAt = aiSummarizedAt; }
+
+    public String getAiModel() { return aiModel; }
+    public void setAiModel(String aiModel) { this.aiModel = aiModel; }
     
     public LocalDateTime getSendTime() { return sendTime; }
     public void setSendTime(LocalDateTime sendTime) { this.sendTime = sendTime; }

@@ -377,10 +377,10 @@
                 </div>
                 <div v-else>
                   <div class="bind-qr-section">
-                    <p class="bind-tip">请使用手机QQ发送验证码到以下号码：</p>
+                    <p class="bind-tip">点击下方「发送验证码」后，机器人会向该 QQ 发送一条含 6 位验证码的私信：</p>
                     <div class="bind-qq-number">{{ bindForm.qqNumber }}</div>
-                    <p class="bind-tip-small">验证码有效期 5 分钟</p>
-                    <p class="bind-tip-small">请查看QQ自发消息</p>
+                    <p class="bind-tip-small">验证码 5 分钟内有效，请到该 QQ 上查看机器人私信</p>
+                    <p class="bind-tip-small">若迟迟没收到，请先确认 NapCat 已登录且该 QQ 可接收私信</p>
                   </div>
                   <div class="form-group">
                     <label>验证码</label>
