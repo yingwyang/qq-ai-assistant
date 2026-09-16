@@ -28,6 +28,21 @@ jobs:
   backend:
     name: 后端（Maven / JDK 17）
     runs-on: ubuntu-latest
+    # @SpringBootTest 会启动完整上下文，其中 RabbitMQ 队列/交换机声明在 broker 不可达时
+    # 会让上下文启动失败（本地开发机有 MQ，所以本地能过、CI 跑不过）。这里挂一个真实 broker。
+    services:
+      rabbitmq:
+        image: rabbitmq:3.12
+        ports:
+          - 5672:5672
+        env:
+          RABBITMQ_DEFAULT_USER: guest
+          RABBITMQ_DEFAULT_PASS: guest
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     defaults:
       run:
         working-directory: backend
@@ -41,8 +56,8 @@ jobs:
           distribution: temurin
           cache: maven
 
-      # 测试用 H2 内存库（见 backend/src/test/resources/application.yml），
-      # 不需要 MySQL / RabbitMQ / MinIO，也不需要任何密钥
+      # 数据库用 H2 内存库（backend/src/test/resources/application.yml），
+      # 不需要 MySQL / MinIO，也不需要任何密钥或 .env
       - name: 构建并测试
         run: mvn -B -ntp package
 
