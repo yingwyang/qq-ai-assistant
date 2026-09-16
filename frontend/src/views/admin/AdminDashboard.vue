@@ -183,9 +183,9 @@ export default {
 .disk-card { flex-direction: column; align-items: flex-start; gap: 10px; }
 .disk-card .stat-info { display: flex; align-items: center; gap: 12px; }
 .disk-bar { width: 100%; }
-.disk-bar-track { width: 100%; height: 8px; background: #e8e8e8; border-radius: 4px; overflow: hidden; }
+.disk-bar-track { width: 100%; height: 8px; background: var(--border-color, #e8e8e8); border-radius: 4px; overflow: hidden; }
 .disk-bar-fill { height: 100%; background: linear-gradient(90deg, #4caf50, #ff9800, #f44336); border-radius: 4px; transition: width 0.3s ease; }
-.disk-bar-label { display: flex; justify-content: space-between; margin-top: 6px; font-size: 11px; color: #999; }
+.disk-bar-label { display: flex; justify-content: space-between; margin-top: 6px; font-size: 11px; color: var(--text-muted, #999); }
 .stat-value { font-size: 24px; font-weight: 700; color: var(--text-primary, #333); }
 .stat-label { font-size: 13px; color: var(--text-secondary, #666); }
 .stat-today { font-size: 12px; color: #3498db; margin-top: 2px; }

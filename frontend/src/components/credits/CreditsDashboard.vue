@@ -15,7 +15,15 @@
         <div class="banner-left">
           <div class="banner-icon"><Icon name="celebrate" :size="36" /></div>
           <div class="banner-content">
-            <div class="banner-title">欢迎使用积分体系 · 每日签到 +150</div>
+            <div class="banner-title">
+              欢迎使用积分体系 · 每日签到 +{{ signInPoints || signInBasePoints || 150 }}
+              <span v-if="monthlyCardBonus > 0" class="banner-card-bonus">
+                含{{ monthlyCardLabel }}额外 +{{ monthlyCardBonus }}
+              </span>
+              <span v-else-if="monthlyCardBonusTier > 0" class="banner-card-bonus">
+                含{{ monthlyCardLabel }}额外 +{{ monthlyCardBonusTier }}（今日已发放）
+              </span>
+            </div>
             <div class="banner-subtitle">
               <span v-if="signInStatus.consecutiveDays > 0">已连续签到 {{ signInStatus.consecutiveDays }} 天</span>
               <span v-else>签到可解锁更多奖励权益</span>
@@ -441,7 +449,7 @@ export default {
 .skeleton-table,
 .skeleton-chart {
   height: 120px;
-  background: linear-gradient(90deg, #f0f0f0 25%, #e8e8e8 50%, #f0f0f0 75%);
+  background: linear-gradient(90deg, var(--border-color, #f0f0f0) 25%, #e8e8e8 50%, #f0f0f0 75%);
   background-size: 200% 100%;
   animation: shimmer 1.5s infinite;
   border-radius: 8px;
@@ -467,7 +475,7 @@ export default {
 
 .skeleton-reward-card {
   height: 140px;
-  background: linear-gradient(90deg, #f0f0f0 25%, #e8e8e8 50%, #f0f0f0 75%);
+  background: linear-gradient(90deg, var(--border-color, #f0f0f0) 25%, #e8e8e8 50%, #f0f0f0 75%);
   background-size: 200% 100%;
   animation: shimmer 1.5s infinite;
   border-radius: 8px;
@@ -527,6 +535,19 @@ export default {
   color: #4a7ba8;
 }
 
+/* 月卡每日额外积分标记（签到卡上体现月卡权益） */
+.banner-card-bonus {  display: inline-block;
+  margin-left: 6px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #b8860b;
+  background: linear-gradient(135deg, #fff4d1, #ffe9a8);
+  border: 1px solid #f0d27a;
+  vertical-align: middle;
+}
+
 .btn-sign-in {
   display: inline-flex;
   align-items: center;
@@ -563,7 +584,7 @@ export default {
 .credits-main-card {
   border-radius: 12px;
   padding: 24px;
-  background: linear-gradient(135deg, #ffffff 0%, #fafbff 100%);
+  background: linear-gradient(135deg, var(--card-bg, #ffffff) 0%, #fafbff 100%);
   border: 1px solid #e8ecf3;
 }
 
@@ -605,7 +626,7 @@ export default {
 .main-balance {
   font-size: 42px;
   font-weight: 700;
-  color: #2c3e50;
+  color: var(--text-primary, #2c3e50);
   line-height: 1;
   letter-spacing: -0.5px;
   background: linear-gradient(135deg, #2c3e50, #3498db);
@@ -639,7 +660,7 @@ export default {
   display: flex;
   align-items: center;
   padding: 16px;
-  background: #f8f9fc;
+  background: var(--bg-tertiary, #f8f9fc);
   border-radius: 8px;
   gap: 20px;
 }
@@ -660,7 +681,7 @@ export default {
 .stat-value {
   font-size: 16px;
   font-weight: 600;
-  color: #2c3e50;
+  color: var(--text-primary, #2c3e50);
 }
 
 .stat-value.earned {
@@ -701,7 +722,7 @@ export default {
   margin: 0;
   font-size: 15px;
   font-weight: 600;
-  color: #333;
+  color: var(--text-primary, #333);
 }
 
 .section-hint {
@@ -731,7 +752,7 @@ export default {
 .reward-card {
   padding: 16px;
   border-radius: 10px;
-  background: white;
+  background: var(--card-bg, white);
   border: 1px solid #eef0f4;
   transition: all 0.2s;
   display: flex;
@@ -745,7 +766,7 @@ export default {
 }
 
 .reward-card.claimed {
-  background: #fafbfc;
+  background: var(--bg-tertiary, #fafbfc);
   opacity: 0.85;
 }
 
@@ -769,7 +790,7 @@ export default {
 .reward-name {
   font-size: 14px;
   font-weight: 600;
-  color: #2c3e50;
+  color: var(--text-primary, #2c3e50);
   margin-bottom: 2px;
 }
 
@@ -786,7 +807,7 @@ export default {
 
 .progress-bar {
   height: 6px;
-  background: #ecf0f1;
+  background: var(--bg-tertiary, #ecf0f1);
   border-radius: 3px;
   overflow: hidden;
 }
@@ -800,7 +821,7 @@ export default {
 
 .progress-text {
   font-size: 12px;
-  color: #666;
+  color: var(--text-secondary, #666);
 }
 
 .progress-text b {
@@ -849,7 +870,7 @@ export default {
   display: flex;
   gap: 16px;
   font-size: 12px;
-  color: #666;
+  color: var(--text-secondary, #666);
 }
 
 .detail-summary .summary-item b {
@@ -887,7 +908,7 @@ export default {
 
 .detail-tab:hover {
   color: #3498db;
-  background: #f0f7ff;
+  background: var(--bg-tertiary, #f0f7ff);
 }
 
 .detail-tab.active {
@@ -907,11 +928,11 @@ export default {
 .filter-date,
 .filter-input {
   padding: 7px 10px;
-  border: 1px solid #ddd;
+  border: 1px solid var(--border-color, #ddd);
   border-radius: 6px;
   font-size: 13px;
-  background: white;
-  color: #333;
+  background: var(--card-bg, white);
+  color: var(--text-primary, #333);
   outline: none;
   transition: border-color 0.2s;
 }
@@ -954,8 +975,8 @@ export default {
 }
 
 .btn-filter.reset {
-  background: #ecf0f1;
-  color: #555;
+  background: var(--bg-tertiary, #ecf0f1);
+  color: var(--text-secondary, #555);
 }
 
 .btn-filter.reset:hover {
@@ -985,7 +1006,7 @@ export default {
 .tx-table {
   width: 100%;
   border-collapse: collapse;
-  background: white;
+  background: var(--card-bg, white);
   border-radius: 6px;
   overflow: hidden;
 }
@@ -999,18 +1020,18 @@ export default {
 }
 
 .tx-table th {
-  background: #f8f9fb;
+  background: var(--bg-tertiary, #f8f9fb);
   font-weight: 600;
-  color: #666;
+  color: var(--text-secondary, #666);
   font-size: 12px;
 }
 
 .tx-table tbody tr:hover {
-  background: #fafbfc;
+  background: var(--bg-tertiary, #fafbfc);
 }
 
 .tx-time {
-  color: #666;
+  color: var(--text-secondary, #666);
   font-size: 12px;
   white-space: nowrap;
 }
@@ -1035,7 +1056,7 @@ export default {
 
 .tx-remark {
   max-width: 220px;
-  color: #666;
+  color: var(--text-secondary, #666);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1048,7 +1069,7 @@ export default {
   padding: 2px 8px;
   background: #f0f4f8;
   border-radius: 4px;
-  color: #555;
+  color: var(--text-secondary, #555);
   font-family: monospace;
   font-size: 12px;
   cursor: pointer;
@@ -1067,21 +1088,21 @@ export default {
   gap: 15px;
   margin-top: 16px;
   font-size: 13px;
-  color: #666;
+  color: var(--text-secondary, #666);
 }
 
 .tx-pagination button {
   padding: 5px 14px;
-  background: white;
-  border: 1px solid #ddd;
+  background: var(--card-bg, white);
+  border: 1px solid var(--border-color, #ddd);
   border-radius: 4px;
   cursor: pointer;
   transition: all 0.2s;
-  color: #333;
+  color: var(--text-primary, #333);
 }
 
 .tx-pagination button:hover:not(:disabled) {
-  background: #f0f7ff;
+  background: var(--bg-tertiary, #f0f7ff);
   border-color: #3498db;
   color: #3498db;
 }
@@ -1104,12 +1125,12 @@ export default {
 
 .chart-btn {
   padding: 4px 12px;
-  background-color: white;
-  border: 1px solid #ddd;
+  background-color: var(--card-bg, white);
+  border: 1px solid var(--border-color, #ddd);
   border-radius: 4px;
   cursor: pointer;
   font-size: 12px;
-  color: #555;
+  color: var(--text-secondary, #555);
   transition: all 0.2s;
 }
 
@@ -1132,4 +1153,23 @@ export default {
   0% { transform: rotate(0deg); }
   100% { transform: rotate(360deg); }
 }
+
+/* ===================== 暗色主题：浅色渐变卡片 ===================== */
+/* 这些卡片用 background-image（渐变），不随 background-color 变量变化，需要单独覆盖 */
+.theme-dark .credits-banner {
+  background: linear-gradient(135deg, #1e293b 0%, #243b55 50%, #1e293b 100%);
+  border-color: #24304a;
+}
+.theme-dark .banner-title { color: #bfdbfe; }
+.theme-dark .banner-subtitle { color: #93c5fd; }
+.theme-dark .banner-card-bonus {
+  color: #fde68a;
+  background: linear-gradient(135deg, #78350f, #92400e);
+  border-color: #b45309;
+}
+.theme-dark .credits-main-card {
+  background: linear-gradient(135deg, var(--card-bg, #1e1e3a) 0%, #16213e 100%);
+  border-color: #24304a;
+}
+.theme-dark .main-icon-wrap { background: linear-gradient(135deg, #78350f, #92400e); }
 </style>

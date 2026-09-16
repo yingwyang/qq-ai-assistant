@@ -81,10 +81,10 @@ public class SubscriptionsController {
         // 月卡档位（SMALL_MONTH_CARD/LARGE_MONTH_CARD）在 CreditRule 中没有对应字段，保留硬编码
         cardPlans.add(planToMap("SMALL_MONTH_CARD", "小月卡", new BigDecimal("30"), 3000,
                 30, SubscriptionTier.SMALL_MONTH_CARD, "MONTHLY_CARD",
-                Arrays.asList("3000 积分基础", "每日登录 +100 积分", "基础模型支持", "专属折扣 9 折", "30 天有效")));
+                Arrays.asList("3000 积分基础", "每日签到额外 +100 积分", "基础模型支持", "专属折扣 9 折", "30 天有效")));
         cardPlans.add(planToMap("LARGE_MONTH_CARD", "大月卡", new BigDecimal("68"), 8000,
                 30, SubscriptionTier.LARGE_MONTH_CARD, "MONTHLY_CARD",
-                Arrays.asList("8000 积分基础", "每日登录 +300 积分", "全模型支持", "专属折扣 8 折", "优先响应队列", "30 天有效")));
+                Arrays.asList("8000 积分基础", "每日签到额外 +300 积分", "全模型支持", "专属折扣 8 折", "优先响应队列", "30 天有效")));
 
         Map<String, Object> data = new HashMap<>();
         data.put("plans", directPlans);

@@ -52,6 +52,7 @@
         <div class="lp-stage">
           <img
             v-if="currentUrl && !loadFailed"
+            :key="currentUrl + '#' + reloadKey"
             :src="currentUrl"
             class="lp-image"
             alt="预览"
@@ -68,6 +69,8 @@
               <line x1="10" y1="10" x2="54" y2="54" stroke-linecap="round" opacity="0.7"/>
             </svg>
             <span>图片加载失败</span>
+            <span class="lp-fallback-tip">可能已过期、未缓存，或本地媒体文件已被清理</span>
+            <button class="lp-retry" type="button" @click.stop="retry">重试</button>
           </div>
         </div>
 
@@ -86,7 +89,7 @@
 </template>
 
 <script>
-import { ref } from 'vue';
+import { ref, watch } from 'vue';
 import { useImagePreview } from '../composables/useImagePreview';
 
 export default {
@@ -94,7 +97,18 @@ export default {
   setup() {
     const { visible, currentUrl, imageList, currentIndex, close, goPrev, goNext, hasMultiple } = useImagePreview();
     const loadFailed = ref(false);
+    const reloadKey = ref(0);   // 变化时强制重建 <img>（配合 key），用于"重试"
+
     const onImgError = () => { loadFailed.value = true; };
+    const retry = () => { loadFailed.value = false; reloadKey.value += 1; };
+
+    /**
+     * 关键修复：切换图片时必须重置失败状态。
+     * 原来 loadFailed 只在 @load 里重置，而失败后 <img> 被 v-if 移除、根本不会再触发 load →
+     * 一张图失败后，后面每一张都停在"图片加载失败"，且左右切换也救不回来。
+     */
+    watch(currentUrl, () => { loadFailed.value = false; });
+
     return {
       visible,
       currentUrl,
@@ -105,7 +119,9 @@ export default {
       goNext,
       hasMultiple,
       loadFailed,
+      reloadKey,
       onImgError,
+      retry,
     };
   }
 };
@@ -152,6 +168,26 @@ export default {
   gap: 16px;
   font-size: 15px;
 }
+
+.lp-fallback-tip {
+  max-width: 320px;
+  text-align: center;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: #8a8a8a;
+}
+
+.lp-retry {
+  padding: 7px 20px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.1);
+  color: #eee;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.lp-retry:hover { background: rgba(255, 255, 255, 0.2); }
 
 .lp-btn {
   position: absolute;

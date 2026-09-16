@@ -209,20 +209,8 @@ public class SubscriptionService {
             // 低等级月卡：不覆盖 tier（例如已有大月卡，又买小月卡，保持大月卡 tier 和有效期）
             // ALL 状态：不再改变
 
-            // 购买/续费月卡成功，立即发放当日的月卡额外登录积分（与 grantMonthlyCardDailyBonus 幂等相同）
-            try {
-                int bonus = (order.getPlanTier() == SubscriptionTier.LARGE_MONTH_CARD) ? 300 : 100;
-                String relatedId = "MONTHLY_CARD_DAILY-" + java.time.LocalDate.now();
-                long exists = creditTransactionRepository.countByUserIdAndRelatedId(order.getUserId(), relatedId);
-                if (exists <= 0) {
-                    creditService.grantPoints(order.getUserId(), bonus,
-                            CreditTransactionType.MONTHLY_CARD_DAILY,
-                            "月卡每日登录奖励(" + order.getPlanTier() + "): +" + bonus + "(购买即发)",
-                            relatedId, null);
-                }
-            } catch (Exception e) {
-                log.warn("订单{} 月卡购买即发首天额外积分失败（忽略）: {}", orderNo, e.getMessage());
-            }
+            // 月卡每日额外积分自 2026-09-16 起只在「每日签到」时发放（CreditService.signInToday），
+            // 购买不再"即发"，保证权益口径统一、且用户能在签到卡上看见。
         }
         // 直购积分：仅加积分，不改变账号 tier/expiresAt
 
@@ -561,20 +549,7 @@ public class SubscriptionService {
             // 同档位月卡：不允许叠加（createOrder 已拦截重复购买，这里兜底不变更）
             // 低等级月卡：不覆盖 tier（例如已有大月卡，又买小月卡，保持大月卡 tier 和有效期）
 
-            // 补单也同步发放当日月卡额外积分（幂等）
-            try {
-                int bonus = (planTier == SubscriptionTier.LARGE_MONTH_CARD) ? 300 : 100;
-                String relatedId = "MONTHLY_CARD_DAILY-" + java.time.LocalDate.now();
-                long exists = creditTransactionRepository.countByUserIdAndRelatedId(userId, relatedId);
-                if (exists <= 0) {
-                    creditService.grantPoints(userId, bonus,
-                            CreditTransactionType.MONTHLY_CARD_DAILY,
-                            "月卡每日登录奖励(" + planTier + "): +" + bonus + "(管理员补单即发)",
-                            relatedId, adminUserId);
-                }
-            } catch (Exception e) {
-                log.warn("管理员补单{} 月卡首日积分发放失败（忽略）: {}", order.getOrderNo(), e.getMessage());
-            }
+            // 月卡每日额外积分自 2026-09-16 起只在「每日签到」时发放，管理员补单不再"即发"。
         }
         // 直购积分：仅加积分，不改变账号 tier/expiresAt
 

@@ -36,6 +36,7 @@
               <div class="action-btns">
                 <button class="btn-action" :class="user.role === 'ADMIN' ? 'demote' : 'promote'" @click="toggleRole(user)">{{ user.role === 'ADMIN' ? '降权' : '提权' }}</button>
                 <button class="btn-action" :class="user.active ? 'disable' : 'enable'" @click="toggleActive(user)">{{ user.active ? '禁用' : '启用' }}</button>
+                <button class="btn-action promote" @click="resetPassword(user)">重置密码</button>
                 <button class="btn-action delete" @click="deleteUser(user)">删除</button>
               </div>
             </td>
@@ -81,6 +82,7 @@ export default {
       toggleRole: userMgmt.toggleRole,
       toggleActive: userMgmt.toggleActive,
       deleteUser: userMgmt.deleteUser,
+      resetPassword: userMgmt.resetPassword,
       formatDate,
     };
   },

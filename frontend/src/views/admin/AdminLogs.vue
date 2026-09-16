@@ -134,7 +134,7 @@ export default {
 </script>
 
 <style scoped>
-.log-sub-tabs { display: flex; gap: 8px; margin-bottom: 16px; border-bottom: 1px solid #e0e0e0; }
+.log-sub-tabs { display: flex; gap: 8px; margin-bottom: 16px; border-bottom: 1px solid var(--border-color, #e0e0e0); }
 .log-sub-tab { padding: 8px 20px; background: transparent; border: none; border-bottom: 2px solid transparent; color: var(--text-secondary, #666); cursor: pointer; font-size: 14px; transition: all 0.2s; }
 .log-sub-tab:hover { color: var(--text-primary, #333); }
 .log-sub-tab.active { color: var(--text-primary, #333); border-bottom-color: var(--accent-color, #3498db); font-weight: 600; }
@@ -146,7 +146,7 @@ export default {
 .log-level-btn.active { color: #fff; border-color: var(--accent-color, #3498db); }
 .log-level-btn.active.level-all { background: #2c3e50; }
 .log-level-btn.active.level-info { background: #17a2b8; }
-.log-level-btn.active.level-warn { background: #ffc107; color: #333; }
+.log-level-btn.active.level-warn { background: #ffc107; color: var(--text-primary, #333); }
 .log-level-btn.active.level-error { background: #dc3545; }
 .log-level-btn.active.level-debug { background: #6c757d; }
 .log-viewer-wrapper { background: #1e1e1e; border-radius: 6px; min-height: 300px; max-height: 600px; overflow: auto; padding: 12px; }
@@ -155,13 +155,13 @@ export default {
 .log-line.log-error { color: #f48771; }
 .log-line.log-warn { color: #cca700; }
 .log-line.log-info { color: #75beff; }
-.log-line.log-debug { color: #888; }
+.log-line.log-debug { color: var(--text-muted, #888); }
 .log-level-tag { flex-shrink: 0; min-width: 50px; font-weight: 600; text-align: center; padding: 0 4px; border-radius: 2px; background: rgba(255, 255, 255, 0.1); height: 18px; line-height: 18px; align-self: flex-start; margin-top: 1px; }
 .log-content { flex: 1; white-space: pre-wrap; }
-.log-loading, .log-empty { color: #888; text-align: center; padding: 40px 0; }
+.log-loading, .log-empty { color: var(--text-muted, #888); text-align: center; padding: 40px 0; }
 .log-error-msg { color: #dc3545; padding: 8px 12px; background: #fff5f5; border-radius: 4px; margin-bottom: 12px; font-size: 13px; }
 .log-pagination { display: flex; align-items: center; justify-content: center; gap: 12px; margin-top: 12px; }
-.log-pagination .page-info { font-size: 13px; color: #666; }
+.log-pagination .page-info { font-size: 13px; color: var(--text-secondary, #666); }
 .audit-search-input, .audit-action-select { padding: 6px 10px; border: 1px solid var(--border-color, #e0e0e0); border-radius: 4px; font-size: 13px; outline: none; }
 .audit-search-input { flex: 1; min-width: 180px; max-width: 300px; }
 .audit-action-select { min-width: 140px; cursor: pointer; }
@@ -171,11 +171,11 @@ export default {
 .audit-table th { padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-primary, #333); border-bottom: 1px solid var(--border-color, #e0e0e0); white-space: nowrap; }
 .audit-table td { padding: 8px 12px; border-bottom: 1px solid var(--border-color, #f0f0f0); color: var(--text-primary, #333); vertical-align: top; }
 .audit-table tbody tr:hover { background: var(--bg-tertiary, #fafbfc); }
-.audit-loading, .audit-empty { text-align: center; color: #888; padding: 30px 0; }
+.audit-loading, .audit-empty { text-align: center; color: var(--text-muted, #888); padding: 30px 0; }
 .audit-action-tag { display: inline-block; padding: 2px 8px; background: #e3f2fd; color: #1976d2; border-radius: 10px; font-size: 12px; white-space: nowrap; }
-.audit-target { font-family: 'Consolas', 'Monaco', monospace; font-size: 12px; color: #666; max-width: 200px; word-break: break-all; }
+.audit-target { font-family: 'Consolas', 'Monaco', monospace; font-size: 12px; color: var(--text-secondary, #666); max-width: 200px; word-break: break-all; }
 .audit-result-badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; }
 .audit-success { background: #e8f5e9; color: #2e7d32; }
 .audit-failure { background: #ffebee; color: #c62828; }
-.audit-detail { max-width: 300px; word-break: break-all; color: #666; }
+.audit-detail { max-width: 300px; word-break: break-all; color: var(--text-secondary, #666); }
 </style>

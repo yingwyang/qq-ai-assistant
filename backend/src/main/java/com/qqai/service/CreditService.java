@@ -57,6 +57,10 @@ public class CreditService {
     private static final List<SubscriptionTier> MONTHLY_CARD_TIERS = Arrays.asList(
             SubscriptionTier.SMALL_MONTH_CARD, SubscriptionTier.LARGE_MONTH_CARD);
 
+    /** 月卡每日签到额外积分：小月卡 +100、大月卡 +300；双持为两者叠加（+400）。 */
+    private static final int SMALL_MONTH_CARD_DAILY_BONUS = 100;
+    private static final int LARGE_MONTH_CARD_DAILY_BONUS = 300;
+
     @Autowired
     private UserCreditRepository userCreditRepository;
 
@@ -730,12 +734,15 @@ public class CreditService {
 
     /**
      * 每日签到：写入签到记录并发放签到积分，连续签到天数基于昨日记录累加。
+     * 2026-09-16 起：持有有效月卡的用户，签到会同时发放月卡每日额外积分（小月卡 +100 / 大月卡 +300），
+     * 即界面上的「每日签到积分」= 基础签到分 + 月卡加成；月卡加成走 grantMonthlyCardDailyBonus 幂等入口，
+     * 同一天不会重复到账。
      * 并发控制：依赖 SignInRecord 表的 UNIQUE(userId, signIn_date) 约束防重复签到，
      * 并发重复插入会被数据库约束拦截，此时优雅返回已存在的今日记录。
      * 事务边界：签到记录与积分流水在同一事务内落库。
      */
     @Transactional
-    public SignInRecord signInToday(Long userId) {
+    public SignInResult signInToday(Long userId) {
         LocalDate today = LocalDate.now();
         if (signInRecordRepository.existsByUserIdAndSignInDate(userId, today)) {
             throw new BizException(400, CreditErrorCode.ALREADY_SIGNED_IN, "今日已签到");
@@ -743,55 +750,71 @@ public class CreditService {
         UserCredit account = ensureAccount(userId);
 
         int streakDays = calculateStreakDays(userId, today);
-        int points = safeSignInPoints();
+        int basePoints = safeSignInPoints();
+        // 月卡加成：先取"本次可得"，实际发放交给幂等入口（今日已发过则为 0）
+        int cardBonus = todayMonthlyCardBonus(userId);
 
         SignInRecord record = new SignInRecord();
         record.setUserId(userId);
         record.setSignInDate(today);
-        record.setPoints(points);
+        record.setPoints(basePoints + cardBonus);
         record.setStreakDays(streakDays);
         try {
             signInRecordRepository.save(record);
         } catch (DataIntegrityViolationException e) {
             log.warn("用户{} 签到并发唯一约束冲突，返回已有记录", userId);
-            return signInRecordRepository.findByUserIdAndSignInDate(userId, today)
+            SignInRecord existing = signInRecordRepository.findByUserIdAndSignInDate(userId, today)
                     .orElseThrow(() -> new BizException(400, CreditErrorCode.ALREADY_SIGNED_IN, "今日已签到"));
+            int existingBase = safeSignInPoints();
+            return new SignInResult(existing, existingBase,
+                    Math.max(0, (existing.getPoints() != null ? existing.getPoints() : existingBase) - existingBase));
         }
 
-        grantPointsInternal(account, points, CreditTransactionType.SIGN_IN,
+        grantPointsInternal(account, basePoints, CreditTransactionType.SIGN_IN,
                 "连续签到" + streakDays + "天", today.toString(), null);
         userCreditRepository.save(account);
 
-        log.info("用户{} 签到成功，获得{}积分，连续{}天", userId, points, streakDays);
-        return record;
+        // 月卡每日额外积分（幂等；无月卡或今日已发过时为 0）
+        int grantedBonus = 0;
+        if (cardBonus > 0) {
+            grantedBonus = grantMonthlyCardDailyBonus(userId);
+            if (grantedBonus != cardBonus) {
+                // 极端并发下加成被别人先领了：把签到记录里的合计改成真实值
+                record.setPoints(basePoints + grantedBonus);
+            }
+        }
+
+        log.info("用户{} 签到成功，获得{}积分（基础{}+月卡{}），连续{}天",
+                userId, basePoints + grantedBonus, basePoints, grantedBonus, streakDays);
+        return new SignInResult(record, basePoints, grantedBonus);
     }
 
     /**
-     * 月卡每日登录额外积分：通过订单表查询用户是否有未过期的月卡（PAID状态+expiresAt>=now），
-     * 取最高档月卡（大月卡优先）发放每日登录奖励。不依赖 tier 字段，避免直购积分高 tier 覆盖
-     * 月卡 tier 导致用户无法领取月卡奖励的问题。
-     * 幂等：通过 relatedId=MONTHLY_CARD_DAILY-{yyyy-MM-dd} 唯一标识当日发放，重复调用不会重复发放。
-     * 触发场景：/api/auth/login 和 /api/auth/me 接口（覆盖手动登录和自动登录）。
-     * 小月卡每日 +100 积分，大月卡每日 +300 积分。
+     * 月卡每日额外积分（自 2026-09-16 起随「每日签到」发放，不再在登录时静默发放）。
+     * 通过订单表查询用户是否有未过期的月卡（PAID状态+expiresAt>=now），取最高档月卡（大月卡优先）。
+     * 不依赖 tier 字段，避免直购积分高 tier 覆盖月卡 tier 导致用户无法领取月卡奖励的问题。
+     * 幂等：relatedId=MONTHLY_CARD_DAILY-{yyyy-MM-dd} + monthly_bonus_record 唯一约束，
+     *       同一天重复调用不会重复发放。
+     * 小月卡每日 +100 积分，大月卡每日 +300 积分，**双持叠加为 +400**。
+     *
+     * @return 本次实际发放的积分；0 表示无有效月卡或今日已发放
      */
     @Transactional
-    public void grantMonthlyCardDailyBonus(Long userId) {
+    public int grantMonthlyCardDailyBonus(Long userId) {
         LocalDate today = LocalDate.now();
         String relatedId = "MONTHLY_CARD_DAILY-" + today;
 
         // 幂等加固：先检查 MonthlyBonusRecord 是否已存在
         if (monthlyBonusRecordRepository.existsByUserIdAndBonusDate(userId, today)) {
-            return;
+            return 0;
         }
 
-        // 查询有效月卡订单：PAID状态 + 月卡类型 + 未过期，按月卡 tier 倒序（大月卡优先）
-        List<SubscriptionOrder> activeCards = subscriptionOrderRepository.findActiveMonthlyCards(
-                userId, OrderStatus.PAID, MONTHLY_CARD_TIERS, LocalDateTime.now());
-        if (activeCards == null || activeCards.isEmpty()) {
-            return;
+        // 查询有效月卡：PAID状态 + 月卡类型 + 未过期；小月卡与大月卡**叠加**计算
+        int bonus = resolveActiveMonthlyCardBonus(userId);
+        if (bonus <= 0) {
+            return 0;
         }
-        SubscriptionTier tier = activeCards.get(0).getPlanTier();
-        int bonus = (tier == SubscriptionTier.LARGE_MONTH_CARD) ? 300 : 100;
+        String combo = resolveActiveMonthlyCardCombo(userId);
 
         // 插入月度奖励记录（幂等：唯一约束防并发重复）
         MonthlyBonusRecord record = new MonthlyBonusRecord();
@@ -801,14 +824,93 @@ public class CreditService {
             monthlyBonusRecordRepository.save(record);
         } catch (DataIntegrityViolationException e) {
             log.warn("用户{} 月卡每日奖励并发冲突，视为已发放直接返回", userId);
-            return;
+            return 0;
         }
 
         UserCredit account = ensureAccount(userId);
         grantPointsInternal(account, bonus, CreditTransactionType.MONTHLY_CARD_DAILY,
-                "月卡每日登录奖励(" + tier + "): +" + bonus, relatedId, null);
+                "月卡每日签到奖励(" + combo + "): +" + bonus, relatedId, null);
         userCreditRepository.save(account);
-        log.info("用户{} 月卡每日登录奖励发放: +{} ({}月卡)", userId, bonus, tier);
+        log.info("用户{} 月卡每日奖励发放: +{} ({})", userId, bonus, combo);
+        return bonus;
+    }
+
+    /** 用户当前有效月卡档位集合（去重）；无有效月卡返回空集。 */
+    public java.util.Set<SubscriptionTier> resolveActiveMonthlyCardTiers(Long userId) {
+        List<SubscriptionOrder> activeCards = subscriptionOrderRepository.findActiveMonthlyCards(
+                userId, OrderStatus.PAID, MONTHLY_CARD_TIERS, LocalDateTime.now());
+        java.util.Set<SubscriptionTier> tiers = java.util.EnumSet.noneOf(SubscriptionTier.class);
+        if (activeCards != null) {
+            for (SubscriptionOrder o : activeCards) {
+                if (o.getPlanTier() != null) tiers.add(o.getPlanTier());
+            }
+        }
+        return tiers;
+    }
+
+    /**
+     * 有效月卡组合的展示名：双持返回 ALL，仅大月卡 LARGE_MONTH_CARD，仅小月卡 SMALL_MONTH_CARD；无卡返回 null。
+     * 用于界面/流水标注（避免双持时只显示"大月卡"，让人以为小月卡没生效）。
+     */
+    public String resolveActiveMonthlyCardCombo(Long userId) {
+        java.util.Set<SubscriptionTier> tiers = resolveActiveMonthlyCardTiers(userId);
+        if (tiers.isEmpty()) {
+            return null;
+        }
+        if (tiers.size() > 1) {
+            return SubscriptionTier.ALL.name();
+        }
+        return tiers.iterator().next().name();
+    }
+
+    /**
+     * 月卡每日额外积分：小月卡 100、大月卡 300，**双持叠加为 400**。
+     */
+    public int monthlyCardBonusFor(SubscriptionTier tier) {
+        if (tier == SubscriptionTier.LARGE_MONTH_CARD) return LARGE_MONTH_CARD_DAILY_BONUS;
+        if (tier == SubscriptionTier.SMALL_MONTH_CARD) return SMALL_MONTH_CARD_DAILY_BONUS;
+        if (tier == SubscriptionTier.ALL) return SMALL_MONTH_CARD_DAILY_BONUS + LARGE_MONTH_CARD_DAILY_BONUS;
+        return 0;
+    }
+
+    /** 用户当前有效月卡的每日额外积分合计（小 100 / 大 300 / 双持 400）；无卡返回 0。 */
+    public int resolveActiveMonthlyCardBonus(Long userId) {
+        int sum = 0;
+        for (SubscriptionTier t : resolveActiveMonthlyCardTiers(userId)) {
+            sum += monthlyCardBonusFor(t);
+        }
+        return sum;
+    }
+
+    /** 今日签到还可获得的月卡额外积分（今日已发过则为 0，用于界面展示"本次可得"）。 */
+    public int todayMonthlyCardBonus(Long userId) {
+        LocalDate today = LocalDate.now();
+        if (monthlyBonusRecordRepository.existsByUserIdAndBonusDate(userId, today)) {
+            return 0;
+        }
+        return resolveActiveMonthlyCardBonus(userId);
+    }
+
+    /** 基础签到积分（credit_rule.sign_in_points，缺省 150）。 */
+    public int getSafeSignInPoints() {
+        return safeSignInPoints();
+    }
+
+    /** 签到结果：基础分 + 月卡额外分。 */
+    public static class SignInResult {
+        public final SignInRecord record;
+        public final int basePoints;
+        public final int monthlyCardBonus;
+
+        public SignInResult(SignInRecord record, int basePoints, int monthlyCardBonus) {
+            this.record = record;
+            this.basePoints = basePoints;
+            this.monthlyCardBonus = monthlyCardBonus;
+        }
+
+        public int getTotalPoints() {
+            return basePoints + monthlyCardBonus;
+        }
     }
 
     private int calculateStreakDays(Long userId, LocalDate today) {
@@ -1161,6 +1263,10 @@ public class CreditService {
         items.add(newUser);
 
         boolean todaySigned = hasSignedInToday(userId);
+        // 月卡加成计入"每日签到"的展示值：这张卡要能体现出月卡权益（双持 = 小 100 + 大 300）
+        String cardCombo = resolveActiveMonthlyCardCombo(userId);
+        int cardBonus = resolveActiveMonthlyCardBonus(userId);
+
         Map<String, Object> signIn = new HashMap<>();
         signIn.put("name", "每日签到");
         signIn.put("type", "SIGN_IN");
@@ -1168,7 +1274,10 @@ public class CreditService {
         signInProgress.put("x", todaySigned ? 1 : 0);
         signInProgress.put("y", 1);
         signIn.put("valueOrProgress", signInProgress);
-        signIn.put("points", signInPoints);
+        signIn.put("points", signInPoints + cardBonus);
+        signIn.put("basePoints", signInPoints);
+        signIn.put("monthlyCardBonus", cardBonus);
+        signIn.put("monthlyCardTier", cardCombo);
         signIn.put("done", todaySigned);
         items.add(signIn);
 

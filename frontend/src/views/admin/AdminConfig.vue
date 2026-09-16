@@ -71,16 +71,16 @@ export default {
 <style scoped>
 .config-groups { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 16px; }
 .config-group-card { background: var(--card-bg, #fff); border: 1px solid var(--border-color, #e8e8e8); border-radius: 8px; padding: 18px; }
-.config-group-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; padding-bottom: 10px; border-bottom: 1px solid #f0f0f0; }
+.config-group-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; padding-bottom: 10px; border-bottom: 1px solid var(--border-color, #f0f0f0); }
 .config-group-header h4 { margin: 0; font-size: 15px; color: var(--text-primary, #333); }
 .config-group-actions { display: flex; gap: 6px; }
 .config-items { display: flex; flex-direction: column; gap: 12px; }
 .config-item { display: flex; flex-direction: column; gap: 4px; }
-.config-item-label { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #888; }
+.config-item-label { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-muted, #888); }
 .restart-badge { display: inline-block; padding: 1px 6px; background: #fff3e0; color: #f57c00; border-radius: 3px; font-size: 10px; font-weight: 500; }
 .config-item-value { display: flex; align-items: center; gap: 6px; }
 .config-value { flex: 1; font-size: 13px; color: var(--text-primary, #333); padding: 6px 0; min-height: 30px; display: flex; align-items: center; }
-.config-value.secret-masked { cursor: pointer; color: #aaa; letter-spacing: 2px; }
+.config-value.secret-masked { cursor: pointer; color: var(--text-muted, #aaa); letter-spacing: 2px; }
 .config-edit-row { display: flex; align-items: center; gap: 6px; flex: 1; }
 .config-input { flex: 1; padding: 6px 10px; border: 1px solid var(--border-color, #e0e0e0); border-radius: 4px; font-size: 13px; color: var(--text-primary, #333); outline: none; transition: border-color 0.2s; }
 .config-input:focus { border-color: var(--accent-color, #3498db); }

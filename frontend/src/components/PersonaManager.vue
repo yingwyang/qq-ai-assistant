@@ -266,7 +266,7 @@ export default {
 .persona-header h3 {
   margin: 0;
   font-size: 16px;
-  color: #2c3e50;
+  color: var(--text-primary, #2c3e50);
 }
 
 .btn-add {
@@ -290,14 +290,14 @@ export default {
   justify-content: space-between;
   align-items: center;
   padding: 12px;
-  background-color: #f8f9fa;
+  background-color: var(--bg-tertiary, #f8f9fa);
   border-radius: 6px;
-  border: 1px solid #e0e0e0;
+  border: 1px solid var(--border-color, #e0e0e0);
   transition: all 0.2s;
 }
 
 .persona-item:hover {
-  background-color: #e9ecef;
+  background-color: var(--bg-tertiary, #e9ecef);
 }
 
 .persona-item.active {
@@ -313,13 +313,13 @@ export default {
 .persona-name {
   font-weight: 600;
   font-size: 14px;
-  color: #2c3e50;
+  color: var(--text-primary, #2c3e50);
   margin-bottom: 4px;
 }
 
 .persona-prompt-preview {
   font-size: 12px;
-  color: #666;
+  color: var(--text-secondary, #666);
 }
 
 .persona-actions {
@@ -381,7 +381,7 @@ export default {
 }
 
 .modal-content {
-  background-color: white;
+  background-color: var(--card-bg, white);
   border-radius: 8px;
   width: 90%;
   max-width: 600px;
@@ -394,7 +394,7 @@ export default {
   justify-content: space-between;
   align-items: center;
   padding: 16px 20px;
-  border-bottom: 1px solid #e0e0e0;
+  border-bottom: 1px solid var(--border-color, #e0e0e0);
 }
 
 .modal-header h3 {
@@ -423,7 +423,7 @@ export default {
   margin-bottom: 6px;
   font-size: 13px;
   font-weight: 500;
-  color: #2c3e50;
+  color: var(--text-primary, #2c3e50);
 }
 
 .form-group input,
@@ -446,7 +446,7 @@ export default {
   justify-content: flex-end;
   gap: 10px;
   padding: 12px 20px;
-  border-top: 1px solid #e0e0e0;
+  border-top: 1px solid var(--border-color, #e0e0e0);
 }
 
 .btn-cancel {

@@ -8,12 +8,8 @@ import com.qqai.repository.GroupRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.*;
 import org.springframework.stereotype.Service;
-import org.springframework.web.client.RestTemplate;
 
-import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -30,11 +26,8 @@ public class GroupTypeRecognitionService {
     private static final int SAMPLE_COUNT = 50;
     private static final long CACHE_TTL_MS = 24 * 60 * 60 * 1000L; // 24h
 
-    @Value("${astrbot.api-url:http://localhost:6185}")
-    private String astrBotApiUrl;
-
-    @Value("${astrbot.token:}")
-    private String astrBotToken;
+    @Autowired
+    private AstrBotService astrBotService;
 
     @Autowired
     private MessageService messageService;
@@ -46,7 +39,6 @@ public class GroupTypeRecognitionService {
     private GroupRepository groupRepository;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
-    private final RestTemplate restTemplate = new RestTemplate();
 
     // 识别结果缓存：groupId -> {result, expireAt}
     private final Map<String, long[]> cacheTimestamps = new ConcurrentHashMap<>();
@@ -56,11 +48,18 @@ public class GroupTypeRecognitionService {
         public final String groupType;
         public final double confidence;
         public final String reason;
+        /** 是否真的拿到了可用的 LLM 结果：false 表示识别失败，调用方据此决定是否扣积分 */
+        public final boolean success;
 
         public RecognitionResult(String groupType, double confidence, String reason) {
+            this(groupType, confidence, reason, false);
+        }
+
+        public RecognitionResult(String groupType, double confidence, String reason, boolean success) {
             this.groupType = groupType;
             this.confidence = confidence;
             this.reason = reason;
+            this.success = success;
         }
 
         public Map<String, Object> toMap() {
@@ -144,22 +143,11 @@ public class GroupTypeRecognitionService {
     }
 
     private String callLlm(String message) throws Exception {
-        HttpHeaders headers = new HttpHeaders();
-        headers.set("X-API-Key", astrBotToken);
-        headers.setContentType(MediaType.APPLICATION_JSON);
-        headers.setAcceptCharset(java.util.List.of(StandardCharsets.UTF_8));
-
-        Map<String, Object> body = new HashMap<>();
-        body.put("message", message);
-        body.put("enable_streaming", false);
-
-        HttpEntity<Map<String, Object>> entity = new HttpEntity<>(body, headers);
-        ResponseEntity<String> response = restTemplate.postForEntity(
-                astrBotApiUrl + "/api/v1/chat", entity, String.class);
-
-        JsonNode root = objectMapper.readTree(response.getBody());
-        JsonNode responseNode = root.get("response");
-        return responseNode != null ? responseNode.asText() : null;
+        // 复用 AstrBotService 中已验证的调用方式（username 必填 + SSE 解析）。
+        // 此处原本自己拼了一套请求：缺 username，AstrBot 恒返回
+        // {"status":"error","message":"Missing key: username"}，又按整段 JSON 取 response 字段，
+        // 于是永远拿到 null，前端显示"其他群 / 置信度 0% / LLM 返回为空"。
+        return astrBotService.chat(message, null, "type.recognition");
     }
 
     private RecognitionResult parseRecognitionResult(String llmResponse) {
@@ -178,7 +166,10 @@ public class GroupTypeRecognitionService {
 
             // 校验 groupType 合法性
             GroupType gt = GroupType.fromString(groupType);
-            return new RecognitionResult(gt.name(), confidence, reason);
+            if (gt == GroupType.OTHER && !"OTHER".equalsIgnoreCase(groupType.trim())) {
+                log.warn("群类型识别返回了未知类型: {}，按 OTHER 处理", groupType);
+            }
+            return new RecognitionResult(gt.name(), confidence, reason, true);
         } catch (Exception e) {
             log.warn("群类型识别结果解析失败: {} -> {}", llmResponse, e.getMessage());
             return new RecognitionResult("OTHER", 0.0, "解析失败");
@@ -208,6 +199,12 @@ public class GroupTypeRecognitionService {
     }
 
     private void cacheResult(String groupId, RecognitionResult result) {
+        if (!result.success) {
+            // 失败结果不缓存：否则 24h 内再点"重新识别"都会直接命中同一条失败结果
+            cacheResults.remove(groupId);
+            cacheTimestamps.remove(groupId);
+            return;
+        }
         cacheResults.put(groupId, result);
         cacheTimestamps.put(groupId, new long[]{System.currentTimeMillis() + CACHE_TTL_MS});
     }

@@ -101,23 +101,23 @@ export default {
 .component-status-dot { width: 10px; height: 10px; border-radius: 50%; background: #e74c3c; transition: background 0.3s; }
 .component-status-dot.active { background: #27ae60; }
 .component-title { flex: 1; font-weight: 600; font-size: 14px; color: var(--text-primary, #333); }
-.component-status-text { font-size: 12px; color: #888; }
+.component-status-text { font-size: 12px; color: var(--text-muted, #888); }
 .component-actions { display: flex; gap: 8px; margin-bottom: 12px; }
 .component-actions button { flex: 1; padding: 8px 0; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 500; transition: all 0.2s; }
 .btn-start:not(:disabled) { background: #3498db; color: #fff; }
 .btn-start:not(:disabled):hover { background: #2980b9; }
 .btn-stop:not(:disabled) { background: #e74c3c; color: #fff; }
 .btn-stop:not(:disabled):hover { background: #c0392b; }
-button:disabled { background: #ddd; color: #999; cursor: not-allowed; }
-.webui-link { display: flex; align-items: center; justify-content: center; gap: 6px; padding: 8px; background: #f0f7ff; border-radius: 4px; color: #1976d2; text-decoration: none; font-size: 12px; transition: background 0.2s; }
+button:disabled { background: #ddd; color: var(--text-muted, #999); cursor: not-allowed; }
+.webui-link { display: flex; align-items: center; justify-content: center; gap: 6px; padding: 8px; background: var(--bg-tertiary, #f0f7ff); border-radius: 4px; color: #1976d2; text-decoration: none; font-size: 12px; transition: background 0.2s; }
 .webui-link:hover { background: #d6e9ff; }
 .login-area { display: flex; justify-content: center; }
 .qrcode-box { text-align: center; }
-.qrcode-box img { width: 180px; height: 180px; border: 1px solid #e0e0e0; border-radius: 6px; }
-.qrcode-box p { margin: 8px 0; font-size: 13px; color: #666; }
-.btn-refresh { padding: 6px 14px; background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 4px; cursor: pointer; font-size: 12px; }
-.auto-login-label { display: flex; align-items: center; gap: 6px; margin-top: 10px; font-size: 12px; color: #666; cursor: pointer; }
+.qrcode-box img { width: 180px; height: 180px; border: 1px solid var(--border-color, #e0e0e0); border-radius: 6px; }
+.qrcode-box p { margin: 8px 0; font-size: 13px; color: var(--text-secondary, #666); }
+.btn-refresh { padding: 6px 14px; background: var(--bg-tertiary, #f8f9fa); border: 1px solid #dee2e6; border-radius: 4px; cursor: pointer; font-size: 12px; }
+.auto-login-label { display: flex; align-items: center; gap: 6px; margin-top: 10px; font-size: 12px; color: var(--text-secondary, #666); cursor: pointer; }
 .auto-login-label input[type="checkbox"] { width: 14px; height: 14px; cursor: pointer; }
-.loading-box { padding: 40px; color: #888; }
+.loading-box { padding: 40px; color: var(--text-muted, #888); }
 @media (max-width: 768px) { .component-grid { grid-template-columns: 1fr; } }
 </style>

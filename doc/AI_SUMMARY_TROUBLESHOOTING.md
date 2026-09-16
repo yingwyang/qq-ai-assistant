@@ -3,6 +3,11 @@
 > 与 `doc/MEDIA_TROUBLESHOOTING.md`（媒体链路）配套。本文记录 **2026-09-15「AI 摘要 100% 失败」故障**的根因、排查方法与修复验证。
 > 目标：同类问题 **5 分钟内定位**。
 
+> ⚠️ **2026-09-16 变更：消息入库不再自动触发 AI 摘要。**
+> 原链路（`MessageService.saveMessage()` → `ai.analysis.queue` → 每条消息调一次 LLM）已**删除**：群活跃时队列长期积压（实测积压 149+ 条待分析），持续消耗模型额度。
+> 现在摘要**只在手动触发时生成**：管理员 `POST /api/messages/process`（批量补）或单条手动分析。
+> 因此 **"新消息没有摘要"不再是故障，而是预期行为**；本手册适用于"手动触发后仍然失败"的排查。
+
 ---
 
 ## 0. TL;DR · 五分钟定位
@@ -81,9 +86,9 @@ data: {"type": "plain", "data": "成功", "streaming": false, ...}
 ## 1. 链路全貌
 
 ```
-消息入库（RootWebhookController）
+手动触发：管理员 POST /api/messages/process（processAllUnprocessedMessages）
   └─ messageQueueService.sendAiAnalysis(AiAnalysisPayload{messageId, content})
-        └─ RabbitMQ  ai.analysis.queue（aiContainerFactory：prefetch=3，重试 3 次）
+        └─ RabbitMQ  ai.analysis.queue（aiContainerFactory：prefetch=3，重试 3 次）   ← 2026-09-16 起唯一生产者
               └─ AiAnalysisConsumer.consumeAiAnalysis
                     ├─ 已 processed → 跳过
                     ├─ AstrBotService.renderMessageForSummary(message)   ← 富媒体渲染（图片 URL 等）
@@ -145,23 +150,31 @@ data: {"type": "plain", "data": "成功", "streaming": false, ...}
 | `processed` 一直为 0 | 每次分析都失败（重试 3 次后进 DLQ） | 看 `.dlq` 与失败日志 |
 | 摘要内容为空字符串 | 消息内容为空（渲染后为空） | 属正常逻辑（消费者直接置 `processed=true`） |
 | 摘要中带工具调用 JSON | 模型返回了 tool-call 结构 | 前端已有过滤（`utils/messageFilter.js`），如需后端过滤可复用该策略 |
+| 群类型「AI 识别」恒显示 其他群 / 置信度 0% / `LLM 返回为空` | 群类型识别服务自己拼了一套 AstrBot 请求（缺 `username` + 未解析 SSE） | 见 §6，已改为复用 `AstrBotService.chat()` |
 
 ---
 
-## 4. 批量补历史摘要（可选）
+## 4. 批量补历史摘要（按需执行）
 
-被重置或从未处理的消息（当前约 1252 条）不会自动重算——队列已排空。需要补时二选一：
+> 2026-09-16 起自动摘要已移除，**`processed = 0` 会随消息入库持续增长，这是预期现象**（不再有人自动消费它）。
+> 需要摘要时按下面的方式主动补；不需要就放着，不消耗任何额度。
 
-1. **走应用接口**（推荐）：管理员登录后调用 `POST /api/messages/process`（内部 `messageService.processAllUnprocessedMessages()`），会把所有 `processed=false` 的消息重新投递到 `ai.analysis.queue`；
+从未处理的消息（`processed=false`，截至 2026-09-16 已有约 2000+ 条）不会自动重算。需要补时二选一：
+
+1. **走应用接口**（推荐）：管理员登录后调用 `POST /api/messages/process`（内部 `messageService.processAllUnprocessedMessages()`），会把所有 `processed=false` 的消息投递到 `ai.analysis.queue`；
 2. **直接发 MQ**：向 `ai.analysis.queue` 投递 `AiAnalysisPayload{messageId, content}`。
 
-> 注意：每条消息都会真实调用一次 AstrBot（约 2–10 秒），1252 条约需 **1–2 小时**并消耗模型额度。建议分批（例如只补最近 N 天），或挑重点群补。
-> 相关 SQL：
+> ⚠️ 注意：**该接口会把当时所有 `processed=0` 的消息一次性投递**，每条都真实调用一次 AstrBot（约 2–16 秒）。2000 条约需 **数小时**并消耗大量模型额度。
+> 强烈建议先分批（把不想补的标成已处理），或挑重点群补：
 > ```sql
 > -- 查看待补数量
 > SELECT COUNT(*) FROM messages WHERE processed = 0;
 > -- 只补最近 3 天（示例：先把更早的标记为已处理，避免被一次性投递）
 > UPDATE messages SET processed = 1 WHERE processed = 0 AND send_time < NOW() - INTERVAL 3 DAY;
+> ```
+> 中途想止损：清空队列即可（已投递未消费的任务全部丢弃，消息本身不受影响）：
+> ```powershell
+> curl.exe -s -u guest:guest -X DELETE "http://127.0.0.1:15672/api/queues/%2F/ai.analysis.queue/contents"
 > ```
 
 ---
@@ -174,7 +187,62 @@ data: {"type": "plain", "data": "成功", "streaming": false, ...}
 4. **失败日志要带证据**：空响应时打印 HTTP 状态 + body 片段，避免再出现"只看到空摘要，无从下手"。
 5. **模型名不要硬编码**：用配置（`astrbot.summary-model`）或交给 AstrBot 默认模型。
 6. **依赖服务健康检查**：AstrBot/NapCat 未运行时，MQ 会快速积压并批量进死信；排查时先确认 6185/6100 端口在监听。
+7. **不要在消息入库主链路上挂 LLM 调用**：群活跃时会把额度烧在低价值内容上，并让队列长期积压（2026-09-16 已移除自动摘要，改为按需触发）。若将来要恢复"自动"，至少加配置开关 + 白名单群 + 限流，别直接恢复成"每条都分析"。
 
 ---
 
-*最后更新：2026-09-15（AI 摘要故障修复后记录）*
+## 6. 同源故障：群类型 AI 识别恒失败（2026-09-16）
+
+### 现象
+
+群类型设置面板点「AI 识别群类型」后固定显示：**其他群 / 置信度 0% / 判断依据：LLM 返回为空**——而且**照样扣了 1 积分**（`credit_transaction` 里能查到 `remark=群类型识别` 的 OUT 流水）。
+
+### 根因
+
+`GroupTypeRecognitionService.callLlm()` 是 **AstrBot 调用的第二份实现**（第一份是 `AstrBotService.doSummarize`），犯了与 §2 完全相同的两个错：
+
+| # | 缺陷 | 后果 |
+|---|---|---|
+| 1 | 请求体只放 `message` / `enable_streaming`，**漏了必填 `username`** | AstrBot 直接返回 `{"status":"error","message":"Missing key: username"}` |
+| 2 | 响应按整段 JSON 取 `response` 字段，**没做 SSE 解析** | `response` 字段不存在 → 返回 null → 前端显示"LLM 返回为空" |
+
+即再次验证了 §2 的结论：**同一个外部接口被写了两遍，只有一遍是对的**——这次坏的是另一份。
+
+### 修复内容
+
+| 文件 | 改动 |
+|---|---|
+| `service/AstrBotService.java` | 把已验证的调用逻辑抽为公共方法 `chat(message, apiKey, tag)`：补 `username`、显式 `enable_streaming=false`、走 `extractChatReply()` 解析 SSE、空响应打印状态码与 body 片段；`doSummarize()` 改为调用它 |
+| `service/GroupTypeRecognitionService.java` | 删除自写的 `RestTemplate` 调用，改调 `astrBotService.chat(...)`；`RecognitionResult` 增加 `success` 标记；**失败结果不再写 24h 缓存**（否则 24h 内重试都命中同一条失败记录） |
+| `controller/GroupController.java` | 改为**识别成功后才扣积分**：先只校验余额（不足返回 402 `INSUFFICIENT_CREDITS`），失败直接返回 `status=error` + `errorCode=RECOGNITION_FAILED`，不扣费 |
+
+### 验证证据
+
+```powershell
+# 管理员登录后实测（群 674405515）
+curl.exe -s -b cookie.txt -X POST "http://127.0.0.1:8081/api/groups/674405515/recognize-type?forceRefresh=true"
+# → {"recognizedType":"HOBBY","confidence":0.82,"reason":"群聊内容主要围绕虚拟主播/UP主…","status":"ok"}   耗时 16.4s
+# 空群（无消息）→ {"status":"error","errorCode":"RECOGNITION_FAILED","message":"AI 识别失败：群聊无消息，无法判断"}
+# 且 credit_transaction 无新增流水 ✅（失败不扣费）
+```
+
+日志对照（`backend\logs\application.log`）：
+
+```
+11:15:07 群类型识别完成 groupId=674405515: type=OTHER, confidence=0.0, reason=LLM 返回为空    ← 修复前
+11:23:20 群类型识别完成 groupId=674405515: type=HOBBY, confidence=0.82, reason=群聊内容主要围绕… ← 修复后
+```
+
+### 遗留项
+
+- ⚠️ **未修（用户选择保留现状）**：`GET /api/system/napcat/login-status` 在 QQ 已登录时仍返回 `loggedIn:false`。原因是它用 `?token=` 查询参数请求 **OneBot(6100)** 的 WebUI 端点（被拒），随后又因 `cache/qrcode.png` 是 5 分钟内的新文件而判定"正在等待登录"。判断真实登录状态请用：
+  ```powershell
+  curl.exe -s -X POST "http://127.0.0.1:6100/get_login_info" -H "Authorization: Bearer <NAPCAT_TOKEN>" -H "Content-Type: application/json" -d '{}'
+  ```
+  返回 `retcode:0` 且带 `user_id` 即为已登录。
+- 💰 修复前用户 11:15 的两次失败各扣了 1 积分，可用管理员调账接口补回：
+  `POST /api/credits/admin/adjust`，body `{"userId":2,"amount":2,"reason":"群类型识别失败退费"}`。
+
+---
+
+*最后更新：2026-09-16（移除消息入库自动摘要；补充 §6 群类型识别同源故障；§2 为 2026-09-15 AI 摘要故障）*

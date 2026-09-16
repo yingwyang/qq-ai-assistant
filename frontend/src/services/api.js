@@ -476,9 +476,10 @@ export const personaApi = {
 };
 
 export const authApi = {
-  login: (username, password) => request('/auth/login', {
+  // rememberMe=true 时后端签发更长有效期（默认 30 天）的 Cookie
+  login: (username, password, rememberMe = false) => request('/auth/login', {
     method: 'POST',
-    body: JSON.stringify({ username, password }),
+    body: JSON.stringify({ username, password, rememberMe }),
   }),
   register: (username, password, nickname) => request('/auth/register', {
     method: 'POST',
@@ -517,6 +518,11 @@ export const adminApi = {
     body: JSON.stringify({ active }),
   }),
   deleteUser: (id) => request(`/admin/users/${id}`, { method: 'DELETE' }),
+  // 管理员重置用户密码（用户忘记密码时使用），重置后该用户登录态立即失效
+  resetUserPassword: (id, newPassword) => request(`/admin/users/${id}/reset-password`, {
+    method: 'POST',
+    body: JSON.stringify({ newPassword }),
+  }),
   getConfig: () => request('/admin/config'),
   updateConfig: (data) => request('/admin/config', {
     method: 'PUT',

@@ -485,7 +485,7 @@ export default {
 }
 
 .profile-container {
-  background: var(--card-bg, white);
+  background: var(--card-bg, var(--card-bg, white));
   border-radius: 12px;
   width: 90%;
   max-width: 600px;
@@ -721,7 +721,7 @@ button:disabled {
 .empty-state {
   text-align: center;
   padding: 40px 20px;
-  color: #999;
+  color: var(--text-muted, #999);
 }
 
 .empty-state p {
@@ -843,7 +843,7 @@ button:disabled {
 }
 
 .modal-content {
-  background: var(--card-bg, white);
+  background: var(--card-bg, var(--card-bg, white));
   padding: 24px;
   border-radius: 8px;
   width: 90%;

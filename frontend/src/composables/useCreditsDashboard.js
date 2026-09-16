@@ -34,7 +34,16 @@ export const TX_TYPE_OPTIONS = [
 
 export function useCreditsDashboard({ showSystemMsg, onOpenUpgrade, onSwitchTab } = {}) {
   // 共享积分状态（与 UserMenuPopover / Sidebar 同步）
-  const { signIn, isSigningIn, todaySigned: storeTodaySigned } = useUserCreditsStore();
+  const {
+    signIn, isSigningIn, todaySigned: storeTodaySigned,
+    signInPoints, signInBasePoints, monthlyCardBonus, monthlyCardBonusTier, monthlyCardTier,
+  } = useUserCreditsStore();
+
+  // 月卡档位中文名（用于签到卡上标注"含大小月卡额外 +400"）
+  const monthlyCardLabel = computed(() => {
+    const map = { SMALL_MONTH_CARD: '小月卡', LARGE_MONTH_CARD: '大月卡', ALL: '大小月卡' };
+    return map[monthlyCardTier.value] || '月卡';
+  });
 
   const balance = ref(0);
   const totalEarned = ref(0);
@@ -268,6 +277,7 @@ export function useCreditsDashboard({ showSystemMsg, onOpenUpgrade, onSwitchTab 
   return {
     balance, totalEarned, totalSpent, tier, tierExpireAt, tierLabel,
     signInStatus, isSigningIn,
+    signInPoints, signInBasePoints, monthlyCardBonus, monthlyCardBonusTier, monthlyCardTier, monthlyCardLabel,
     rewards, rewardsLoading,
     transactions, transactionsTotal, transactionsLoading,
     txPage, txSize, totalTxPages,

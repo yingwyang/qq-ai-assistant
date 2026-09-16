@@ -678,16 +678,27 @@ export default {
       { key: 'config', icon: 'config', label: '配置管理' },
       { key: 'maintenance', icon: 'backup', label: '数据维护' },
       { key: 'group-credits', label: '积分管理', isGroup: true },
-      { key: 'credit-rule', icon: 'settings', label: '规则配置' },
+      { key: 'credit-rule', icon: 'speed', label: '规则配置' },
       { key: 'credit-users', icon: 'user', label: '用户积分' },
-      { key: 'credit-transactions', icon: 'file', label: '积分流水' },
-      { key: 'credit-orders', icon: 'file', label: '订单管理' },
-      { key: 'credit-refund-approve', icon: 'file', label: pendingRefundCount.value > 0 ? `退款审批 (${pendingRefundCount.value})` : '退款审批' },
-      { key: 'credit-dispute', icon: 'file', label: pendingDisputeCount.value > 0 ? `纠纷处理 (${pendingDisputeCount.value})` : '纠纷处理' },
+      { key: 'credit-transactions', icon: 'list', label: '积分流水' },
+      { key: 'credit-orders', icon: 'file-text', label: '订单管理' },
+      { key: 'credit-refund-approve', icon: 'coin', label: pendingRefundCount.value > 0 ? `退款审批 (${pendingRefundCount.value})` : '退款审批' },
+      { key: 'credit-dispute', icon: 'warning', label: pendingDisputeCount.value > 0 ? `纠纷处理 (${pendingDisputeCount.value})` : '纠纷处理' },
     ]);
+
+    // 订单管理页自己的筛选条件快照。
+    // 「退款审批」「纠纷处理」与「订单管理」共用同一份 adminOrders.filters，
+    // 前两者进入时会把 statusSelected 改成 PENDING_REFUND / DISPUTED，
+    // 若切回订单管理时不还原，就会带着这两个状态过滤去查订单 → 显示"暂无订单数据"（旧 bug）。
+    let ordersTabFilters = null;
 
     // 切换 Tab 时懒加载对应组件 + 数据
     const setActiveTab = (key) => {
+      const prevKey = activeTab.value;
+      // 离开订单管理前，把它自己的筛选条件存下来
+      if (prevKey === 'credit-orders' && key !== 'credit-orders') {
+        ordersTabFilters = { ...adminOrders.filters, statusSelected: [...adminOrders.filters.statusSelected] };
+      }
       activeTab.value = key;
       // 懒加载子组件
       const loader = tabComponentMap[key];
@@ -702,6 +713,11 @@ export default {
       } else if (key === 'credit-transactions') {
         adminTx.loadTransactions(0);
       } else if (key === 'credit-orders') {
+        // 回到订单管理：还原它自己的筛选条件（而不是沿用退款审批/纠纷处理留下的状态过滤）
+        if (ordersTabFilters) {
+          Object.assign(adminOrders.filters, ordersTabFilters);
+          adminOrders.filters.statusSelected = [...(ordersTabFilters.statusSelected || [])];
+        }
         adminOrders.loadOrders(0);
       } else if (key === 'credit-refund-approve') {
         adminOrders.filters.orderNo = '';
@@ -1008,7 +1024,10 @@ export default {
   padding: 8px 14px 4px;
   font-size: 18px;
   font-weight: 600;
-  color: #090f16;
+  /* 侧栏在两种主题下都是深色底，这里必须用侧栏文字色；
+     原先写死 #090f16（近黑），两种主题下都看不清 */
+  color: var(--sidebar-text, #ecf0f1);
+  opacity: 0.75;
 }
 
 .admin-main {
@@ -1091,12 +1110,12 @@ export default {
   border: none;
   font-size: 22px;
   line-height: 1;
-  color: #999;
+  color: var(--text-muted, #999);
   cursor: pointer;
   padding: 0 4px;
 }
 
-.btn-close:hover { color: #333; }
+.btn-close:hover { color: var(--text-primary, #333); }
 
 .modal-body {
   padding: 20px;
@@ -1194,7 +1213,7 @@ export default {
   margin-bottom: 14px;
 }
 
-.refund-order-info label { font-weight: 600; color: #666; margin-right: 6px; }
+.refund-order-info label { font-weight: 600; color: var(--text-secondary, #666); margin-right: 6px; }
 
 .refund-order-info span { color: var(--text-primary, #333); }
 
@@ -1238,7 +1257,7 @@ export default {
 .drawer-order-no {
   font-family: 'Consolas', 'Monaco', monospace;
   font-size: 12px;
-  color: #888;
+  color: var(--text-muted, #888);
   font-weight: 400;
 }
 
@@ -1246,11 +1265,11 @@ export default {
   background: none;
   border: none;
   font-size: 22px;
-  color: #999;
+  color: var(--text-muted, #999);
   cursor: pointer;
 }
 
-.drawer-close:hover { color: #333; }
+.drawer-close:hover { color: var(--text-primary, #333); }
 
 .drawer-body {
   flex: 1;
@@ -1283,7 +1302,7 @@ export default {
   gap: 2px;
 }
 
-.detail-item label { font-size: 11px; color: #999; }
+.detail-item label { font-size: 11px; color: var(--text-muted, #999); }
 
 .detail-item span { font-size: 13px; color: var(--text-primary, #333); }
 
@@ -1331,13 +1350,13 @@ export default {
 
 .timeline-op {
   font-size: 11px;
-  color: #999;
+  color: var(--text-muted, #999);
   font-weight: 400;
 }
 
 .timeline-time {
   font-size: 11px;
-  color: #aaa;
+  color: var(--text-muted, #aaa);
   margin-top: 2px;
 }
 
@@ -1378,7 +1397,7 @@ export default {
 
 .related-desc {
   font-size: 12px;
-  color: #666;
+  color: var(--text-secondary, #666);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1399,7 +1418,7 @@ export default {
 .related-amount.sub { color: #c62828; }
 
 .related-time {
-  color: #aaa;
+  color: var(--text-muted, #aaa);
   font-size: 11px;
 }
 
@@ -1461,12 +1480,12 @@ export default {
   background: none;
   border: none;
   font-size: 28px;
-  color: #666;
+  color: var(--text-secondary, #666);
   cursor: pointer;
   z-index: 10;
 }
 
-.preview-close:hover { color: #333; }
+.preview-close:hover { color: var(--text-primary, #333); }
 
 .preview-title {
   display: flex;
@@ -1479,11 +1498,11 @@ export default {
 .preview-title span {
   font-size: 15px;
   font-weight: 500;
-  color: #333;
+  color: var(--text-primary, #333);
   word-break: break-all;
 }
 
-.preview-title small { font-size: 12px; color: #888; white-space: nowrap; }
+.preview-title small { font-size: 12px; color: var(--text-muted, #888); white-space: nowrap; }
 
 .preview-media {
   display: flex;
@@ -1501,14 +1520,14 @@ export default {
 
 .preview-audio { width: 100%; padding: 20px; }
 
-.preview-unsupported { padding: 60px 20px; color: #888; font-size: 14px; }
+.preview-unsupported { padding: 60px 20px; color: var(--text-muted, #888); font-size: 14px; }
 
 .preview-nav {
   display: flex;
   justify-content: space-between;
   padding: 14px 20px;
-  border-top: 1px solid #f0f0f0;
-  background: #fafafa;
+  border-top: 1px solid var(--border-color, #f0f0f0);
+  background: var(--bg-tertiary, #fafafa);
 }
 
 .preview-nav-btn {
@@ -1542,15 +1561,15 @@ export default {
   justify-content: space-between;
   align-items: center;
   padding: 16px 20px;
-  border-bottom: 1px solid #f0f0f0;
-  background: #fafafa;
+  border-bottom: 1px solid var(--border-color, #f0f0f0);
+  background: var(--bg-tertiary, #fafafa);
 }
 
-.preview-gallery-title { font-size: 16px; font-weight: 500; color: #333; }
+.preview-gallery-title { font-size: 16px; font-weight: 500; color: var(--text-primary, #333); }
 
-.preview-gallery-header small { font-size: 12px; color: #888; }
+.preview-gallery-header small { font-size: 12px; color: var(--text-muted, #888); }
 
-.preview-gallery-body { flex: 1; overflow-y: auto; padding: 16px 20px; background: #fff; }
+.preview-gallery-body { flex: 1; overflow-y: auto; padding: 16px 20px; background: var(--card-bg, #fff); }
 
 .preview-grid {
   display: grid;
@@ -1563,7 +1582,7 @@ export default {
   border-radius: 8px;
   overflow: hidden;
   background: #f8f8f8;
-  border: 1px solid #f0f0f0;
+  border: 1px solid var(--border-color, #f0f0f0);
   cursor: pointer;
   transition: transform 0.15s, box-shadow 0.15s;
 }
@@ -1602,7 +1621,7 @@ export default {
   align-items: center;
   justify-content: center;
   overflow: hidden;
-  background: #f0f0f0;
+  background: var(--border-color, #f0f0f0);
 }
 
 .preview-thumbnail img,
@@ -1619,25 +1638,25 @@ export default {
   background: #f8f8f8;
 }
 
-.preview-grid-info { padding: 8px; background: #fff; }
+.preview-grid-info { padding: 8px; background: var(--card-bg, #fff); }
 
 .preview-grid-name {
   display: block;
   font-size: 12px;
-  color: #333;
+  color: var(--text-primary, #333);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.preview-grid-info small { font-size: 11px; color: #999; }
+.preview-grid-info small { font-size: 11px; color: var(--text-muted, #999); }
 
-.preview-empty { text-align: center; padding: 60px 20px; color: #888; font-size: 14px; }
+.preview-empty { text-align: center; padding: 60px 20px; color: var(--text-muted, #888); font-size: 14px; }
 
 .preview-gallery-footer {
   padding: 14px 20px;
-  border-top: 1px solid #f0f0f0;
-  background: #fafafa;
+  border-top: 1px solid var(--border-color, #f0f0f0);
+  background: var(--bg-tertiary, #fafafa);
   display: flex;
   justify-content: center;
 }

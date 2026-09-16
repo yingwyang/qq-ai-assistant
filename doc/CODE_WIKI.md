@@ -440,7 +440,7 @@ qq-web/
 | **`CreditRule`** | **积分规则**（消费系数、tier 折扣、阶梯折扣） |
 | **`SubscriptionOrder`** | **订阅订单**（月卡档位、有效期、支付状态） |
 | **`SignInRecord`** | **签到记录**（连续天数、奖励积分） |
-| **`MonthlyBonusRecord`** | **月度奖励记录**（登录发放月卡积分） |
+| **`MonthlyBonusRecord`** | **月度奖励记录**（月卡每日额外积分，随签到发放，幂等防重） |
 | `AuditLog` | 审计日志（管理员操作记录） |
 
 #### 3.1.5 安全模块

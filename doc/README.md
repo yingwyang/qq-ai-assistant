@@ -40,8 +40,8 @@
 | **QQ 绑定验证** | 通过向目标 QQ 发送验证码私信，验证用户身份，确保只有 QQ 账号主人才能绑定 |
 | **AI 多提供商配置** | 支持配置多个大模型提供商（SiliconFlow/OpenAI 等），可切换、增删，分账号持久化 |
 | **智能体管理** | 内置人格管理面板，支持自定义系统提示词、开场白、工具调用配置 |
-| **积分系统** | 每日签到、新用户奖励、AI 对话按 Token 计费（模型分级费率 × 阶梯折扣 × tier 折扣），月卡每日登录奖励；管理员可配置积分规则、调整用户积分 |
-| **订阅与月卡体系** | 直购积分套餐（Lite / Pro / ProPlus / Ultra / Mega）+ 月卡（小月卡 ¥30 / 大月卡 ¥68），月卡叠加升级（小+大=ALL 全功能版），订单购买、取消、退款、纠纷处理；管理员可补单、作废、退款、审批 |
+| **积分系统** | 每日签到、新用户奖励、AI 对话按 Token 计费（模型分级费率 × 阶梯折扣 × tier 折扣），月卡持卡用户每日签到额外 +100/+300（双持叠加 +400）；管理员可配置积分规则、调整用户积分 |
+| **订阅与月卡体系** | 直购积分套餐（Lite / Pro / ProPlus / Ultra / Mega）+ 月卡（小月卡 ¥30 / 大月卡 ¥68），月卡叠加升级（小+大=ALL 全功能版，每日签到额外积分叠加为 +400），订单购买、取消、退款、纠纷处理；管理员可补单、作废、退款、审批 |
 | **群类型识别** | AI 自动识别群聊类型（游戏/学习/工作/兴趣/生活/社交），按群类型定制 AI 摘要策略 |
 | **文本转语音（TTS）** | 集成 GPT-SoVITS，支持多音色切换，AI 回复一键生成语音（可选） |
 | **系统管理后台** | 数据概览、用户管理、组件控制、媒体管理、配置管理、数据维护、系统日志、审计 |
@@ -90,7 +90,7 @@
 |----------|------|------|----------|--------|-----|------|
 | `qqai.media` | Direct | `media.download.queue` | 5 | MediaDownloadConsumer | `media.download.dlq` | 图片/视频异步下载 |
 | `qqai.voice` | Direct | `voice.transcode.queue` | 2 | VoiceTranscodeConsumer | `voice.transcode.dlq` | 语音 SILK→MP3 转码 |
-| `qqai.ai` | Direct | `ai.analysis.queue` | 3 | AiAnalysisConsumer | `ai.analysis.dlq` | AstrBot AI 摘要生成 |
+| `qqai.ai` | Direct | `ai.analysis.queue` | 3 | AiAnalysisConsumer | `ai.analysis.dlq` | AstrBot AI 摘要生成（**2026-09-16 起仅由手动触发**：管理员 `POST /api/messages/process`；消息入库不再自动投递） |
 | `qqai.broadcast` | Fanout | `broadcast.queue` | 3 | BroadcastConsumer | — | WebSocket 消息广播 |
 
 **重试策略**：所有业务消费者使用 RetryTemplate（3 次指数退避 1s→2s→4s），耗尽后 `RejectAndDontRequeueRecoverer` 触发死信路由到 DLQ。DLQ 消费者做兜底处理（回填失败占位符或日志告警）。
@@ -177,7 +177,7 @@ qq-ai-assistant/
 | `user_credit` | **用户积分表**（余额 / 累计收入支出 / 消费封禁 / 订阅等级与到期时间） |
 | `sign_in_record` | **签到记录表**（每日一次，连续签到天数） |
 | `subscription_order` | **订阅订单表**（套餐 / 价格 / 支付状态 / 退款 / 纠纷） |
-| `monthly_bonus_record` | **月卡每日奖励记录表**（月卡用户每日登录领取额外积分，幂等防重） |
+| `monthly_bonus_record` | **月卡每日奖励记录表**（月卡用户每日签到时额外发放积分，幂等防重） |
 | `audit_log` | 审计日志表（记录关键管理操作） |
 
 ### 表字段详情
@@ -454,7 +454,9 @@ finalCost = ceil(rawCost × modelRate × overtaxRate × tierDiscount × tieredDi
 | bonus_date | DATE NOT NULL | 奖励日期（UNIQUE(user_id, bonus_date) 幂等防重） |
 | created_at | TIMESTAMP | 创建时间 |
 
-> 月卡用户每日首次登录时系统自动发放额外积分，本表记录已发放记录避免重复。
+> 月卡用户每日**签到**时（2026-09-16 前为每日登录时）系统额外发放积分：小月卡 +100、大月卡 +300，
+> **双持两者叠加为 +400**，与基础签到积分一起到账（签到接口返回的 `points` = 基础分 + 月卡加成）；
+> 本表记录已发放日期避免重复。
 
 ---
 
@@ -594,6 +596,8 @@ archive.cron:         0 0 2 * * ?    # 每天凌晨 2 点
 jwt:
   secret:     ${JWT_SECRET:your-256-bit-secret-key-for-jwt-signing-qq-ai-assistant}
   expiration: ${JWT_EXPIRATION:86400000}
+  # 登录页勾选「记住我」后的有效期，默认 30 天
+  remember-me-expiration: ${JWT_REMEMBER_ME_EXPIRATION:2592000000}
 ```
 
 ### 步骤四：启动后端

@@ -22,6 +22,10 @@ public class JwtUtil {
     
     @Value("${jwt.expiration:86400000}") // 默认24小时
     private long jwtExpiration;
+
+    /** 「记住我」时的有效期，默认 30 天（2592000000ms）。 */
+    @Value("${jwt.remember-me-expiration:2592000000}")
+    private long jwtRememberMeExpiration;
     
     private SecretKey getSigningKey() {
         if (jwtSecret == null || jwtSecret.isBlank()) {
@@ -32,8 +36,17 @@ public class JwtUtil {
     }
 
     public String generateToken(Long userId, String username, String role, Integer tokenVersion) {
+        return generateToken(userId, username, role, tokenVersion, jwtExpiration);
+    }
+
+    /**
+     * 生成指定有效期的 token（「记住我」用更长有效期）。
+     *
+     * @param expirationMs 有效期毫秒数
+     */
+    public String generateToken(Long userId, String username, String role, Integer tokenVersion, long expirationMs) {
         Date now = new Date();
-        Date expiryDate = new Date(now.getTime() + jwtExpiration);
+        Date expiryDate = new Date(now.getTime() + expirationMs);
         String jti = UUID.randomUUID().toString();
 
         return Jwts.builder()
@@ -105,5 +118,10 @@ public class JwtUtil {
     
     public long getExpirationTime() {
         return jwtExpiration;
+    }
+
+    /** 「记住我」有效期（毫秒）。 */
+    public long getRememberMeExpirationTime() {
+        return jwtRememberMeExpiration;
     }
 }

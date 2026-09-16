@@ -155,7 +155,7 @@ export default {
 .tx-summary-card.spent { border-left: 3px solid #f44336; }
 .tx-summary-card.net { border-left: 3px solid #2196f3; }
 .tx-summary-card.count { border-left: 3px solid #ff9800; }
-.tx-summary-label { font-size: 12px; color: #888; margin-bottom: 4px; }
+.tx-summary-label { font-size: 12px; color: var(--text-muted, #888); margin-bottom: 4px; }
 .tx-summary-value { font-size: 20px; font-weight: 700; color: var(--text-primary, #333); }
 .tx-filters { display: flex; flex-direction: column; gap: 10px; padding: 14px; background: var(--card-bg, #fff); border: 1px solid var(--border-color, #e8e8e8); border-radius: 8px; margin-bottom: 16px; }
 .tx-filter-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }

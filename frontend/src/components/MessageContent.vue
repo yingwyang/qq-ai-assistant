@@ -88,10 +88,10 @@
     <!-- 图片消息 -->
     <div v-else-if="isImageMessage" class="message-image">
       <img
-        v-if="imageUrl && !imageError"
-        :src="imageUrl"
+        v-if="displayImageUrl && !imageError"
+        :src="displayImageUrl"
         @error="onImageError"
-        @click="openImage(imageUrl)"
+        @click="openGalleryImage(displayImageUrl)"
       />
       <div v-else class="media-placeholder">
         <svg viewBox="0 0 64 64" width="64" height="64" stroke="#999" fill="none" stroke-width="2">
@@ -201,11 +201,28 @@ export default {
     qqNicknameMap: {
       type: Map,
       default: () => new Map()
+    },
+    /** 当前会话的图片列表（含本消息），用于图片预览左右切换；为空时退化为只预览当前图 */
+    gallery: {
+      type: Array,
+      default: () => []
     }
   },
   emits: ['navigate-to-message'],
   setup(props, { emit }) {
     const { open: openImage } = useImagePreview();
+
+    /**
+     * 点击图片：把「当前会话的图片列表」一起交给预览组件。
+     * 之前只传了单张图，imageList 恒为 1 项 → 预览里的 ←/→ 与左右箭头按钮都不生效。
+     */
+    const openGalleryImage = (url) => {
+      if (!url) return;
+      const list = (Array.isArray(props.gallery) ? props.gallery : []).filter(Boolean);
+      // 被点的图若不在列表里（例如消息刚加载完），补进来，避免索引回落到第一张
+      const target = list.includes(url) ? list : [...list, url];
+      openImage(url, target);
+    };
     const isPlaying = ref(false);
     const voiceDuration = ref(0);
     const decodeHtmlEntities = (text) => {
@@ -238,12 +255,32 @@ export default {
       return '图片下载中...';
     });
     const imageError = ref(false);
+    // 本地文件缺失/损坏时回退到 QQ 原始链接（合并转发里的图片经常只有远端链接有效）
+    const useRemoteImage = ref(false);
     const videoError = ref(false);
     const isForwardExpanded = ref(false);
     let currentAudio = null;
 
-    // 图片加载失败 -> 显示"图片已删除"
+    /** 从 CQ 码里取 QQ 原始图片链接（本地文件失效时的兜底） */
+    const remoteImageUrl = computed(() => {
+      const c = content.value || '';
+      const backtick = c.match(/url=`([^`]+)`/);
+      if (backtick && backtick[1]) return backtick[1].replace(/&amp;/g, '&').trim();
+      const m = c.match(/url=(https?:\/\/[^,\]]+)/);
+      return m && m[1] ? m[1].replace(/&amp;/g, '&').trim() : '';
+    });
+
+    /** 实际渲染的图片地址 */
+    const displayImageUrl = computed(() =>
+      (useRemoteImage.value && remoteImageUrl.value) ? remoteImageUrl.value : imageUrl.value
+    );
+
+    // 图片加载失败：先尝试远端链接，再显示"图片已删除"
     const onImageError = () => {
+      if (!useRemoteImage.value && remoteImageUrl.value && remoteImageUrl.value !== imageUrl.value) {
+        useRemoteImage.value = true;
+        return;
+      }
       if (imageError.value) return;
       imageError.value = true;
     };
@@ -614,8 +651,7 @@ export default {
     };
     
     // 获取本地媒体URL
-    const getLocalMediaUrl = (path) => {
-      if (!path) return '';
+    const getLocalMediaUrl = (path) => {      if (!path) return '';
       if (path.startsWith('http')) return path;
       if (path.startsWith('/images/') || path.startsWith('/uploads/')) {
         return `http://localhost:8081${path}`;
@@ -924,6 +960,7 @@ export default {
       onMiniAppIconError,
       onMiniAppPreviewError,
       imageError,
+      displayImageUrl,
       videoError,
       imageUrl,
       voiceUrl,
@@ -938,6 +975,7 @@ export default {
       formatFileSize,
       formatDuration,
       openImage,
+      openGalleryImage,
       toggleVoicePlay,
       onImageError,
       onVideoError,
@@ -1012,7 +1050,7 @@ export default {
 
 .reply-preview {
   font-size: 12px;
-  color: #666;
+  color: var(--text-secondary, #666);
   line-height: 1.4;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1029,7 +1067,7 @@ export default {
 }
 
 .reply-preview-placeholder {
-  color: #999;
+  color: var(--text-muted, #999);
   font-style: italic;
 }
 
@@ -1067,14 +1105,14 @@ export default {
 .forward-empty {
   padding: 8px 10px;
   font-size: 12px;
-  color: #999;
+  color: var(--text-muted, #999);
   background-color: rgba(0, 0, 0, 0.03);
   border-radius: 6px;
   text-align: center;
 }
 
 .forward-fallback {
-  color: #666;
+  color: var(--text-secondary, #666);
   font-weight: 500;
   margin-bottom: 2px;
 }
@@ -1095,12 +1133,12 @@ export default {
 .forward-title {
   font-size: 14px;
   font-weight: 600;
-  color: #2c3e50;
+  color: var(--text-primary, #2c3e50);
 }
 
 .forward-summary {
   font-size: 12px;
-  color: #666;
+  color: var(--text-secondary, #666);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1111,7 +1149,7 @@ export default {
   flex-direction: column;
   gap: 8px;
   padding-left: 10px;
-  border-left: 2px solid #ddd;
+  border-left: 2px solid var(--border-color, #ddd);
   margin-left: 4px;
 }
 
@@ -1134,7 +1172,7 @@ export default {
 }
 
 .forward-item-time {
-  color: #999;
+  color: var(--text-muted, #999);
 }
 
 .forward-toggle-btn {
@@ -1171,7 +1209,7 @@ export default {
   flex-direction: column;
   gap: 8px;
   padding: 10px;
-  background-color: #f0f0f0;
+  background-color: var(--border-color, #f0f0f0);
   border-radius: 8px;
 }
 
@@ -1184,7 +1222,7 @@ export default {
   align-items: center;
   gap: 8px;
   font-size: 12px;
-  color: #666;
+  color: var(--text-secondary, #666);
 }
 
 .message-voice .voice-player {
@@ -1245,7 +1283,7 @@ export default {
 
 .voice-duration {
   font-size: 14px;
-  color: #333;
+  color: var(--text-primary, #333);
   margin-left: auto;
 }
 
@@ -1295,24 +1333,24 @@ export default {
   justify-content: center;
   gap: 8px;
   padding: 24px;
-  background-color: #f0f0f0;
+  background-color: var(--border-color, #f0f0f0);
   border-radius: 8px;
 }
 
 .video-icon-svg {
   width: 40px;
   height: 40px;
-  color: #999;
+  color: var(--text-muted, #999);
 }
 
 .message-video .video-label {
   font-size: 13px;
-  color: #666;
+  color: var(--text-secondary, #666);
 }
 
 .message-video .video-size {
   font-size: 11px;
-  color: #999;
+  color: var(--text-muted, #999);
 }
 
 .message-face {
@@ -1320,9 +1358,9 @@ export default {
 }
 
 .message-face .face-text {
-  color: #666;
+  color: var(--text-secondary, #666);
   font-style: italic;
-  background-color: #f0f0f0;
+  background-color: var(--border-color, #f0f0f0);
   padding: 2px 8px;
   border-radius: 4px;
   font-size: 12px;
@@ -1335,16 +1373,16 @@ export default {
   justify-content: center;
   gap: 8px;
   padding: 24px;
-  background-color: #f5f5f5;
+  background-color: var(--bg-tertiary, #f5f5f5);
   border-radius: 8px;
-  border: 1px dashed #ddd;
+  border: 1px dashed var(--border-color, #ddd);
   min-width: 160px;
   cursor: not-allowed;
 }
 
 .placeholder-label {
   font-size: 12px;
-  color: #999;
+  color: var(--text-muted, #999);
 }
 
 /* 媒体加载中占位符 */
@@ -1355,7 +1393,7 @@ export default {
   justify-content: center;
   gap: 10px;
   padding: 24px;
-  background-color: #f5f5f5;
+  background-color: var(--bg-tertiary, #f5f5f5);
   border-radius: 8px;
   border: 1px dashed #ccc;
   min-width: 160px;
@@ -1364,7 +1402,7 @@ export default {
 .loading-spinner {
   width: 28px;
   height: 28px;
-  border: 3px solid #ddd;
+  border: 3px solid var(--border-color, #ddd);
   border-top-color: #3498db;
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
@@ -1372,7 +1410,7 @@ export default {
 
 .loading-label {
   font-size: 12px;
-  color: #999;
+  color: var(--text-muted, #999);
 }
 
 @keyframes spin {
@@ -1387,7 +1425,7 @@ export default {
 .mini-app-card {
   display: flex;
   flex-direction: column;
-  background-color: #fff;
+  background-color: var(--card-bg, #fff);
   border: 1px solid rgba(0, 0, 0, 0.08);
   border-radius: 10px;
   cursor: pointer;
@@ -1396,7 +1434,7 @@ export default {
 }
 
 .mini-app-card:hover {
-  background-color: #f8f9fa;
+  background-color: var(--bg-tertiary, #f8f9fa);
   border-color: rgba(0, 0, 0, 0.12);
 }
 
@@ -1413,7 +1451,7 @@ export default {
   height: 48px;
   border-radius: 8px;
   overflow: hidden;
-  background-color: #f0f0f0;
+  background-color: var(--border-color, #f0f0f0);
 }
 
 .mini-app-icon img {
@@ -1441,7 +1479,7 @@ export default {
 .mini-app-title {
   font-size: 14px;
   font-weight: 500;
-  color: #333;
+  color: var(--text-primary, #333);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1449,7 +1487,7 @@ export default {
 
 .mini-app-desc {
   font-size: 12px;
-  color: #666;
+  color: var(--text-secondary, #666);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1457,7 +1495,7 @@ export default {
 
 .mini-app-source {
   font-size: 11px;
-  color: #999;
+  color: var(--text-muted, #999);
 }
 
 .mini-app-arrow {

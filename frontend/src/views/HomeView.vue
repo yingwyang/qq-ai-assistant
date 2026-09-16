@@ -571,8 +571,8 @@ export default {
 html, body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   line-height: 1.6;
-  color: #333;
-  background-color: #f5f5f5;
+  color: var(--text-primary, #333);
+  background-color: var(--bg-tertiary, #f5f5f5);
   margin: 0 !important;
   padding: 0 !important;
   width: 100%;
@@ -694,7 +694,7 @@ html, body {
 
 .agents-page h2 {
   margin-bottom: 20px;
-  color: #2c3e50;
+  color: var(--text-primary, #2c3e50);
 }
 
 .agents-list {
@@ -704,7 +704,7 @@ html, body {
 }
 
 .agent-card {
-  background-color: white;
+  background-color: var(--card-bg, white);
   border-radius: 8px;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
   padding: 20px;
@@ -726,7 +726,7 @@ html, body {
   display: flex;
   align-items: center;
   justify-content: center;
-  background-color: #f8f9fa;
+  background-color: var(--bg-tertiary, #f8f9fa);
   border-radius: 8px;
 }
 
@@ -736,7 +736,7 @@ html, body {
 
 .agent-info h3 {
   margin: 0 0 5px 0;
-  color: #2c3e50;
+  color: var(--text-primary, #2c3e50);
 }
 
 .agent-info p {
@@ -750,7 +750,7 @@ html, body {
   border-radius: 16px;
   font-size: 12px;
   font-weight: 500;
-  background-color: #f1f3f4;
+  background-color: var(--bg-tertiary, #f1f3f4);
   color: #5f6368;
 }
 
@@ -769,13 +769,13 @@ html, body {
   height: 100%;
   min-height: 100%;
   gap: 16px;
-  color: #999;
+  color: var(--text-muted, #999);
 }
 
 .auth-loading-spinner {
   width: 40px;
   height: 40px;
-  border: 3px solid #e0e0e0;
+  border: 3px solid var(--border-color, #e0e0e0);
   border-top-color: #3498db;
   border-radius: 50%;
   animation: auth-spin 0.8s linear infinite;
@@ -800,7 +800,7 @@ html, body {
 .login-prompt-content {
   text-align: center;
   padding: 40px;
-  background-color: var(--bg-secondary, white);
+  background-color: var(--bg-secondary, var(--card-bg, white));
   border-radius: 12px;
   box-shadow: 0 4px 12px var(--card-shadow, rgba(0, 0, 0, 0.1));
 }
@@ -846,8 +846,8 @@ html, body {
 
 .mobile-tabs {
   display: flex;
-  background: #fff;
-  border-bottom: 1px solid #e0e0e0;
+  background: var(--card-bg, #fff);
+  border-bottom: 1px solid var(--border-color, #e0e0e0);
   flex-shrink: 0;
 }
 
@@ -855,14 +855,14 @@ html, body {
   flex: 1;
   padding: 12px;
   border: none;
-  background: #f5f5f5;
+  background: var(--bg-tertiary, #f5f5f5);
   cursor: pointer;
   font-size: 14px;
   transition: all 0.2s;
 }
 
 .mobile-tab.active {
-  background: #fff;
+  background: var(--card-bg, #fff);
   color: #1890ff;
   border-bottom: 2px solid #1890ff;
 }
@@ -970,7 +970,7 @@ html, body {
 }
 
 .persona-modal-content {
-  background-color: var(--bg-secondary, white);
+  background-color: var(--bg-secondary, var(--card-bg, white));
   border-radius: 8px;
   max-width: 90%;
   max-height: 90%;

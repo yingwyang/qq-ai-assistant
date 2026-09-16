@@ -4,7 +4,7 @@
       <div 
         ref="popoverEl"
         class="user-menu-popover" 
-        :class="{ 'theme-dark': false }"
+        :class="'theme-' + (theme || 'light')"
       >
         <!-- 用户信息头部 -->
         <div v-if="userInfo" class="menu-user-header">
@@ -91,6 +91,13 @@
             </div>
           </div>
 
+          <!-- 主题切换（原来这个按钮被删掉了，这里实装回来） -->
+          <div class="menu-item" @click="toggleTheme">
+            <Icon :name="isDark ? 'sun' : 'moon'" :size="18" />
+            <span class="menu-label">{{ isDark ? '浅色模式' : '深色模式' }}</span>
+            <span class="menu-switch" :class="{ on: isDark }"><span class="knob"></span></span>
+          </div>
+
           <div class="menu-item" @click="$emit('open-docs')">
             <Icon name="book" :size="18" />
             <span class="menu-label">帮助与反馈</span>
@@ -110,11 +117,12 @@
 </template>
 
 <script>
-import { ref, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
 import { useRouter } from 'vue-router';
 import Icon from './Icon.vue';
 import { useComponentControl } from '../composables/useComponentControl';
 import { useUserCreditsStore } from '../composables/useUserCreditsStore';
+import { useTheme } from '../composables/useTheme';
 
 export default {
   name: 'UserMenuPopover',
@@ -129,6 +137,11 @@ export default {
     const router = useRouter();
     const activeSubmenu = ref('');
     const popoverEl = ref(null);
+
+    // 主题（弹层被 Teleport 到 body，拿不到 .theme-* 的 CSS 变量，
+    // 所以把主题类挂到弹层自身上，见模板 :class）
+    const { theme, toggleTheme } = useTheme();
+    const isDark = computed(() => theme.value === 'dark');
 
     // 全局共享积分状态（与 Sidebar / UserCenter 引用同一份 ref）
     const { balance, todaySigned, isSigningIn, signIn, reload: reloadCredits } = useUserCreditsStore();
@@ -264,6 +277,9 @@ export default {
       goToUpgrade,
       goToCredits,
       handleSignIn,
+      theme,
+      toggleTheme,
+      isDark,
     };
   }
 };
@@ -438,9 +454,23 @@ export default {
   font-size: 16px;
   transition: transform 0.2s;
 }
-.menu-item.has-submenu .menu-arrow.expanded {
-  transform: rotate(90deg);
+.menu-item.has-submenu .menu-arrow.expanded {  transform: rotate(90deg);
 }
+
+/* 主题切换开关 */
+.menu-switch {
+  width: 34px; height: 18px; border-radius: 999px; flex-shrink: 0;
+  background: var(--border-color, #d0d0d0);
+  position: relative; transition: background 0.2s;
+}
+.menu-switch.on { background: var(--accent-color, #3498db); }
+.menu-switch .knob {
+  position: absolute; top: 2px; left: 2px;
+  width: 14px; height: 14px; border-radius: 50%;
+  background: var(--card-bg, #fff); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  transition: transform 0.2s;
+}
+.menu-switch.on .knob { transform: translateX(16px); }
 
 .submenu {
   background: var(--bg-tertiary, #f8f9fa);
@@ -511,7 +541,7 @@ export default {
   justify-content: center;
   align-items: center;
   min-height: 180px;
-  background: #fff;
+  background: var(--card-bg, #fff);
   border-radius: 6px;
   padding: 12px;
 }

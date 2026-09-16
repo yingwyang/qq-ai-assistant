@@ -51,8 +51,10 @@ export default {
 html, body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   line-height: 1.6;
-  color: #333;
-  background-color: #f5f5f5;
+  /* 跟随主题（useTheme 会把 theme-light / theme-dark 挂在 <html> 上）：
+     原来这里写死 #f5f5f5/#333，导致暗色模式下所有页面底层仍是浅色 */
+  color: var(--text-primary, #333);
+  background-color: var(--bg-primary, #f5f5f5);
   margin: 0 !important;
   padding: 0 !important;
   width: 100%;
@@ -69,6 +71,8 @@ html, body {
 
 /* 主题 CSS 变量 - 亮色 */
 .theme-light {
+  /* 让原生控件（下拉框、滚动条、日期选择器）跟随应用主题，而不是跟随操作系统 */
+  color-scheme: light;
   --bg-primary: #f5f5f5;
   --bg-secondary: #ffffff;
   --bg-tertiary: #f8f9fa;
@@ -93,6 +97,7 @@ html, body {
 
 /* 主题 CSS 变量 - 暗色 */
 .theme-dark {
+  color-scheme: dark;
   --bg-primary: #1a1a2e;
   --bg-secondary: #16213e;
   --bg-tertiary: #0f3460;

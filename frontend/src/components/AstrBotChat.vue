@@ -1777,7 +1777,7 @@ export default {
   display: flex;
   flex-direction: column;
   height: 100%;
-  background-color: #f5f5f5;
+  background-color: var(--bg-tertiary, #f5f5f5);
   position: relative;
 }
 
@@ -1785,8 +1785,8 @@ export default {
   display: flex;
   align-items: center;
   padding: 15px 20px;
-  background-color: white;
-  border-bottom: 1px solid #e0e0e0;
+  background-color: var(--card-bg, white);
+  border-bottom: 1px solid var(--border-color, #e0e0e0);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
@@ -1814,7 +1814,7 @@ export default {
 .header-info h3 {
   margin: 0;
   font-size: 16px;
-  color: #2c3e50;
+  color: var(--text-primary, #2c3e50);
 }
 
 .header-info .status {
@@ -1850,11 +1850,11 @@ export default {
 }
 .tts-character-select {
   padding: 4px 8px;
-  border: 1px solid #ddd;
+  border: 1px solid var(--border-color, #ddd);
   border-radius: 6px;
   font-size: 12px;
-  background: #fff;
-  color: #333;
+  background: var(--card-bg, #fff);
+  color: var(--text-primary, #333);
   cursor: pointer;
   outline: none;
   transition: border-color 0.2s;
@@ -1878,7 +1878,7 @@ export default {
 }
 
 .action-btn:hover {
-  background-color: #f0f0f0;
+  background-color: var(--border-color, #f0f0f0);
 }
 
 .conversation-panel {
@@ -1887,7 +1887,7 @@ export default {
   right: 10px;
   width: 280px;
   max-height: 400px;
-  background: white;
+  background: var(--card-bg, white);
   border-radius: 8px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
   z-index: 100;
@@ -1900,13 +1900,13 @@ export default {
   justify-content: space-between;
   align-items: center;
   padding: 12px 16px;
-  border-bottom: 1px solid #e0e0e0;
+  border-bottom: 1px solid var(--border-color, #e0e0e0);
 }
 
 .panel-header h4 {
   margin: 0;
   font-size: 14px;
-  color: #2c3e50;
+  color: var(--text-primary, #2c3e50);
 }
 
 .close-btn {
@@ -1933,7 +1933,7 @@ export default {
 }
 
 .conversation-item:hover {
-  background-color: #f5f5f5;
+  background-color: var(--bg-tertiary, #f5f5f5);
 }
 
 .conversation-item.active {
@@ -1977,7 +1977,7 @@ export default {
 }
 
 .confirm-dialog {
-  background: white;
+  background: var(--card-bg, white);
   border-radius: 12px;
   width: 90%;
   max-width: 400px;
@@ -2001,7 +2001,7 @@ export default {
   align-items: center;
   gap: 10px;
   padding: 20px 20px 10px;
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid var(--border-color, #f0f0f0);
 }
 
 .confirm-icon {
@@ -2011,7 +2011,7 @@ export default {
 .confirm-dialog-header h3 {
   margin: 0;
   font-size: 18px;
-  color: #2c3e50;
+  color: var(--text-primary, #2c3e50);
 }
 
 .confirm-dialog-body {
@@ -2021,7 +2021,7 @@ export default {
 .confirm-dialog-body p {
   margin: 0 0 8px;
   font-size: 15px;
-  color: #2c3e50;
+  color: var(--text-primary, #2c3e50);
 }
 
 .confirm-hint {
@@ -2038,17 +2038,17 @@ export default {
 
 .btn-cancel {
   padding: 10px 20px;
-  border: 1px solid #ddd;
-  background: white;
+  border: 1px solid var(--border-color, #ddd);
+  background: var(--card-bg, white);
   border-radius: 6px;
   cursor: pointer;
   font-size: 14px;
-  color: #666;
+  color: var(--text-secondary, #666);
   transition: all 0.2s;
 }
 
 .btn-cancel:hover {
-  background: #f5f5f5;
+  background: var(--bg-tertiary, #f5f5f5);
 }
 
 .btn-confirm {
@@ -2081,7 +2081,7 @@ export default {
 }
 
 .settings-dialog {
-  background: white;
+  background: var(--card-bg, white);
   border-radius: 12px;
   width: 95%;
   max-width: 1000px;
@@ -2098,8 +2098,8 @@ export default {
   align-items: center;
   gap: 10px;
   padding: 16px 20px;
-  border-bottom: 1px solid #f0f0f0;
-  background: white;
+  border-bottom: 1px solid var(--border-color, #f0f0f0);
+  background: var(--card-bg, white);
   flex-shrink: 0;
 }
 
@@ -2111,7 +2111,7 @@ export default {
   margin: 0;
   flex: 1;
   font-size: 16px;
-  color: #2c3e50;
+  color: var(--text-primary, #2c3e50);
 }
 
 /* 设置面板主体 - 左右布局 */
@@ -2124,8 +2124,8 @@ export default {
 /* 左侧提供商列表 */
 .settings-sidebar {
   width: 260px;
-  background: #f8f9fa;
-  border-right: 1px solid #e0e0e0;
+  background: var(--bg-tertiary, #f8f9fa);
+  border-right: 1px solid var(--border-color, #e0e0e0);
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
@@ -2136,13 +2136,13 @@ export default {
   align-items: center;
   justify-content: space-between;
   padding: 14px 16px;
-  border-bottom: 1px solid #e0e0e0;
+  border-bottom: 1px solid var(--border-color, #e0e0e0);
 }
 
 .sidebar-title {
   font-size: 14px;
   font-weight: 600;
-  color: #2c3e50;
+  color: var(--text-primary, #2c3e50);
 }
 
 .btn-add-provider {
@@ -2150,24 +2150,24 @@ export default {
   height: 28px;
   border: 1px dashed #ccc;
   border-radius: 6px;
-  background: white;
+  background: var(--card-bg, white);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #666;
+  color: var(--text-secondary, #666);
   transition: all 0.2s;
 }
 
 .btn-add-provider:hover {
   border-color: #3498db;
   color: #3498db;
-  background: #f0f7ff;
+  background: var(--bg-tertiary, #f0f7ff);
 }
 
 .provider-add-form {
   padding: 12px;
-  border-bottom: 1px solid #e0e0e0;
+  border-bottom: 1px solid var(--border-color, #e0e0e0);
   display: flex;
   gap: 6px;
 }
@@ -2175,7 +2175,7 @@ export default {
 .provider-add-form input {
   flex: 1;
   padding: 6px 10px;
-  border: 1px solid #ddd;
+  border: 1px solid var(--border-color, #ddd);
   border-radius: 4px;
   font-size: 13px;
 }
@@ -2192,9 +2192,9 @@ export default {
 
 .btn-provider-cancel {
   padding: 6px 12px;
-  background: #f5f5f5;
-  color: #666;
-  border: 1px solid #ddd;
+  background: var(--bg-tertiary, #f5f5f5);
+  color: var(--text-secondary, #666);
+  border: 1px solid var(--border-color, #ddd);
   border-radius: 4px;
   font-size: 12px;
   cursor: pointer;
@@ -2218,7 +2218,7 @@ export default {
 }
 
 .provider-item:hover {
-  background: #e8f4fc;
+  background: var(--bg-tertiary, #e8f4fc);
 }
 
 .provider-item.active {
@@ -2230,7 +2230,7 @@ export default {
   width: 32px;
   height: 32px;
   border-radius: 8px;
-  background: #e0e0e0;
+  background: var(--border-color, #e0e0e0);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2250,7 +2250,7 @@ export default {
   display: block;
   font-size: 14px;
   font-weight: 500;
-  color: #2c3e50;
+  color: var(--text-primary, #2c3e50);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2316,8 +2316,8 @@ export default {
   align-items: center;
   justify-content: space-between;
   padding: 20px;
-  border-bottom: 1px solid #f0f0f0;
-  background: #fafafa;
+  border-bottom: 1px solid var(--border-color, #f0f0f0);
+  background: var(--bg-tertiary, #fafafa);
 }
 
 .provider-title-row {
@@ -2340,7 +2340,7 @@ export default {
 .provider-display-name {
   margin: 0;
   font-size: 18px;
-  color: #2c3e50;
+  color: var(--text-primary, #2c3e50);
 }
 
 .provider-url-text {
@@ -2374,11 +2374,11 @@ export default {
 }
 
 .form-section {
-  background: white;
+  background: var(--card-bg, white);
   border-radius: 8px;
   padding: 16px;
   margin-bottom: 16px;
-  border: 1px solid #e0e0e0;
+  border: 1px solid var(--border-color, #e0e0e0);
 }
 
 .form-item {
@@ -2393,7 +2393,7 @@ export default {
   display: block;
   font-size: 14px;
   font-weight: 600;
-  color: #2c3e50;
+  color: var(--text-primary, #2c3e50);
   margin-bottom: 4px;
 }
 
@@ -2407,7 +2407,7 @@ export default {
 .form-input {
   width: 100%;
   padding: 10px 14px;
-  border: 1px solid #ddd;
+  border: 1px solid var(--border-color, #ddd);
   border-radius: 6px;
   font-size: 14px;
   transition: all 0.2s;
@@ -2431,28 +2431,28 @@ export default {
 
 .toggle-key-btn {
   padding: 10px 14px;
-  background: #f5f5f5;
-  border: 1px solid #ddd;
+  background: var(--bg-tertiary, #f5f5f5);
+  border: 1px solid var(--border-color, #ddd);
   border-radius: 6px;
   font-size: 13px;
-  color: #666;
+  color: var(--text-secondary, #666);
   cursor: pointer;
   white-space: nowrap;
   transition: all 0.2s;
 }
 
 .toggle-key-btn:hover {
-  background: #e8e8e8;
+  background: var(--border-color, #e8e8e8);
   border-color: #3498db;
   color: #3498db;
 }
 
 /* 模型配置区域 */
 .model-section {
-  background: white;
+  background: var(--card-bg, white);
   border-radius: 8px;
   padding: 16px;
-  border: 1px solid #e0e0e0;
+  border: 1px solid var(--border-color, #e0e0e0);
 }
 
 .section-header {
@@ -2466,7 +2466,7 @@ export default {
   margin: 0;
   font-size: 15px;
   font-weight: 600;
-  color: #2c3e50;
+  color: var(--text-primary, #2c3e50);
 }
 
 .section-actions {
@@ -2477,7 +2477,7 @@ export default {
 
 .search-input {
   padding: 6px 12px;
-  border: 1px solid #ddd;
+  border: 1px solid var(--border-color, #ddd);
   border-radius: 4px;
   font-size: 13px;
   width: 160px;
@@ -2485,7 +2485,7 @@ export default {
 
 .btn-get-models, .btn-custom-model {
   padding: 6px 12px;
-  border: 1px solid #ddd;
+  border: 1px solid var(--border-color, #ddd);
   border-radius: 4px;
   font-size: 13px;
   cursor: pointer;
@@ -2496,13 +2496,13 @@ export default {
 }
 
 .btn-get-models {
-  background: #f0f7ff;
+  background: var(--bg-tertiary, #f0f7ff);
   color: #3498db;
   border-color: #d0e3ff;
 }
 
 .btn-get-models:hover {
-  background: #e0f0ff;
+  background: var(--bg-tertiary, #e0f0ff);
 }
 
 .btn-custom-model {
@@ -2520,7 +2520,7 @@ export default {
   gap: 8px;
   margin-bottom: 16px;
   padding: 12px;
-  background: #f8f9fa;
+  background: var(--bg-tertiary, #f8f9fa);
   border-radius: 6px;
 }
 
@@ -2541,9 +2541,9 @@ export default {
 
 .btn-model-cancel {
   padding: 8px 14px;
-  background: #f5f5f5;
-  color: #666;
-  border: 1px solid #ddd;
+  background: var(--bg-tertiary, #f5f5f5);
+  color: var(--text-secondary, #666);
+  border: 1px solid var(--border-color, #ddd);
   border-radius: 4px;
   font-size: 13px;
   cursor: pointer;
@@ -2567,7 +2567,7 @@ export default {
 }
 
 .model-config-item:hover {
-  background: #f8f9fa;
+  background: var(--bg-tertiary, #f8f9fa);
 }
 
 .model-info {
@@ -2579,7 +2579,7 @@ export default {
   display: block;
   font-size: 14px;
   font-weight: 500;
-  color: #2c3e50;
+  color: var(--text-primary, #2c3e50);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2631,7 +2631,7 @@ export default {
   width: 18px;
   left: 2px;
   bottom: 2px;
-  background-color: white;
+  background-color: var(--card-bg, white);
   border-radius: 50%;
   transition: 0.3s;
 }
@@ -2659,7 +2659,7 @@ export default {
 }
 
 .model-action-btn:hover {
-  background: #f0f0f0;
+  background: var(--border-color, #f0f0f0);
   color: #3498db;
 }
 
@@ -2690,14 +2690,14 @@ export default {
   justify-content: flex-end;
   gap: 10px;
   padding: 16px 20px;
-  border-top: 1px solid #f0f0f0;
-  background: white;
+  border-top: 1px solid var(--border-color, #f0f0f0);
+  background: var(--card-bg, white);
   flex-shrink: 0;
 }
 
 .conv-title {
   font-size: 14px;
-  color: #2c3e50;
+  color: var(--text-primary, #2c3e50);
   font-weight: 500;
   white-space: nowrap;
   overflow: hidden;
@@ -2728,21 +2728,21 @@ export default {
 
 .toggle-group-btn {
   background: transparent;
-  border: 1px solid #ddd;
+  border: 1px solid var(--border-color, #ddd);
   border-radius: 6px;
   padding: 4px 8px;
   cursor: pointer;
   display: flex;
   align-items: center;
   gap: 4px;
-  color: #666;
+  color: var(--text-secondary, #666);
   font-size: 12px;
   transition: all 0.2s;
 }
 
 .toggle-group-btn:hover {
-  background: #f0f0f0;
-  color: #333;
+  background: var(--border-color, #f0f0f0);
+  color: var(--text-primary, #333);
 }
 
 .toggle-group-btn.active {
@@ -2760,17 +2760,17 @@ export default {
   align-items: center;
   gap: 6px;
   padding: 10px 12px;
-  background: #f8f9fa;
+  background: var(--bg-tertiary, #f8f9fa);
   border-radius: 6px;
   cursor: pointer;
   font-size: 13px;
   font-weight: 600;
-  color: #333;
+  color: var(--text-primary, #333);
   transition: background 0.2s;
 }
 
 .conv-group-header:hover {
-  background: #e9ecef;
+  background: var(--bg-tertiary, #e9ecef);
 }
 
 .conv-group-title {
@@ -2781,8 +2781,8 @@ export default {
 }
 
 .conv-group-count {
-  background: #e0e0e0;
-  color: #666;
+  background: var(--border-color, #e0e0e0);
+  color: var(--text-secondary, #666);
   font-size: 11px;
   padding: 2px 8px;
   border-radius: 10px;
@@ -2791,7 +2791,7 @@ export default {
 
 .conv-group-items {
   padding-left: 8px;
-  border-left: 2px solid #e0e0e0;
+  border-left: 2px solid var(--border-color, #e0e0e0);
   margin-left: 12px;
 }
 
@@ -2800,7 +2800,7 @@ export default {
 }
 
 .conv-group-items .conversation-item:hover {
-  background-color: #f0f4ff;
+  background-color: var(--bg-tertiary, #f0f4ff);
 }
 
 .conv-group-items .conv-content {
@@ -2811,7 +2811,7 @@ export default {
   flex: 1;
   overflow-y: auto;
   padding: 20px;
-  background-color: #f5f5f5;
+  background-color: var(--bg-tertiary, #f5f5f5);
 }
 
 .empty-chat {
@@ -2853,7 +2853,7 @@ export default {
 }
 
 .message-left {
-  background-color: white;
+  background-color: var(--card-bg, white);
   border-bottom-left-radius: 4px;
   flex-direction: row;
   margin-right: auto;
@@ -2998,7 +2998,7 @@ export default {
 }
 
 .message-system-bubble {
-  background-color: #f0f7ff;
+  background-color: var(--bg-tertiary, #f0f7ff);
   border: 1px solid #d0e3ff;
   border-radius: 12px;
   max-width: 90%;
@@ -3032,8 +3032,8 @@ export default {
 
 .chat-input-area {
   padding: 12px 20px 15px;
-  background-color: white;
-  border-top: 1px solid #e0e0e0;
+  background-color: var(--card-bg, white);
+  border-top: 1px solid var(--border-color, #e0e0e0);
 }
 
 .model-selector-bar {
@@ -3060,7 +3060,7 @@ export default {
   padding: 5px 10px 5px 28px;
   border: 1px solid #cbd5e0;
   border-radius: 6px;
-  background-color: white;
+  background-color: var(--card-bg, white);
   font-size: 13px;
   color: #2d3748;
   cursor: pointer;
@@ -3079,7 +3079,7 @@ export default {
 }
 
 .model-selector select:disabled {
-  background-color: #f5f5f5;
+  background-color: var(--bg-tertiary, #f5f5f5);
   cursor: not-allowed;
 }
 
@@ -3115,7 +3115,7 @@ export default {
   width: 26px;
   height: 26px;
   border: 1px solid #cbd5e0;
-  background-color: white;
+  background-color: var(--card-bg, white);
   border-radius: 6px;
   color: #7f8c8d;
   cursor: pointer;
@@ -3125,7 +3125,7 @@ export default {
 .model-refresh-btn:hover {
   border-color: #3498db;
   color: #3498db;
-  background-color: #f0f7ff;
+  background-color: var(--bg-tertiary, #f0f7ff);
 }
 
 .model-tip {
@@ -3152,7 +3152,7 @@ export default {
 .input-wrapper input {
   flex: 1;
   padding: 12px 16px;
-  border: 1px solid #ddd;
+  border: 1px solid var(--border-color, #ddd);
   border-radius: 24px;
   font-size: 14px;
   outline: none;
@@ -3164,7 +3164,7 @@ export default {
 }
 
 .input-wrapper input:disabled {
-  background-color: #f5f5f5;
+  background-color: var(--bg-tertiary, #f5f5f5);
   cursor: not-allowed;
 }
 
@@ -3332,5 +3332,32 @@ export default {
 .analysis-extra-hint b {
   color: #5b5bd6;
   font-weight: 600;
+}
+
+/* ===================== 暗色主题：输入区 ===================== */
+/* 模型选择条与提示块用的是浅色渐变 / 半透明浅紫，不随变量走，需要单独覆盖 */
+.theme-dark .model-selector-bar {
+  background: linear-gradient(135deg, #1e293b 0%, #16213e 100%);
+  border-color: #24304a;
+}
+.theme-dark .model-selector { color: #cbd5e1; }
+.theme-dark .model-selector select { color: #e5e7eb; border-color: #334155; }
+.theme-dark .model-refresh-btn {
+  color: #94a3b8;
+  border-color: #334155;
+  background-color: rgba(255, 255, 255, 0.06);
+}
+.theme-dark .model-tip {
+  color: #c7d2fe;
+  background: rgba(129, 140, 248, 0.18);
+}
+.theme-dark .input-wrapper input {
+  background-color: rgba(255, 255, 255, 0.05);
+  color: #e5e7eb;
+}
+.theme-dark .input-wrapper input::placeholder { color: #94a3b8; }
+.theme-dark .send-btn:disabled {
+  background-color: #3a4560;
+  color: #94a3b8;
 }
 </style>

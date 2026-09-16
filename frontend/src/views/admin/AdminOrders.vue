@@ -140,8 +140,8 @@ export default {
 .tx-filter-input { padding: 6px 10px; border: 1px solid var(--border-color, #d9d9d9); border-radius: 4px; font-size: 13px; min-width: 140px; background: var(--card-bg, #fff); color: var(--text-primary, #333); }
 .tx-filter-input:focus { outline: none; border-color: var(--accent-color, #3498db); }
 .status-multi-select { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
-.status-multi-label { font-size: 13px; color: #666; }
-.status-chip { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border: 1px solid var(--border-color, #d9d9d9); border-radius: 12px; font-size: 12px; cursor: pointer; color: #666; user-select: none; transition: all 0.2s; }
+.status-multi-label { font-size: 13px; color: var(--text-secondary, #666); }
+.status-chip { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border: 1px solid var(--border-color, #d9d9d9); border-radius: 12px; font-size: 12px; cursor: pointer; color: var(--text-secondary, #666); user-select: none; transition: all 0.2s; }
 .status-chip input[type='checkbox'] { width: 13px; height: 13px; cursor: pointer; }
 .status-chip.active { background: var(--accent-color, #3498db); color: #fff; border-color: var(--accent-color, #3498db); }
 </style>

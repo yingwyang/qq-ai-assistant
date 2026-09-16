@@ -115,21 +115,39 @@ public class GroupController {
                 return ResponseEntity.status(401).body(Map.of("status", "error", "message", "未登录"));
             }
 
-            // 消耗积分（统一扣费入口）
-            int groupCost = 0;
-            try {
-                boolean isAdmin = securityHelper.isAdmin();
-                CreditService.CreditCostResult groupResult = creditService.spendForGroupType(userId, groupId, isAdmin);
-                groupCost = groupResult.getCost();
-            } catch (com.qqai.exception.BizException e) {
-                return ResponseEntity.status(402).body(Map.of(
-                        "status", "error",
-                        "errorCode", "INSUFFICIENT_CREDITS",
-                        "message", "积分不足，无法执行群类型识别"));
+            boolean isAdmin = securityHelper.isAdmin();
+
+            // 只做余额校验（不扣费）；真正扣费挪到识别成功之后。
+            // 此前是"先扣 1 积分再识别"，LLM 一失败用户就白扣一次。
+            if (!isAdmin) {
+                int balance = creditService.getBalance(userId).map(b -> b.getBalance()).orElse(0);
+                if (balance < 1) {
+                    return ResponseEntity.status(402).body(Map.of(
+                            "status", "error",
+                            "errorCode", "INSUFFICIENT_CREDITS",
+                            "message", "积分不足，无法执行群类型识别"));
+                }
             }
 
             GroupTypeRecognitionService.RecognitionResult result =
                     recognitionService.recognizeGroupType(groupId, forceRefresh);
+
+            if (!result.success) {
+                // 识别失败不扣积分，失败原因原样返回（前端会弹 error toast）
+                log.warn("群类型识别未成功 groupId={}: {}", groupId, result.reason);
+                return ResponseEntity.ok(Map.of(
+                        "status", "error",
+                        "errorCode", "RECOGNITION_FAILED",
+                        "message", "AI 识别失败：" + result.reason));
+            }
+
+            int groupCost = 0;
+            try {
+                CreditService.CreditCostResult groupResult = creditService.spendForGroupType(userId, groupId, isAdmin);
+                groupCost = groupResult.getCost();
+            } catch (com.qqai.exception.BizException e) {
+                log.warn("群类型识别扣费失败(结果已正常返回) userId={}, groupId={}: {}", userId, groupId, e.getMessage());
+            }
 
             Map<String, Object> response = new HashMap<>();
             response.put("status", "ok");

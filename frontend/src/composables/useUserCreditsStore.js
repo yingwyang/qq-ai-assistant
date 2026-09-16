@@ -10,6 +10,12 @@ const expiresAt = ref(null);
 const todaySigned = ref(false);
 const loading = ref(false);
 const isSigningIn = ref(false);
+// 每日签到可得积分 = 基础签到分 + 月卡每日额外积分（后端 /credits/balance 下发）
+const signInPoints = ref(0);
+const signInBasePoints = ref(0);
+const monthlyCardBonus = ref(0);       // 今日还可领取的月卡额外积分（已发过则为 0）
+const monthlyCardBonusTier = ref(0);   // 月卡档位对应的每日额外积分（固定值，用于标注）
+const monthlyCardTier = ref(null);
 let loaded = false;  // 标记"是否成功加载过"，失败不标记，允许下次引用时重试
 
 const tierLabel = computed(() => {
@@ -44,6 +50,11 @@ export function useUserCreditsStore() {
       tier.value = data?.subscriptionTier || data?.tier || 'FREE';
       expiresAt.value = data?.subscriptionExpiresAt || data?.tierExpireAt || data?.expiresAt || null;
       todaySigned.value = !!(data?.todaySignInDone ?? data?.todayDone ?? data?.todaySigned ?? false);
+      signInBasePoints.value = Number(data?.signInBasePoints ?? 0);
+      monthlyCardBonus.value = Number(data?.monthlyCardBonus ?? 0);
+      monthlyCardBonusTier.value = Number(data?.monthlyCardBonusTier ?? data?.monthlyCardBonus ?? 0);
+      monthlyCardTier.value = data?.monthlyCardTier || null;
+      signInPoints.value = Number(data?.signInPoints ?? (signInBasePoints.value + monthlyCardBonus.value));
       loaded = true;  // 成功才标记，失败允许后续引用时重试
     } catch (error) {
       // 401 已由 api.js 统一处理（清 token + auth:logout），这里静默失败
@@ -71,13 +82,18 @@ export function useUserCreditsStore() {
     try {
       const data = await creditsApi.signIn();
       const points = Number(data?.points ?? 0);
+      const cardBonus = Number(data?.monthlyCardBonus ?? 0);
       if (data?.newBalance !== undefined && data?.newBalance !== null) {
         balance.value = Number(data.newBalance);
       } else {
         balance.value += points;
       }
       todaySigned.value = true;
-      showToast(`签到成功 +${points}`, 'success');
+      // 月卡用户提示里点出加成部分，让"每日签到积分"这条权益可见
+      showToast(
+        cardBonus > 0 ? `签到成功 +${points}（含月卡额外 +${cardBonus}）` : `签到成功 +${points}`,
+        'success'
+      );
       return data;
     } catch (error) {
       const code = error?.errorCode;
@@ -121,6 +137,11 @@ export function useUserCreditsStore() {
     tier.value = 'FREE';
     expiresAt.value = null;
     todaySigned.value = false;
+    signInPoints.value = 0;
+    signInBasePoints.value = 0;
+    monthlyCardBonus.value = 0;
+    monthlyCardBonusTier.value = 0;
+    monthlyCardTier.value = null;
     loaded = false;  // 登出切换账号时重置缓存，允许新账号重新加载
   };
 
@@ -132,6 +153,11 @@ export function useUserCreditsStore() {
     todaySigned,
     loading,
     isSigningIn,
+    signInPoints,
+    signInBasePoints,
+    monthlyCardBonus,
+    monthlyCardBonusTier,
+    monthlyCardTier,
     reload,
     reset,
     signIn,

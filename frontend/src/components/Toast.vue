@@ -85,7 +85,7 @@ export default {
   align-items: center;
   gap: 12px;
   padding: 14px 18px;
-  background: #fff;
+  background: var(--card-bg, #fff);
   border-radius: 8px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
   min-width: 280px;
@@ -140,7 +140,7 @@ export default {
 .toast-content {
   flex: 1;
   font-size: 14px;
-  color: #333;
+  color: var(--text-primary, #333);
   line-height: 1.5;
 }
 
@@ -153,7 +153,7 @@ export default {
   justify-content: center;
   background: none;
   border: none;
-  color: #999;
+  color: var(--text-muted, #999);
   font-size: 18px;
   cursor: pointer;
   border-radius: 4px;
@@ -161,8 +161,8 @@ export default {
 }
 
 .toast-close:hover {
-  background: #f5f5f5;
-  color: #666;
+  background: var(--bg-tertiary, #f5f5f5);
+  color: var(--text-secondary, #666);
 }
 
 /* 动画效果 */

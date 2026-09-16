@@ -116,7 +116,7 @@ export default {
 }
 
 .dialog-container {
-  background: #fff;
+  background: var(--card-bg, #fff);
   border-radius: 12px;
   width: 90%;
   max-width: 400px;
@@ -129,14 +129,14 @@ export default {
   align-items: center;
   justify-content: space-between;
   padding: 16px 20px;
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid var(--border-color, #f0f0f0);
 }
 
 .dialog-title {
   margin: 0;
   font-size: 16px;
   font-weight: 600;
-  color: #333;
+  color: var(--text-primary, #333);
 }
 
 .dialog-close {
@@ -147,7 +147,7 @@ export default {
   justify-content: center;
   background: none;
   border: none;
-  color: #999;
+  color: var(--text-muted, #999);
   font-size: 20px;
   cursor: pointer;
   border-radius: 4px;
@@ -155,8 +155,8 @@ export default {
 }
 
 .dialog-close:hover {
-  background: #f5f5f5;
-  color: #666;
+  background: var(--bg-tertiary, #f5f5f5);
+  color: var(--text-secondary, #666);
 }
 
 .dialog-body {
@@ -189,7 +189,7 @@ export default {
 .dialog-message {
   margin: 0;
   font-size: 14px;
-  color: #333;
+  color: var(--text-primary, #333);
   line-height: 1.6;
   flex: 1;
 }
@@ -199,8 +199,8 @@ export default {
   justify-content: flex-end;
   gap: 12px;
   padding: 16px 20px;
-  border-top: 1px solid #f0f0f0;
-  background: #fafafa;
+  border-top: 1px solid var(--border-color, #f0f0f0);
+  background: var(--bg-tertiary, #fafafa);
 }
 
 .btn {
@@ -213,9 +213,9 @@ export default {
 }
 
 .btn-secondary {
-  background: #fff;
-  border-color: #d9d9d9;
-  color: #666;
+  background: var(--card-bg, #fff);
+  border-color: var(--border-color, #d9d9d9);
+  color: var(--text-secondary, #666);
 }
 
 .btn-secondary:hover {

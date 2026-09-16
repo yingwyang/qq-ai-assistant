@@ -80,9 +80,13 @@ public class MessageService {
         message.setArchived(false);
         Message savedMessage = messageRepository.save(message);
         messageBroadcastService.broadcastNewMessage(savedMessage);
-        // 投递 AI 分析任务到 RabbitMQ（替代旧的 ApplicationEvent 机制）
-        messageQueueService.sendAiAnalysis(
-                new AiAnalysisPayload(savedMessage.getId(), savedMessage.getContent()));
+        // 注意：自 2026-09-16 起，消息入库不再自动投递 AI 分析任务。
+        // 原实现是"每条消息入库 → ai.analysis.queue → 调一次 LLM"，群活跃时队列长期积压
+        // （实测单队列积压 149 条待分析），持续消耗模型额度，故移除该自动链路。
+        // 摘要改为按需生成：
+        //   1) 批量：管理员调用 POST /api/messages/process（对应 processAllUnprocessedMessages）
+        //   2) 单条：手动触发分析接口
+        // 消费者与队列保留不变，手动作业照常消费。详见 doc/AI_SUMMARY_TROUBLESHOOTING.md
         return savedMessage;
     }
 

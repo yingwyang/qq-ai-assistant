@@ -27,6 +27,9 @@ public class AdminController {
     @Autowired
     private AuditLogService auditLogService;
 
+    @Autowired
+    private org.springframework.security.crypto.password.PasswordEncoder passwordEncoder;
+
     /**
      * 获取当前登录管理员用户名（用于审计）
      */
@@ -136,6 +139,35 @@ public class AdminController {
         auditLogService.log(currentUsername(), "USER_ACTIVE_CHANGE", "user:" + targetUsername,
                 "SUCCESS", (active ? "启用" : "禁用") + "用户 (userId=" + id + ")");
         return ResponseEntity.ok(Map.of("message", "用户状态更新成功"));
+    }
+
+    /**
+     * 管理员重置指定用户的密码（用户"忘记密码"时由管理员处理）。
+     * 密码规则与用户自助改密一致：8-64 位且同时包含大写字母、小写字母与数字。
+     * 重置后 tokenVersion + 1 → 该用户已签发的登录态立即失效，需用新密码重新登录。
+     */
+    @PostMapping("/users/{id}/reset-password")
+    public ResponseEntity<?> resetUserPassword(@PathVariable Long id, @RequestBody Map<String, String> body) {
+        String newPassword = body.get("newPassword");
+        if (newPassword == null
+                || !newPassword.matches("^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d)[A-Za-z\\d@$!%*?&]{8,64}$")) {
+            return ResponseEntity.badRequest()
+                    .body(Map.of("error", "密码需 8-64 位，且同时包含大写字母、小写字母与数字"));
+        }
+
+        Optional<User> userOpt = userService.findById(id);
+        if (userOpt.isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
+
+        User user = userOpt.get();
+        user.setPassword(passwordEncoder.encode(newPassword));
+        user.setTokenVersion((user.getTokenVersion() == null ? 0 : user.getTokenVersion()) + 1);
+        userService.save(user);
+
+        auditLogService.log(currentUsername(), "ADMIN_RESET_PASSWORD", "user:" + user.getUsername(),
+                "SUCCESS", "管理员重置密码 (userId=" + id + ")");
+        return ResponseEntity.ok(Map.of("message", "密码已重置，该用户的登录状态已失效，请用新密码重新登录"));
     }
 
     /**

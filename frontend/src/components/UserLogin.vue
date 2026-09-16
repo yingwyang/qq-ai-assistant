@@ -283,7 +283,7 @@ export default {
 }
 
 .login-container {
-  background-color: white;
+  background-color: var(--card-bg, white);
   border-radius: 12px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
   width: 90%;
@@ -300,7 +300,7 @@ export default {
 
 .login-header h2 {
   margin: 0;
-  color: #2c3e50;
+  color: var(--text-primary, #2c3e50);
   font-size: 24px;
   font-weight: 600;
 }
@@ -322,8 +322,8 @@ export default {
 }
 
 .close-btn:hover:not(:disabled) {
-  background-color: #f0f0f0;
-  color: #2c3e50;
+  background-color: var(--border-color, #f0f0f0);
+  color: var(--text-primary, #2c3e50);
 }
 
 .close-btn:disabled {
@@ -342,7 +342,7 @@ export default {
 .form-group label {
   display: block;
   margin-bottom: 8px;
-  color: #2c3e50;
+  color: var(--text-primary, #2c3e50);
   font-size: 14px;
   font-weight: 500;
 }
@@ -350,7 +350,7 @@ export default {
 .form-group input {
   width: 100%;
   padding: 12px 16px;
-  border: 1px solid #e0e0e0;
+  border: 1px solid var(--border-color, #e0e0e0);
   border-radius: 8px;
   font-size: 15px;
   transition: border-color 0.2s, box-shadow 0.2s;
@@ -363,7 +363,7 @@ export default {
 }
 
 .form-group input:disabled {
-  background-color: #f5f5f5;
+  background-color: var(--bg-tertiary, #f5f5f5);
   cursor: not-allowed;
 }
 
@@ -402,7 +402,7 @@ export default {
   text-align: center;
   margin-top: 20px;
   padding-top: 20px;
-  border-top: 1px solid #e0e0e0;
+  border-top: 1px solid var(--border-color, #e0e0e0);
   color: #7f8c8d;
   font-size: 14px;
 }

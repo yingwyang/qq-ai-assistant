@@ -157,7 +157,7 @@
                 <span class="message-time">{{ formatTime(message.sendTime || message.timestamp) }}</span>
               </div>
               <!-- 消息内容 -->
-              <MessageContent :message="message" :qq-nickname-map="qqNicknameMap" @navigate-to-message="handleNavigateToMessage" />
+              <MessageContent :message="message" :qq-nickname-map="qqNicknameMap" :gallery="chatImageGallery" @navigate-to-message="handleNavigateToMessage" />
               <!-- AI 总结（左对齐） -->
               <div v-if="message.aiSummary" class="ai-summary">
                 <div class="ai-summary-header">
@@ -182,7 +182,7 @@
                 <span class="message-user">{{ message.userNickname || message.userName || '我' }}</span>
               </div>
               <!-- 消息内容 -->
-              <MessageContent :message="message" :qq-nickname-map="qqNicknameMap" @navigate-to-message="handleNavigateToMessage" />
+              <MessageContent :message="message" :qq-nickname-map="qqNicknameMap" :gallery="chatImageGallery" @navigate-to-message="handleNavigateToMessage" />
             </div>
           </div>
         </div>
@@ -199,7 +199,7 @@ import { messageApi } from '../services/api';
 import MessageContent from './MessageContent.vue';
 import { showToast } from './Toast.vue';
 import { useMessageWebSocket } from '../composables/useMessageWebSocket';
-import { extractForwardXmlTitles, extractForwardMessages } from '../utils/messageParser';
+import { extractForwardXmlTitles, extractForwardMessages, extractImageUrl } from '../utils/messageParser';
 import { formatMessageTime } from '../utils/formatTime';
 import logger from '../utils/logger';
 
@@ -225,6 +225,10 @@ export default {
     const selfQq = computed(() => props.group?.ownerQq || '');
     const messages = ref([]);
     const isLoading = ref(false);
+    // 当前会话已加载消息里的全部图片（按消息顺序）→ 供图片预览左右切换
+    const chatImageGallery = computed(() =>
+      (messages.value || []).map(extractImageUrl).filter(Boolean)
+    );
     const currentGroupName = ref('');
     const messagesContainer = ref(null);
     const currentPage = ref(0);
@@ -774,6 +778,7 @@ export default {
     return {
       groupId,
       messages,
+      chatImageGallery,
       isLoading,
       currentGroupName,
       messagesContainer,
@@ -815,7 +820,7 @@ export default {
 
 <style scoped>
 .chat-interface {
-  background-color: white;
+  background-color: var(--card-bg, white);
   border-radius: 8px;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
   height: 100%;
@@ -826,8 +831,8 @@ export default {
 
 .chat-header {
   padding: 8px 16px;
-  border-bottom: 1px solid #e0e0e0;
-  background-color: #f8f9fa;
+  border-bottom: 1px solid var(--border-color, #e0e0e0);
+  background-color: var(--bg-tertiary, #f8f9fa);
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -869,7 +874,7 @@ export default {
 
 .current-group {
   font-weight: 500;
-  color: #2c3e50;
+  color: var(--text-primary, #2c3e50);
   font-size: 14px;
 }
 
@@ -881,7 +886,7 @@ export default {
 
 .load-more-hint {
   text-align: center;
-  color: #888;
+  color: var(--text-muted, #888);
   font-size: 13px;
   padding: 8px 0 12px;
 }
@@ -892,7 +897,7 @@ export default {
   align-items: center;
   justify-content: center;
   height: 100%;
-  color: #666;
+  color: var(--text-secondary, #666);
 }
 
 .empty-icon {
@@ -945,10 +950,15 @@ export default {
 }
 
 .message-left {
+  /* 浅色主题保持原值；暗色主题单独覆盖（原来写死 #f1f3f4，暗色下气泡是亮块） */
   background-color: #f1f3f4;
   border-bottom-left-radius: 4px;
   flex-direction: row;
   margin-right: auto;
+}
+.theme-dark .message-left {
+  background-color: #16213e;
+  color: #e0e0e0;
 }
 
 .message-right {
@@ -978,7 +988,7 @@ export default {
   align-items: center;
   margin-bottom: 4px;
   font-size: 12px;
-  color: #666;
+  color: var(--text-secondary, #666);
 }
 
 .message-right .message-header {
@@ -1037,7 +1047,7 @@ export default {
 
 .ai-summary-content {
   line-height: 1.4;
-  color: #333;
+  color: var(--text-primary, #333);
 }
 
 /* 滚动条样式 */
@@ -1046,7 +1056,7 @@ export default {
 }
 
 .messages-area::-webkit-scrollbar-track {
-  background: #f1f1f1;
+  background: var(--bg-tertiary, #f1f1f1);
   border-radius: 3px;
 }
 
@@ -1105,8 +1115,8 @@ export default {
   justify-content: space-between;
   align-items: center;
   padding: 12px 20px;
-  background-color: #f8f9fa;
-  border-bottom: 1px solid #e0e0e0;
+  background-color: var(--bg-tertiary, #f8f9fa);
+  border-bottom: 1px solid var(--border-color, #e0e0e0);
   gap: 15px;
   flex-wrap: wrap;
 }
@@ -1119,7 +1129,7 @@ export default {
 
 .selected-count {
   font-weight: 500;
-  color: #2c3e50;
+  color: var(--text-primary, #2c3e50);
 }
 
 .selection-mode-label {
@@ -1127,7 +1137,7 @@ export default {
   align-items: center;
   gap: 6px;
   cursor: pointer;
-  color: #666;
+  color: var(--text-secondary, #666);
   font-size: 14px;
 }
 
@@ -1151,7 +1161,7 @@ export default {
 .quick-select-input {
   width: 60px;
   padding: 6px 10px;
-  border: 1px solid #ddd;
+  border: 1px solid var(--border-color, #ddd);
   border-radius: 4px;
   font-size: 14px;
   text-align: center;
@@ -1327,7 +1337,7 @@ export default {
 .analysis-picker {
   width: min(680px, 92vw);
   max-height: 85vh;
-  background: white;
+  background: var(--card-bg, white);
   border-radius: 14px;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.22);
   display: flex;
@@ -1350,7 +1360,7 @@ export default {
 .analysis-picker-title {
   font-size: 18px;
   font-weight: 700;
-  color: #1f2937;
+  color: var(--text-primary, #1f2937);
   margin-bottom: 4px;
 }
 .analysis-picker-sub {
@@ -1379,8 +1389,8 @@ export default {
   transition: all 0.15s;
 }
 .analysis-picker-close:hover {
-  background: #f0f1f5;
-  color: #1f2937;
+  background: var(--bg-tertiary, #f0f1f5);
+  color: var(--text-primary, #1f2937);
 }
 .analysis-picker-grid {
   padding: 16px 18px 22px;
@@ -1393,8 +1403,8 @@ export default {
   text-align: left;
   padding: 14px 16px;
   border-radius: 12px;
-  border: 1.5px solid #e5e7eb;
-  background: #fafbfc;
+  border: 1.5px solid var(--border-color, #e5e7eb);
+  background: var(--bg-tertiary, #fafbfc);
   cursor: pointer;
   display: flex;
   gap: 12px;
@@ -1405,7 +1415,7 @@ export default {
 }
 .analysis-picker-item:hover:not(:disabled) {
   border-color: #9ca3ff;
-  background: #f4f5ff;
+  background: var(--bg-tertiary, #f4f5ff);
   transform: translateY(-1px);
   box-shadow: 0 6px 16px rgba(91, 91, 214, 0.12);
 }
@@ -1415,12 +1425,12 @@ export default {
 }
 .analysis-picker-item.recommended {
   border-color: #c4c7ff;
-  background: #eef0ff;
+  background: var(--bg-tertiary, #eef0ff);
   position: relative;
 }
 .analysis-picker-item.recommended:hover:not(:disabled) {
   border-color: #5b5bd6;
-  background: #e6e8ff;
+  background: var(--bg-tertiary, #e6e8ff);
 }
 .analysis-picker-icon {
   font-size: 24px;
@@ -1437,7 +1447,7 @@ export default {
 .analysis-picker-name {
   font-size: 14.5px;
   font-weight: 600;
-  color: #1f2937;
+  color: var(--text-primary, #1f2937);
   display: flex;
   align-items: center;
   gap: 6px;
@@ -1464,12 +1474,12 @@ export default {
 .analysis-picker-input-area {
   margin-top: 12px;
   padding-top: 12px;
-  border-top: 1px solid #f0f0f0;
+  border-top: 1px solid var(--border-color, #f0f0f0);
 }
 .analysis-picker-input {
   width: 100%;
   padding: 10px 12px;
-  border: 1px solid #e0e0e0;
+  border: 1px solid var(--border-color, #e0e0e0);
   border-radius: 8px;
   font-size: 13px;
   font-family: inherit;

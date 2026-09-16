@@ -209,22 +209,22 @@ export default {
 .rule-form-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; margin-top: 12px; }
 .rule-item { display: flex; flex-direction: column; gap: 6px; }
 .rule-item label { font-size: 13px; font-weight: 500; color: var(--text-primary, #333); }
-.rule-item small { font-size: 11px; color: #999; }
+.rule-item small { font-size: 11px; color: var(--text-muted, #999); }
 .rule-item.toggle-item { flex-direction: row; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; background: var(--bg-tertiary, #fafbfc); border-radius: 6px; }
 .rule-item.toggle-item label:first-child { flex: 1; }
-.rule-switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-size: 12px; color: #666; }
+.rule-switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-size: 12px; color: var(--text-secondary, #666); }
 .rule-switch input[type='checkbox'] { width: 16px; height: 16px; cursor: pointer; }
 .plans-edit-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; margin-top: 12px; }
 .plan-edit-card { padding: 14px; background: var(--bg-tertiary, #fafbfc); border: 1px solid var(--border-color, #e8e8e8); border-radius: 8px; display: flex; flex-direction: column; gap: 10px; }
 .plan-edit-name { font-size: 14px; font-weight: 600; color: var(--text-primary, #333); }
 .plan-edit-row { display: flex; flex-direction: column; gap: 4px; }
-.plan-edit-row label { font-size: 12px; color: #666; }
+.plan-edit-row label { font-size: 12px; color: var(--text-secondary, #666); }
 .plan-duration-row { display: flex; align-items: center; gap: 12px; margin-top: 14px; }
 .plan-duration-row label { font-size: 13px; font-weight: 500; color: var(--text-primary, #333); }
 .plan-duration-input { width: 120px; }
 .rule-actions { display: flex; justify-content: flex-end; padding-top: 8px; }
 .rule-save-btn { min-width: 160px; }
-.readonly-tip { display: block; margin-top: 10px; color: #999; font-size: 12px; }
+.readonly-tip { display: block; margin-top: 10px; color: var(--text-muted, #999); font-size: 12px; }
 .json-textarea { font-family: monospace; font-size: 12px; resize: vertical; min-height: 60px; }
 .grid-span-2 { grid-column: span 2; }
 @media (max-width: 600px) {

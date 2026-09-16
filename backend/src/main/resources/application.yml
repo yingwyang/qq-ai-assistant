@@ -180,6 +180,8 @@ spring:
 jwt:
   secret: ${JWT_SECRET:}
   expiration: 86400000
+  # 「记住我」勾选后的有效期：默认 30 天
+  remember-me-expiration: ${JWT_REMEMBER_ME_EXPIRATION:2592000000}
 
 napcat:
   token: ${NAPCAT_TOKEN:}

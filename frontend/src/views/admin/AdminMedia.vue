@@ -164,18 +164,18 @@ export default {
 <style scoped>
 .media-manager-body { /* wrapper */ }
 .media-manager-card { background: var(--card-bg, #fff); border: 1px solid var(--border-color, #e8e8e8); border-radius: 8px; padding: 16px; }
-.media-summary { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 14px; font-size: 13px; color: #666; }
+.media-summary { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 14px; font-size: 13px; color: var(--text-secondary, #666); }
 .media-selected { color: #3498db; font-weight: 500; }
 .media-filter { display: flex; gap: 8px; margin-bottom: 14px; }
-.media-loading { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 32px; gap: 10px; font-size: 13px; color: #888; }
-.media-empty { padding: 32px; text-align: center; font-size: 13px; color: #999; }
+.media-loading { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 32px; gap: 10px; font-size: 13px; color: var(--text-muted, #888); }
+.media-empty { padding: 32px; text-align: center; font-size: 13px; color: var(--text-muted, #999); }
 .media-table { width: 100%; border-collapse: collapse; margin-bottom: 14px; font-size: 13px; }
 .media-table th, .media-table td { padding: 10px 8px; border-bottom: 1px solid var(--border-color, #f0f0f0); text-align: left; color: var(--text-primary, #333); }
 .media-table th { font-weight: 600; color: var(--text-primary, #333); background: var(--bg-tertiary, #fafafa); }
 .media-table tbody tr:hover { background: var(--bg-tertiary, #fafafa); }
 .media-table .col-checkbox { width: 36px; text-align: center; }
 .media-table input[type="checkbox"] { width: 14px; height: 14px; cursor: pointer; }
-.media-pagination { display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 14px; font-size: 13px; color: #666; }
+.media-pagination { display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 14px; font-size: 13px; color: var(--text-secondary, #666); }
 .media-pagination button { padding: 6px 12px; border: 1px solid var(--border-color, #e0e0e0); background: var(--card-bg, #fff); border-radius: 4px; cursor: pointer; font-size: 12px; color: var(--text-secondary, #666); transition: all 0.2s; }
 .media-pagination button:hover:not(:disabled) { border-color: var(--accent-color, #3498db); color: var(--accent-color, #3498db); }
 .media-pagination button:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -184,10 +184,10 @@ export default {
 .media-actions button { flex: 1; padding: 10px 0; border: none; border-radius: 6px; font-size: 14px; font-weight: 500; cursor: pointer; transition: background-color 0.2s; }
 .btn-delete:not(:disabled) { background-color: #e74c3c; color: #fff; }
 .btn-delete:not(:disabled):hover { background-color: #c0392b; }
-.btn-delete:disabled { background-color: #e0e0e0; color: #999; cursor: not-allowed; }
+.btn-delete:disabled { background-color: var(--border-color, #e0e0e0); color: var(--text-muted, #999); cursor: not-allowed; }
 .btn-purge:not(:disabled) { background-color: #f39c12; color: #fff; }
 .btn-purge:not(:disabled):hover { background-color: #e67e22; }
-.btn-purge:disabled { background-color: #e0e0e0; color: #999; cursor: not-allowed; }
+.btn-purge:disabled { background-color: var(--border-color, #e0e0e0); color: var(--text-muted, #999); cursor: not-allowed; }
 .file-name-cell { cursor: pointer; color: #3498db; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .file-name-cell:hover { text-decoration: underline; }
 .col-action { width: 60px; text-align: center; }

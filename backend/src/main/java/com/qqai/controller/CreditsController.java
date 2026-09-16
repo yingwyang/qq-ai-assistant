@@ -7,6 +7,7 @@ import com.qqai.entity.SignInRecord;
 import com.qqai.entity.UserCredit;
 import com.qqai.entity.enums.CreditDirection;
 import com.qqai.entity.enums.CreditTransactionType;
+import com.qqai.entity.enums.SubscriptionTier;
 import com.qqai.service.CreditService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
@@ -52,6 +53,18 @@ public class CreditsController {
         data.put("totalSpent", account.getTotalSpent());
         data.put("todaySignInDone", todaySigned);
         data.put("streakDays", streakDays);
+        // 每日签到可得积分 = 基础签到分 + 月卡每日额外积分（无月卡时为 0），供界面展示。
+        // 注意：monthlyCardBonus 取"今日还可领"的口径（今日已发过则为 0），保证界面数字=实际到账；
+        //       monthlyCardBonusTier 取档位口径（双持 = 小100+大300 = 400），
+        //       用于在已发放时标注"含大小月卡额外 +400（今日已发放）"。
+        int cardBonusTier = creditService.resolveActiveMonthlyCardBonus(userId);
+        int cardBonusToday = creditService.todayMonthlyCardBonus(userId);
+        int baseSignIn = creditService.getSafeSignInPoints();
+        data.put("signInBasePoints", baseSignIn);
+        data.put("monthlyCardBonus", cardBonusToday);
+        data.put("monthlyCardBonusTier", cardBonusTier);
+        data.put("monthlyCardTier", creditService.resolveActiveMonthlyCardCombo(userId));
+        data.put("signInPoints", baseSignIn + cardBonusToday);
         data.put("subscriptionTier", account.getSubscriptionTier() != null
                 ? account.getSubscriptionTier().name() : "FREE");
         data.put("subscriptionExpiresAt", account.getSubscriptionExpiresAt());
@@ -61,12 +74,15 @@ public class CreditsController {
     @PostMapping("/sign-in")
     public ResponseEntity<ApiResponse<Map<String, Object>>> signIn() {
         Long userId = securityHelper.requireCurrentUserId();
-        SignInRecord record = creditService.signInToday(userId);
+        CreditService.SignInResult result = creditService.signInToday(userId);
         UserCredit after = creditService.getBalanceWithTier(userId);
 
         Map<String, Object> data = new HashMap<>();
-        data.put("points", record.getPoints());
-        data.put("streakDays", record.getStreakDays());
+        // points 为本次到账合计（基础签到分 + 月卡每日额外积分）
+        data.put("points", result.getTotalPoints());
+        data.put("basePoints", result.basePoints);
+        data.put("monthlyCardBonus", result.monthlyCardBonus);
+        data.put("streakDays", result.record.getStreakDays());
         data.put("newBalance", after.getBalance());
         return ResponseEntity.ok(ApiResponse.success(data));
     }

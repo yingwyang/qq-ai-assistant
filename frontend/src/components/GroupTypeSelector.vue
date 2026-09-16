@@ -27,7 +27,7 @@
         <button
           v-for="opt in groupTypeOptions"
           :key="opt.value"
-          :class="['gt-card', { active: opt.value === currentTypeKey, disabled: isSaving }]"
+          :class="['gt-card', { active: opt.value === pendingTypeKey, disabled: isSaving }]"
           :disabled="isSaving"
           @click="selectType(opt.value)"
         >
@@ -37,7 +37,9 @@
             <div class="gt-desc">{{ opt.desc }}</div>
             <div class="gt-rec">推荐：{{ opt.recLabel }}</div>
           </div>
-          <div v-if="opt.value === currentTypeKey" class="gt-check">
+          <!-- 高亮跟随"待保存的选择"（pendingTypeKey），保存前点哪张就亮哪张；
+               已保存的类型由上方的「当前：」标签展示 -->
+          <div v-if="opt.value === pendingTypeKey" class="gt-check">
             <Icon name="check-circle" :size="18" />
           </div>
         </button>
@@ -251,7 +253,7 @@ export default {
 .gt-dialog {
   width: min(560px, 94vw);
   max-height: 90vh;
-  background: white;
+  background: var(--card-bg, white);
   border-radius: 14px;
   box-shadow: 0 20px 60px rgba(0,0,0,0.22);
   display: flex; flex-direction: column;
@@ -268,7 +270,7 @@ export default {
   display: flex; justify-content: space-between; align-items: flex-start;
   background: linear-gradient(180deg, #f8faff 0%, #fff 100%);
 }
-.gt-title { font-size: 18px; font-weight: 700; color: #1f2937; margin-bottom: 4px; }
+.gt-title { font-size: 18px; font-weight: 700; color: var(--text-primary, #1f2937); margin-bottom: 4px; }
 .gt-sub   { font-size: 13px; color: #6b7280; }
 .gt-gn    { color: #5b5bd6; font-weight: 500; }
 .gt-close {
@@ -277,7 +279,7 @@ export default {
   cursor: pointer; display: flex; align-items: center; justify-content: center;
   transition: all 0.15s;
 }
-.gt-close:hover { background: #f0f1f5; color: #1f2937; }
+.gt-close:hover { background: var(--bg-tertiary, #f0f1f5); color: var(--text-primary, #1f2937); }
 
 .gt-current {
   padding: 12px 22px 0;
@@ -304,15 +306,17 @@ export default {
   padding: 16px 22px;
   display: grid;
   grid-template-columns: 1fr 1fr;
+  /* 行等高：否则"其他群"这类描述只有一行的卡片会比同排卡片矮一截（7 项时它独占最后一行） */
+  grid-auto-rows: 1fr;
   gap: 10px;
   overflow-y: auto;
 }
 .gt-card {
   text-align: left;
-  padding: 12px 14px;
+  padding: 12px 30px 12px 14px;   /* 右侧留白：避免右上角选中对勾压到文字 */
   border-radius: 12px;
-  border: 1.5px solid #e5e7eb;
-  background: #fafbfc;
+  border: 1.5px solid var(--border-color, #e5e7eb);
+  background: var(--bg-tertiary, #fafbfc);
   cursor: pointer;
   display: flex; gap: 10px; align-items: flex-start;
   position: relative;
@@ -320,7 +324,7 @@ export default {
   color: inherit; font: inherit;
 }
 .gt-card:hover:not(:disabled):not(.active) {
-  border-color: #c4c7ff; background: #f4f5ff; transform: translateY(-1px);
+  border-color: #c4c7ff; background: var(--bg-tertiary, #f4f5ff); transform: translateY(-1px);
 }
 .gt-card.active {
   border-color: #5b5bd6;
@@ -334,7 +338,7 @@ export default {
   font-size: 20px; flex-shrink: 0;
   background: #eef2ff;
 }
-.gt-icon-GAME   { background: #eef0ff; }
+.gt-icon-GAME   { background: var(--bg-tertiary, #eef0ff); }
 .gt-icon-STUDY  { background: #ecfdf5; }
 .gt-icon-WORK   { background: #fffbeb; }
 .gt-icon-HOBBY  { background: #fdf2f8; }
@@ -342,7 +346,7 @@ export default {
 .gt-icon-SOCIAL { background: #dbeafe; }
 .gt-icon-OTHER  { background: #f3f4f6; }
 .gt-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.gt-name { font-size: 14px; font-weight: 600; color: #1f2937; }
+.gt-name { font-size: 14px; font-weight: 600; color: var(--text-primary, #1f2937); }
 .gt-desc { font-size: 11.5px; color: #6b7280; line-height: 1.45; }
 .gt-rec  { font-size: 11px; color: #5b5bd6; margin-top: 4px; font-weight: 500; }
 .gt-check {
@@ -360,7 +364,7 @@ export default {
   gap: 14px;
 }
 .gt-ai-left { flex: 1; min-width: 0; }
-.gt-ai-title { font-size: 13.5px; font-weight: 600; color: #1f2937; margin-bottom: 2px; }
+.gt-ai-title { font-size: 13.5px; font-weight: 600; color: var(--text-primary, #1f2937); margin-bottom: 2px; }
 .gt-ai-desc  { font-size: 12px; color: #6b7280; }
 .gt-ai-result { font-size: 12.5px; color: #374151; margin-top: 8px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .gt-ai-conf   { font-size: 11.5px; color: #10b981; font-weight: 600; }
@@ -404,7 +408,7 @@ export default {
   transition: all 0.15s;
 }
 .gt-btn-ghost {
-  background: white; border-color: #e5e7eb; color: #374151;
+  background: var(--card-bg, white); border-color: var(--border-color, #e5e7eb); color: #374151;
 }
 .gt-btn-ghost:hover:not(:disabled) { border-color: #c7cbd1; background: #f9fafb; }
 .gt-btn-primary {

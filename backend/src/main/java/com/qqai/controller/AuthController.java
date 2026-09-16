@@ -121,7 +121,10 @@ public class AuthController {
         userService.save(user);
 
         Integer tv = user.getTokenVersion() != null ? user.getTokenVersion() : 0;
-        String token = jwtUtil.generateToken(user.getId(), user.getUsername(), user.getRole(), tv);
+        // 「记住我」→ 更长有效期（默认 30 天），否则默认 24 小时；token 与 Cookie 用同一时长
+        boolean rememberMe = Boolean.TRUE.equals(req.rememberMe());
+        long tokenExpiration = rememberMe ? jwtUtil.getRememberMeExpirationTime() : jwtUtil.getExpirationTime();
+        String token = jwtUtil.generateToken(user.getId(), user.getUsername(), user.getRole(), tv, tokenExpiration);
 
         // 设置 HttpOnly Cookie(前端同源请求自动携带,不再需要 localStorage 存 token)
         ResponseCookie cookie = ResponseCookie.from(COOKIE_NAME, token)
@@ -129,19 +132,15 @@ public class AuthController {
                 .secure(false) // 生产走 HTTPS 时应配置为 true
                 .sameSite("Lax")
                 .path("/")
-                .maxAge(Duration.ofMillis(jwtUtil.getExpirationTime()))
+                .maxAge(Duration.ofMillis(tokenExpiration))
                 .build();
         response.addHeader(HttpHeaders.SET_COOKIE, cookie.toString());
 
         // 异步检查并启动三个插件（延迟 3 秒，不阻塞登录响应）
         pluginEnsureService.ensurePluginsStartedAsync();
 
-        // 月卡每日登录额外积分（幂等，每日仅发放一次）
-        try {
-            creditService.grantMonthlyCardDailyBonus(user.getId());
-        } catch (Exception e) {
-            log.warn("用户{} 月卡每日登录奖励发放失败（忽略）: {}", user.getId(), e.getMessage());
-        }
+        // 月卡每日额外积分已改为随「每日签到」发放（见 CreditService.signInToday），
+        // 登录/自动登录不再静默发放，避免出现"权益看不见、还可能与签到重复"的问题。
 
         DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
@@ -229,12 +228,7 @@ public class AuthController {
         // PluginEnsureService 有幂等性检查，不会重复启动已运行的插件
         pluginEnsureService.ensurePluginsStartedAsync();
 
-        // 月卡每日登录额外积分（幂等，每日仅发放一次，覆盖自动登录场景）
-        try {
-            creditService.grantMonthlyCardDailyBonus(user.getId());
-        } catch (Exception e) {
-            log.warn("用户{} 月卡每日登录奖励发放失败（忽略）: {}", user.getId(), e.getMessage());
-        }
+        // 月卡每日额外积分已改为随「每日签到」发放（见 CreditService.signInToday），此处不再发放。
 
         return ResponseEntity.ok(ApiResponse.success(responseMap));
     }

@@ -72,3 +72,37 @@ export function extractForwardMessages(msg) {
 
   return [];
 }
+
+/** 本地媒体路径 → 可访问 URL（与 MessageContent 内的实现保持一致，保证图片预览能匹配索引） */
+export function toMediaUrl(path) {
+  if (!path) return '';
+  if (path.startsWith('http')) return path;
+  if (path.startsWith('/images/') || path.startsWith('/uploads/')) {
+    return `http://localhost:8081${path}`;
+  }
+  return path;
+}
+
+/**
+ * 从一条消息中提取图片 URL（与 MessageContent 的 imageUrl 计算逻辑保持一致）。
+ * 用于组装"当前会话的图片列表"，供图片预览左右切换使用。
+ * @param {Object} msg - 消息对象
+ * @returns {string} 图片 URL，取不到时返回空串
+ */
+export function extractImageUrl(msg) {
+  if (!msg) return '';
+  if (msg.localUrl) return toMediaUrl(msg.localUrl);
+  const c = typeof msg.content === 'string' ? msg.content : '';
+  if (!c) return '';
+  if (/^\/images\//.test(c) || /^\/uploads\//.test(c)) return toMediaUrl(c);
+  // 只认图片类 CQ 码，避免把视频/语音混进图片预览
+  if (c.includes('[CQ:image') || /^\[CQ:image/.test(c) || msg.messageType === 'IMAGE') {
+    const backtick = c.match(/url=`([^`]+)`/);
+    if (backtick && backtick[1]) return backtick[1].replace(/&amp;/g, '&').trim();
+    const urlMatch = c.match(/url=([^,\]]+)/);
+    if (urlMatch && urlMatch[1]) return urlMatch[1].replace(/&amp;/g, '&').trim();
+    const fileMatch = c.match(/file=([^,\]]+)/);
+    if (fileMatch && fileMatch[1]) return toMediaUrl(fileMatch[1].replace(/&amp;/g, '&').trim());
+  }
+  return '';
+}

@@ -112,15 +112,34 @@ public class AstrBotService {
         if (content == null || content.trim().isEmpty()) {
             return "";
         }
-        String token = (apiKey != null && !apiKey.isEmpty()) ? apiKey : astrBotToken;
-        HttpPost httpPost = new HttpPost(astrBotApiUrl + "/api/v1/chat");
-        httpPost.setHeader("Content-Type", "application/json");
-        httpPost.setHeader("X-API-Key", token);
-
         // 从 prompts.yml 渲染摘要模板
         java.util.Map<String, Object> vars = new java.util.HashMap<>();
         vars.put("content", content);
         String message = promptTemplateService.render(templateKey, groupType, vars);
+        return chat(message, apiKey, templateKey);
+    }
+
+    /**
+     * 调用 AstrBot /api/v1/chat 的通用入口（摘要、群类型识别等共用同一套已验证逻辑）。
+     *
+     * 统一处理三件容易踩的事：
+     * 1. username 是必填字段，缺失时 AstrBot 直接返回 {"status":"error","message":"Missing key: username"}；
+     * 2. 响应是 SSE 文本流，不能按整段 JSON 去取 response 字段；
+     * 3. 响应为空时打出状态码与响应片段，便于直接定位。
+     *
+     * @param message 已渲染好的提示词
+     * @param apiKey  用户 API Key（可选，为空则用配置中的 ASTRBOT_TOKEN）
+     * @param tag     日志标记，用于区分调用来源
+     * @return 纯文本回复；调用失败或响应为空返回 null
+     */
+    public String chat(String message, String apiKey, String tag) throws Exception {
+        if (message == null || message.isBlank()) {
+            return null;
+        }
+        String token = (apiKey != null && !apiKey.isEmpty()) ? apiKey : astrBotToken;
+        HttpPost httpPost = new HttpPost(astrBotApiUrl + "/api/v1/chat");
+        httpPost.setHeader("Content-Type", "application/json");
+        httpPost.setHeader("X-API-Key", token);
 
         ObjectNode requestBody = objectMapper.createObjectNode();
         requestBody.put("message", message);
@@ -148,8 +167,8 @@ public class AstrBotService {
             String reply = extractChatReply(rawBody);
             if (reply == null || reply.isBlank()) {
                 // 打出发送内容与响应片段,便于下次直接定位(此前只看到"空摘要",无从下手)
-                log.warn("AI摘要响应为空: status={}, template={}, body前300字符={}",
-                        response.getCode(), templateKey,
+                log.warn("AstrBot 响应为空: tag={}, status={}, body前300字符={}",
+                        tag, response.getCode(),
                         rawBody.length() > 300 ? rawBody.substring(0, 300) : rawBody);
                 return null;
             }

@@ -76,6 +76,28 @@ export function useUserManagement({ showSystemMsg } = {}) {
     }
   };
 
+  /**
+   * 重置用户密码（用于用户"忘记密码"）。
+   * 密码规则与后端一致：8-64 位，同时包含大写字母、小写字母与数字。
+   * 重置后该用户已签发的登录态会立即失效。
+   */
+  const resetPassword = async (user) => {
+    const pwd = window.prompt(
+      `重置用户 ${user.username} 的密码\n\n规则：8-64 位，且同时包含大写字母、小写字母与数字\n重置后该用户需用新密码重新登录：`
+    );
+    if (pwd === null) return;
+    if (!/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)[A-Za-z\d@$!%*?&]{8,64}$/.test(pwd)) {
+      if (showSystemMsg) showSystemMsg('密码不符合规则：需 8-64 位且含大小写字母与数字', 'error');
+      return;
+    }
+    try {
+      await adminApi.resetUserPassword(user.id, pwd);
+      if (showSystemMsg) showSystemMsg(`用户 ${user.username} 的密码已重置`);
+    } catch (error) {
+      if (showSystemMsg) showSystemMsg('重置密码失败: ' + error.message, 'error');
+    }
+  };
+
   const cleanup = () => {
     if (userSearchTimer) clearTimeout(userSearchTimer);
   };
@@ -83,6 +105,6 @@ export function useUserManagement({ showSystemMsg } = {}) {
   return {
     users, userSearch, userCurrentPage, userPageSize, userTotalElements, userTotalPages,
     loadUsers, onUserSearchInput, goToUserPage,
-    toggleRole, toggleActive, deleteUser, cleanup,
+    toggleRole, toggleActive, deleteUser, resetPassword, cleanup,
   };
 }

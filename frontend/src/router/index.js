@@ -32,7 +32,8 @@ const routes = [
     path: '/docs/:pathMatch(.*)*',
     name: 'Docs',
     component: () => import('../views/DocView.vue'),
-    meta: { requiresAuth: true }
+    // 文档为前端内置 markdown，无需登录即可阅读（登录页「使用文档」入口依赖这一点）
+    meta: { public: true }
   }
 ];
 

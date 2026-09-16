@@ -431,7 +431,7 @@ export default {
 }
 
 .modal-content {
-  background-color: white;
+  background-color: var(--card-bg, white);
   border-radius: 8px;
   box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
   width: 90%;
@@ -445,12 +445,12 @@ export default {
   justify-content: space-between;
   align-items: center;
   padding: 20px;
-  border-bottom: 1px solid #e0e0e0;
+  border-bottom: 1px solid var(--border-color, #e0e0e0);
 }
 
 .modal-header h2 {
   margin: 0;
-  color: #2c3e50;
+  color: var(--text-primary, #2c3e50);
   font-size: 18px;
 }
 
@@ -471,7 +471,7 @@ export default {
 }
 
 .close-btn:hover {
-  background-color: #f0f0f0;
+  background-color: var(--border-color, #f0f0f0);
 }
 
 .modal-body {
@@ -486,9 +486,9 @@ export default {
 .system-control-section h3,
 .login-section h3 {
   margin: 0 0 15px 0;
-  color: #2c3e50;
+  color: var(--text-primary, #2c3e50);
   font-size: 16px;
-  border-bottom: 1px solid #e0e0e0;
+  border-bottom: 1px solid var(--border-color, #e0e0e0);
   padding-bottom: 8px;
 }
 
@@ -504,7 +504,7 @@ export default {
   align-items: center;
   gap: 8px;
   padding: 8px 12px;
-  background-color: #f8f9fa;
+  background-color: var(--bg-tertiary, #f8f9fa);
   border-radius: 6px;
 }
 
@@ -512,7 +512,7 @@ export default {
   flex: 1;
   font-size: 14px;
   font-weight: 500;
-  color: #2c3e50;
+  color: var(--text-primary, #2c3e50);
 }
 
 .btn-component {
@@ -584,19 +584,19 @@ export default {
   height: 200px;
   margin: 20px auto;
   display: block;
-  border: 1px solid #e0e0e0;
+  border: 1px solid var(--border-color, #e0e0e0);
   border-radius: 4px;
 }
 
 .loading {
   padding: 40px 0;
-  color: #666;
+  color: var(--text-secondary, #666);
 }
 
 .btn-refresh {
   margin-top: 15px;
   padding: 8px 16px;
-  background-color: #f8f9fa;
+  background-color: var(--bg-tertiary, #f8f9fa);
   border: 1px solid #dee2e6;
   border-radius: 4px;
   cursor: pointer;
@@ -605,7 +605,7 @@ export default {
 }
 
 .btn-refresh:hover {
-  background-color: #e9ecef;
+  background-color: var(--bg-tertiary, #e9ecef);
 }
 
 .logged-in {
@@ -640,7 +640,7 @@ export default {
   gap: 15px;
   margin-bottom: 15px;
   padding: 10px;
-  background-color: #f8f9fa;
+  background-color: var(--bg-tertiary, #f8f9fa);
   border-radius: 4px;
 }
 
@@ -649,7 +649,7 @@ export default {
   align-items: center;
   gap: 6px;
   font-size: 13px;
-  color: #666;
+  color: var(--text-secondary, #666);
 }
 
 .status-item.active {
@@ -669,7 +669,7 @@ export default {
 
 .status-text {
   font-size: 12px;
-  color: #999;
+  color: var(--text-muted, #999);
 }
 
 .status-item.active .status-text {
@@ -687,7 +687,7 @@ export default {
   gap: 10px;
   margin-bottom: 10px;
   padding: 8px;
-  background-color: #f8f9fa;
+  background-color: var(--bg-tertiary, #f8f9fa);
   border-radius: 4px;
 }
 
@@ -695,7 +695,7 @@ export default {
   flex: 1;
   font-size: 14px;
   font-weight: 500;
-  color: #2c3e50;
+  color: var(--text-primary, #2c3e50);
 }
 
 .btn-component {

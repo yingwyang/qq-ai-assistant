@@ -68,17 +68,17 @@ export default {
 <style scoped>
 .maintenance-section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
 .maintenance-section-header h4 { margin: 0; }
-.maintenance-desc { font-size: 13px; color: #888; margin: 0 0 14px 0; }
+.maintenance-desc { font-size: 13px; color: var(--text-muted, #888); margin: 0 0 14px 0; }
 .backup-list { display: flex; flex-direction: column; gap: 8px; }
-.empty-backup { text-align: center; padding: 30px; color: #aaa; font-size: 13px; }
+.empty-backup { text-align: center; padding: 30px; color: var(--text-muted, #aaa); font-size: 13px; }
 .backup-item { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; background: var(--bg-tertiary, #f8f9fa); border-radius: 6px; transition: background 0.2s; }
 .backup-item:hover { background: #f0f1f3; }
 .backup-info { display: flex; flex-direction: column; gap: 2px; }
 .backup-name { font-size: 13px; font-weight: 500; color: var(--text-primary, #333); }
-.backup-meta { font-size: 11px; color: #999; }
+.backup-meta { font-size: 11px; color: var(--text-muted, #999); }
 .archive-form { display: flex; align-items: flex-end; gap: 14px; }
 .archive-input-group { display: flex; flex-direction: column; gap: 4px; }
-.archive-input-group label { font-size: 12px; color: #888; }
+.archive-input-group label { font-size: 12px; color: var(--text-muted, #888); }
 .archive-input { width: 100px; }
-.archive-unit { font-size: 13px; color: #666; align-self: flex-end; margin-bottom: 6px; }
+.archive-unit { font-size: 13px; color: var(--text-secondary, #666); align-self: flex-end; margin-bottom: 6px; }
 </style>

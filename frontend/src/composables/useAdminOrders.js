@@ -268,8 +268,11 @@ export function useAdminOrders({ showSystemMsg } = {}) {
         reason: disputeModal.reason.trim(),
       });
       if (showSystemMsg) {
+        // 原来这里引用了不存在的变量 action → 提交成功后抛 ReferenceError，
+        // 被下面 catch 捕获并提示"纠纷处理失败"，管理员会误以为失败而重复提交。
+        const outcome = disputeModal.agree ? '同意退款' : '驳回申诉';
         const rp = res?.refundPoints != null ? `，扣减 ${res.refundPoints} 积分` : '';
-        showSystemMsg(`纠纷处理完成：订单 ${disputeModal.orderNo} ${action}${rp}`);
+        showSystemMsg(`纠纷处理完成：订单 ${disputeModal.orderNo} ${outcome}${rp}`);
       }
       closeDisputeModal();
       await loadOrders(ordersPage.value);

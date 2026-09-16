@@ -329,13 +329,13 @@ const renderedHtml = computed(() => {
   padding: 0.4em 0.8em;
   border-left: 4px solid #dfe2e5;
   background-color: rgba(0, 0, 0, 0.03);
-  color: #555;
+  color: var(--text-secondary, #555);
 }
 
 .rich-text :deep(pre) {
   margin: 0.6em 0;
   padding: 0.8em;
-  background-color: #f6f8fa;
+  background-color: var(--bg-tertiary, #f6f8fa);
   border-radius: 6px;
   overflow-x: auto;
 }
@@ -376,7 +376,7 @@ const renderedHtml = computed(() => {
 }
 
 .rich-text :deep(th) {
-  background-color: #f6f8fa;
+  background-color: var(--bg-tertiary, #f6f8fa);
   font-weight: 600;
 }
 
@@ -385,7 +385,7 @@ const renderedHtml = computed(() => {
   padding: 0.6em;
   border: 1px solid #e1e4e8;
   border-radius: 6px;
-  background-color: #fafbfc;
+  background-color: var(--bg-tertiary, #fafbfc);
 }
 
 .rich-text :deep(summary) {
@@ -399,7 +399,7 @@ const renderedHtml = computed(() => {
   padding: 0.6em 0.8em;
   border: 1px solid #e1e4e8;
   border-radius: 6px;
-  background-color: #fafbfc;
+  background-color: var(--bg-tertiary, #fafbfc);
 }
 
 .rich-text :deep(.toc-title) {
@@ -442,7 +442,7 @@ const renderedHtml = computed(() => {
   padding: 0.6em 0.8em;
   border: 1px solid #e1e4e8;
   border-radius: 8px;
-  background: linear-gradient(135deg, #fafbfc 0%, #f0f4f8 100%);
+  background: linear-gradient(135deg, var(--bg-tertiary, #fafbfc) 0%, #f0f4f8 100%);
   text-align: left;
 }
 
@@ -478,7 +478,7 @@ const renderedHtml = computed(() => {
   padding: 0.8em 1em;
   border-radius: 8px;
   border-left: 4px solid #0366d6;
-  background-color: #ffffff;
+  background-color: var(--card-bg, #ffffff);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
   text-align: left;
   scroll-margin-top: 12px;
@@ -504,6 +504,15 @@ const renderedHtml = computed(() => {
   background-color: #faf8ff;
 }
 
+/* ===================== 暗色主题：分段提示块 ===================== */
+/* 上面 4 个 rt-section 用的是浅色底 + 左侧色条（背景是 background-color，
+   已按主题变量替换的只有中性灰，这里给彩色分段补上深色底） */
+.theme-dark .rich-text :deep(.rt-section:nth-child(4n+1)) { background-color: rgba(3, 102, 214, 0.16); }
+.theme-dark .rich-text :deep(.rt-section:nth-child(4n+2)) { background-color: rgba(40, 167, 69, 0.16); }
+.theme-dark .rich-text :deep(.rt-section:nth-child(4n+3)) { background-color: rgba(245, 158, 11, 0.16); }
+.theme-dark .rich-text :deep(.rt-section:nth-child(4n)) { background-color: rgba(139, 92, 246, 0.16); }
+.theme-dark .rich-text :deep(.rt-section-title) { color: #e5e7eb; }
+
 .rich-text :deep(.rt-section-title) {
   margin: 0 0 0.5em;
   font-size: 1.05em;
@@ -516,7 +525,7 @@ const renderedHtml = computed(() => {
 }
 
 .rich-text :deep(.rt-section-content) {
-  color: #333;
+  color: var(--text-primary, #333);
 }
 
 .rich-text :deep(.rt-section-content > *:first-child) {

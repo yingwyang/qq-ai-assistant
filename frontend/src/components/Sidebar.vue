@@ -1233,21 +1233,21 @@ export default {
 /* 右键菜单 */
 .context-menu {
   position: fixed;
-  background: white;
+  background: var(--card-bg, white);
   border-radius: 8px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
   min-width: 160px;
   z-index: 2000;
   padding: 6px 0;
   font-size: 13px;
-  color: #2c3e50;
+  color: var(--text-primary, #2c3e50);
 }
 
 .context-menu-header {
   padding: 6px 14px;
   font-weight: 600;
   color: #7f8c8d;
-  border-bottom: 1px solid #eee;
+  border-bottom: 1px solid var(--border-color, #eee);
   margin-bottom: 4px;
 }
 
@@ -1261,7 +1261,7 @@ export default {
 }
 
 .context-menu-item:hover {
-  background-color: #f5f5f5;
+  background-color: var(--bg-tertiary, #f5f5f5);
 }
 
 .context-menu-item.danger {

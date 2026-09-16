@@ -1154,7 +1154,7 @@ export default {
 <style scoped>
 .user-center {
   height: 100vh;
-  background-color: #f5f7fa;
+  background-color: var(--bg-primary, #f5f7fa);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -1166,8 +1166,8 @@ export default {
   justify-content: space-between;
   align-items: center;
   padding: 16px 24px;
-  background-color: white;
-  border-bottom: 1px solid #e8e8e8;
+  background-color: var(--card-bg, white);
+  border-bottom: 1px solid var(--border-color, #e8e8e8);
   box-shadow: 0 2px 8px rgba(0,0,0,0.06);
   z-index: 10;
 }
@@ -1182,7 +1182,7 @@ export default {
   margin: 0;
   font-size: 18px;
   font-weight: 600;
-  color: #333;
+  color: var(--text-primary, #333);
 }
 
 .header-actions {
@@ -1205,7 +1205,7 @@ export default {
 .hcs-tier {
   padding: 2px 10px;
   border-radius: 10px;
-  background: #ecf0f1;
+  background: var(--bg-tertiary, #ecf0f1);
   color: #7f8c8d;
   font-weight: 600;
   font-size: 12px;
@@ -1226,7 +1226,7 @@ export default {
   align-items: center;
   gap: 3px;
   font-weight: 600;
-  color: #2c3e50;
+  color: var(--text-primary, #2c3e50);
 }
 .hcs-gem {
   font-size: 13px;
@@ -1320,7 +1320,7 @@ export default {
   margin: 0;
   font-size: 18px;
   font-weight: 600;
-  color: #333;
+  color: var(--text-primary, #333);
 }
 
 .component-grid {
@@ -1339,7 +1339,7 @@ export default {
 
 .napcat-intro-card {
   flex: 1;
-  background: white;
+  background: var(--card-bg, white);
   border-radius: 8px;
   padding: 20px;
   box-shadow: 0 2px 8px rgba(0,0,0,0.06);
@@ -1354,14 +1354,14 @@ export default {
 
 .intro-content p {
   margin: 0 0 12px 0;
-  color: #555;
+  color: var(--text-secondary, #555);
   line-height: 1.6;
 }
 
 .intro-content ul {
   margin: 0 0 15px 0;
   padding-left: 0;
-  color: #555;
+  color: var(--text-secondary, #555);
   line-height: 1.8;
   list-style: none;
 }
@@ -1371,15 +1371,15 @@ export default {
 }
 
 .intro-content li strong {
-  color: #333;
+  color: var(--text-primary, #333);
 }
 
 .intro-tip {
-  color: #888;
+  color: var(--text-muted, #888);
   font-size: 13px;
   margin-top: 10px;
   padding: 10px;
-  background: #f5f7fa;
+  background: var(--bg-primary, #f5f7fa);
   border-radius: 4px;
 }
 
@@ -1392,7 +1392,7 @@ export default {
 }
 
 .component-card {
-  background: white;
+  background: var(--card-bg, white);
   border-radius: 8px;
   padding: 20px;
   box-shadow: 0 2px 8px rgba(0,0,0,0.06);
@@ -1418,7 +1418,7 @@ export default {
 
 .component-title {
   font-weight: 600;
-  color: #333;
+  color: var(--text-primary, #333);
 }
 
 .component-status-text {
@@ -1485,7 +1485,7 @@ export default {
 }
 
 .section-card {
-  background: white;
+  background: var(--card-bg, white);
   border-radius: 8px;
   padding: 20px;
   box-shadow: 0 2px 8px rgba(0,0,0,0.06);
@@ -1495,7 +1495,7 @@ export default {
   margin: 0 0 15px 0;
   font-size: 15px;
   font-weight: 600;
-  color: #333;
+  color: var(--text-primary, #333);
 }
 
 .section-card-header {
@@ -1507,7 +1507,7 @@ export default {
 
 .collapse-toggle {
   padding: 4px 8px;
-  background-color: #ecf0f1;
+  background-color: var(--bg-tertiary, #ecf0f1);
   border: none;
   border-radius: 4px;
   cursor: pointer;
@@ -1529,7 +1529,7 @@ export default {
 
 .qrcode-box img {
   max-width: 200px;
-  border: 2px solid #eee;
+  border: 2px solid var(--border-color, #eee);
   border-radius: 8px;
 }
 
@@ -1571,8 +1571,8 @@ export default {
 
 .chart-btn {
   padding: 4px 12px;
-  background-color: white;
-  border: 1px solid #ddd;
+  background-color: var(--card-bg, white);
+  border: 1px solid var(--border-color, #ddd);
   border-radius: 4px;
   cursor: pointer;
   font-size: 12px;
@@ -1612,7 +1612,7 @@ export default {
   align-items: center;
   gap: 20px;
   padding-bottom: 20px;
-  border-bottom: 1px solid #eee;
+  border-bottom: 1px solid var(--border-color, #eee);
 }
 
 .profile-avatar {
@@ -1633,7 +1633,7 @@ export default {
   margin: 0;
   font-size: 20px;
   font-weight: 600;
-  color: #333;
+  color: var(--text-primary, #333);
 }
 
 .profile-role {
@@ -1650,16 +1650,16 @@ export default {
   display: flex;
   justify-content: space-between;
   padding: 10px 0;
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid var(--border-color, #f0f0f0);
 }
 
 .detail-row label {
   font-weight: 500;
-  color: #666;
+  color: var(--text-secondary, #666);
 }
 
 .detail-row span {
-  color: #333;
+  color: var(--text-primary, #333);
 }
 
 .btn-edit-profile {
@@ -1694,7 +1694,7 @@ export default {
 }
 
 .modal-content {
-  background-color: white;
+  background-color: var(--card-bg, white);
   border-radius: 8px;
   width: 90%;
   max-width: 450px;
@@ -1706,26 +1706,26 @@ export default {
   align-items: center;
   justify-content: space-between;
   padding: 16px 20px;
-  border-bottom: 1px solid #eee;
+  border-bottom: 1px solid var(--border-color, #eee);
 }
 
 .modal-header h3 {
   margin: 0;
   font-size: 18px;
   font-weight: 600;
-  color: #333;
+  color: var(--text-primary, #333);
 }
 
 .btn-close {
   background: none;
   border: none;
-  color: #999;
+  color: var(--text-muted, #999);
   cursor: pointer;
   padding: 4px;
 }
 
 .btn-close:hover {
-  color: #333;
+  color: var(--text-primary, #333);
 }
 
 .modal-body {
@@ -1740,14 +1740,14 @@ export default {
   display: block;
   margin-bottom: 6px;
   font-weight: 500;
-  color: #666;
+  color: var(--text-secondary, #666);
   font-size: 14px;
 }
 
 .form-group input {
   width: 100%;
   padding: 10px 12px;
-  border: 1px solid #ddd;
+  border: 1px solid var(--border-color, #ddd);
   border-radius: 4px;
   font-size: 14px;
   box-sizing: border-box;
@@ -1770,13 +1770,13 @@ export default {
   justify-content: flex-end;
   gap: 12px;
   padding: 16px 20px;
-  border-top: 1px solid #eee;
+  border-top: 1px solid var(--border-color, #eee);
 }
 
 .btn-cancel {
   padding: 8px 20px;
-  background-color: #f5f5f5;
-  color: #666;
+  background-color: var(--bg-tertiary, #f5f5f5);
+  color: var(--text-secondary, #666);
   border: none;
   border-radius: 4px;
   cursor: pointer;
@@ -1841,7 +1841,7 @@ export default {
 }
 
 .preview-content {
-  background: white;
+  background: var(--card-bg, white);
   border-radius: 8px;
   max-width: 90vw;
   max-height: 90vh;
@@ -1907,7 +1907,7 @@ export default {
 }
 
 .preview-grid-item:hover {
-  background-color: #f0f7ff;
+  background-color: var(--bg-tertiary, #f0f7ff);
 }
 
 .preview-grid-item.selected {
@@ -1953,7 +1953,7 @@ export default {
 .preview-search-input {
   width: 100%;
   padding: 6px 32px 6px 12px;
-  border: 1px solid #ddd;
+  border: 1px solid var(--border-color, #ddd);
   border-radius: 16px;
   font-size: 13px;
   outline: none;
@@ -1971,7 +1971,7 @@ export default {
   transform: translateY(-50%);
   background: none;
   border: none;
-  color: #999;
+  color: var(--text-muted, #999);
   cursor: pointer;
   font-size: 16px;
   padding: 0 4px;
@@ -1979,7 +1979,7 @@ export default {
 }
 
 .preview-search-clear:hover {
-  color: #666;
+  color: var(--text-secondary, #666);
 }
 
 .preview-select-all {
@@ -1987,7 +1987,7 @@ export default {
   align-items: center;
   gap: 4px;
   font-size: 13px;
-  color: #555;
+  color: var(--text-secondary, #555);
   cursor: pointer;
   user-select: none;
 }
@@ -2004,7 +2004,7 @@ export default {
 
 .preview-selected-count {
   font-size: 13px;
-  color: #666;
+  color: var(--text-secondary, #666);
   padding: 4px 10px;
   background-color: #e8f4fd;
   border-radius: 4px;
@@ -2036,7 +2036,7 @@ export default {
 
 .preview-thumbnail {
   aspect-ratio: 1;
-  background-color: #f5f5f5;
+  background-color: var(--bg-tertiary, #f5f5f5);
   border-radius: 6px;
   overflow: hidden;
   margin-bottom: 8px;
@@ -2064,7 +2064,7 @@ export default {
 .preview-grid-name {
   display: block;
   font-size: 12px;
-  color: #333;
+  color: var(--text-primary, #333);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2076,7 +2076,7 @@ export default {
   align-items: center;
   gap: 10px;
   padding-top: 15px;
-  border-top: 1px solid #eee;
+  border-top: 1px solid var(--border-color, #eee);
 }
 
 .preview-pagination {
@@ -2087,7 +2087,7 @@ export default {
 
 .preview-page-btn {
   padding: 5px 12px;
-  background-color: #fff;
+  background-color: var(--card-bg, #fff);
   color: #3498db;
   border: 1px solid #3498db;
   border-radius: 4px;
@@ -2105,22 +2105,22 @@ export default {
   border-color: #ccc;
   color: #ccc;
   cursor: not-allowed;
-  background-color: #f5f5f5;
+  background-color: var(--bg-tertiary, #f5f5f5);
 }
 
 .preview-page-info {
   font-size: 13px;
-  color: #666;
+  color: var(--text-secondary, #666);
   min-width: 60px;
   text-align: center;
 }
 
 .preview-page-select {
   padding: 4px 8px;
-  border: 1px solid #ddd;
+  border: 1px solid var(--border-color, #ddd);
   border-radius: 4px;
   font-size: 12px;
-  background-color: #fff;
+  background-color: var(--card-bg, #fff);
   cursor: pointer;
 }
 
@@ -2132,7 +2132,7 @@ export default {
 .preview-loading {
   text-align: center;
   padding: 60px 20px;
-  color: #999;
+  color: var(--text-muted, #999);
   font-size: 14px;
 }
 
@@ -2210,7 +2210,7 @@ export default {
 }
 
 .preview-thumbnail-placeholder {
-  background-color: #f0f0f0;
+  background-color: var(--border-color, #f0f0f0);
 }
 
 .profile-cards-grid {
@@ -2227,7 +2227,7 @@ export default {
   margin: 0 0 15px 0;
   font-size: 15px;
   font-weight: 600;
-  color: #333;
+  color: var(--text-primary, #333);
 }
 
 .profile-avatar-card {
@@ -2285,7 +2285,7 @@ export default {
   margin: 0;
   font-size: 18px;
   font-weight: 600;
-  color: #333;
+  color: var(--text-primary, #333);
 }
 
 .role-badge {
@@ -2294,7 +2294,7 @@ export default {
   padding: 2px 10px;
   font-size: 12px;
   border-radius: 12px;
-  background-color: #ecf0f1;
+  background-color: var(--bg-tertiary, #ecf0f1);
   color: #7f8c8d;
 }
 
@@ -2364,7 +2364,7 @@ export default {
 .qq-bindings-header h4 {
   margin: 0;
   font-size: 15px;
-  color: #2c3e50;
+  color: var(--text-primary, #2c3e50);
 }
 
 .qq-add-btn {
@@ -2397,10 +2397,10 @@ export default {
   justify-content: center;
   width: 28px;
   height: 28px;
-  border: 1px solid #ddd;
-  background-color: white;
+  border: 1px solid var(--border-color, #ddd);
+  background-color: var(--card-bg, white);
   border-radius: 4px;
-  color: #666;
+  color: var(--text-secondary, #666);
   cursor: pointer;
   transition: all 0.2s;
   padding: 0;
@@ -2451,13 +2451,13 @@ export default {
   align-items: center;
   gap: 12px;
   padding: 10px 12px;
-  background-color: #f8f9fa;
+  background-color: var(--bg-tertiary, #f8f9fa);
   border-radius: 6px;
   transition: background-color 0.2s;
 }
 
 .qq-binding-item:hover {
-  background-color: #eef2f5;
+  background-color: var(--bg-tertiary, #eef2f5);
 }
 
 .qq-binding-avatar {
@@ -2465,7 +2465,7 @@ export default {
   height: 40px;
   border-radius: 50%;
   object-fit: cover;
-  border: 2px solid #ddd;
+  border: 2px solid var(--border-color, #ddd);
 }
 
 .qq-binding-info {
@@ -2477,14 +2477,14 @@ export default {
 
 .qq-binding-nickname {
   font-weight: 500;
-  color: #333;
+  color: var(--text-primary, #333);
   font-size: 14px;
 }
 
 .bind-qr-section {
   text-align: center;
   padding: 16px;
-  background-color: #f8f9fa;
+  background-color: var(--bg-tertiary, #f8f9fa);
   border-radius: 8px;
   margin-bottom: 16px;
 }
@@ -2492,13 +2492,13 @@ export default {
 .bind-tip {
   margin: 0 0 8px;
   font-size: 13px;
-  color: #555;
+  color: var(--text-secondary, #555);
 }
 
 .bind-qq-number {
   font-size: 24px;
   font-weight: bold;
-  color: #2c3e50;
+  color: var(--text-primary, #2c3e50);
   margin: 8px 0;
   letter-spacing: 2px;
 }
@@ -2519,7 +2519,7 @@ export default {
   padding: 60px 20px;
   color: #7f8c8d;
   font-size: 13px;
-  background: white;
+  background: var(--card-bg, white);
   border-radius: 8px;
   box-shadow: 0 2px 8px rgba(0,0,0,0.06);
 }
@@ -2532,7 +2532,7 @@ export default {
   gap: 12px;
   padding: 60px 20px;
   color: #95a5a6;
-  background: white;
+  background: var(--card-bg, white);
   border-radius: 8px;
   box-shadow: 0 2px 8px rgba(0,0,0,0.06);
 }
@@ -2555,9 +2555,9 @@ export default {
   align-items: center;
   gap: 12px;
   padding: 18px;
-  background: white;
+  background: var(--card-bg, white);
   border-radius: 8px;
-  border: 1px solid #e8e8e8;
+  border: 1px solid var(--border-color, #e8e8e8);
   box-shadow: 0 2px 8px rgba(0,0,0,0.06);
 }
 
@@ -2586,13 +2586,13 @@ export default {
 .stat-value {
   font-size: 24px;
   font-weight: 700;
-  color: #333;
+  color: var(--text-primary, #333);
   line-height: 1.2;
 }
 
 .stat-label {
   font-size: 13px;
-  color: #666;
+  color: var(--text-secondary, #666);
   margin-top: 2px;
 }
 
@@ -2611,9 +2611,9 @@ export default {
 }
 
 .chart-card {
-  background: white;
+  background: var(--card-bg, white);
   border-radius: 8px;
-  border: 1px solid #e8e8e8;
+  border: 1px solid var(--border-color, #e8e8e8);
   padding: 18px;
   box-shadow: 0 2px 8px rgba(0,0,0,0.06);
 }
@@ -2621,7 +2621,7 @@ export default {
 .chart-card h4 {
   margin: 0 0 16px 0;
   font-size: 14px;
-  color: #333;
+  color: var(--text-primary, #333);
 }
 
 .chart-large {
