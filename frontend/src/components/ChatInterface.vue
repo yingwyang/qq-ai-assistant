@@ -108,6 +108,43 @@
         </div>
       </div>
     </div>
+    <!-- 群日报「今日速览」（AI 摘要阶段 3）：打开群聊时自动拉取该群最新一期 -->
+    <div v-if="groupDigest" class="group-digest">
+      <div class="digest-header">
+        <span class="digest-title"><Icon name="chart" :size="14" /> 今日速览</span>
+        <span class="digest-date">{{ groupDigest.digestDate || '今天' }}</span>
+        <span
+          v-if="digestSentimentLabel"
+          class="ai-sentiment"
+          :class="'st-' + (groupDigest.sentiment || '')"
+        >{{ digestSentimentLabel }}</span>
+        <span class="digest-actions">
+          <button class="digest-btn" @click="toggleDigestExpand" :title="digestExpanded ? '收起速览' : '展开完整速览'">
+            {{ digestExpanded ? '收起' : '展开' }}
+          </button>
+          <button class="digest-btn primary" :disabled="digestGenerating" @click="generateDigest">
+            <span v-if="digestGenerating" class="msg-action-spinner"></span>
+            {{ digestGenerating ? '生成中…' : '重新生成' }}
+          </button>
+        </span>
+      </div>
+      <div class="digest-summary" :class="{ expanded: digestExpanded }">{{ groupDigest.summary }}</div>
+      <div v-if="digestTags.length" class="ai-summary-tags">
+        <span v-for="tag in digestTags" :key="tag" class="ai-tag">#{{ tag }}</span>
+      </div>
+      <div v-if="digestExpanded" class="digest-meta">
+        <span v-if="groupDigest.messageCount != null">共 {{ groupDigest.messageCount }} 条消息参与生成</span>
+        <span v-if="groupDigest.model"> · 模型 {{ groupDigest.model }}</span>
+      </div>
+    </div>
+    <!-- 无日报：一行很淡的提示，点击即可生成（不占空间） -->
+    <div v-else-if="groupId" class="group-digest digest-empty">
+      <button class="digest-empty-btn" :disabled="digestGenerating" @click="generateDigest">
+        <span v-if="digestGenerating" class="msg-action-spinner"></span>
+        {{ digestGenerating ? '正在生成今日速览，请稍候…' : '今日暂无速览，点击生成' }}
+      </button>
+    </div>
+
     <div class="messages-area" ref="messagesContainer" @scroll="handleScroll">
       <div v-if="isLoadingMore" class="load-more-hint">加载更早的消息...</div>
       <div v-if="messages.length === 0 && !isLoading" class="empty-state">
@@ -334,6 +371,76 @@ export default {
         summarizingIds.value = unmark(summarizingIds.value, message.id);
       }
     };
+    // ===== 阶段 3：群日报「今日速览」 =====
+    // 后端接口：GET /api/groups/{groupId}/digest/latest、POST /api/groups/{groupId}/digest
+    const groupDigest = ref(null);        // 当前群最新一期日报（后端视图：summary/tags/sentiment/digestDate/messageCount）
+    const digestGenerating = ref(false);  // 生成中（按钮转圈 + 禁用）
+    const digestExpanded = ref(false);    // 是否展开完整内容
+
+    const DIGEST_SENTIMENT_LABELS = { positive: '积极', neutral: '中性', negative: '消极' };
+    const digestSentimentLabel = computed(() => DIGEST_SENTIMENT_LABELS[groupDigest.value?.sentiment] || '');
+    // tags 后端存的是逗号分隔字符串（新接口），这里同时兼容数组形式
+    const digestTags = computed(() => {
+      const raw = groupDigest.value?.tags;
+      if (Array.isArray(raw)) return raw.filter(Boolean).map(String);
+      return (typeof raw === 'string' && raw)
+        ? raw.split(',').map(s => s.trim()).filter(Boolean)
+        : [];
+    });
+
+    /** 兼容「data 里直接是日报对象」与「data 被省略（无日报）」两种响应形态 */
+    const normalizeDigest = (res) => {
+      if (!res || typeof res !== 'object') return null;
+      if (res.summary || res.digestDate || res.tags) return res;
+      const inner = res.data;
+      if (inner && (inner.summary || inner.digestDate || inner.tags)) return inner;
+      return null;
+    };
+
+    /** 拉取该群最新一期日报；没有日报时静默置空，不打扰用户 */
+    const loadGroupDigest = async (gid) => {
+      if (!gid) {
+        groupDigest.value = null;
+        return;
+      }
+      try {
+        groupDigest.value = normalizeDigest(await messageApi.getLatestGroupDigest(gid));
+        digestExpanded.value = false;
+      } catch (error) {
+        // 没有日报 / 无权限都不应影响群聊浏览
+        groupDigest.value = null;
+        logger.warn('[digest] 加载今日速览失败:', error);
+      }
+    };
+
+    /**
+     * 生成今日速览。
+     * 首次生成 → force=false（后端同群同天幂等，避免重复烧额度）；
+     * 已有速览时按钮含义是「重新生成」→ force=true，真正重跑一次大模型。
+     */
+    const generateDigest = async () => {
+      if (digestGenerating.value || !groupId.value) return;
+      const hadDigest = !!groupDigest.value;
+      digestGenerating.value = true;
+      try {
+        const view = normalizeDigest(await messageApi.generateGroupDigest(groupId.value, null, hadDigest));
+        if (!view) {
+          showToast('速览返回为空，请稍后重试', 'warning');
+          return;
+        }
+        groupDigest.value = view;
+        digestExpanded.value = true;  // 生成后直接展开，便于看到完整速览
+        showToast(hadDigest ? '今日速览已重新生成' : '今日速览生成完成', 'success');
+      } catch (error) {
+        logger.warn('[digest] 生成今日速览失败:', error);
+        showToast(error?.message || '生成今日速览失败', 'error');
+      } finally {
+        digestGenerating.value = false;
+      }
+    };
+
+    const toggleDigestExpand = () => { digestExpanded.value = !digestExpanded.value; };
+
     const currentGroupName = ref('');
     const messagesContainer = ref(null);
     const currentPage = ref(0);
@@ -472,6 +579,7 @@ export default {
         if (!g) {
           messages.value = [];
           currentGroupName.value = '';
+          groupDigest.value = null;
           return;
         }
         const gid = g.groupId;
@@ -487,6 +595,8 @@ export default {
 
         // 同时加载该群历史成员昵称映射，用于解析 @消息
         loadGroupMembers(gid);
+        // 同时加载该群最新一期日报（今日速览卡片）
+        loadGroupDigest(gid);
         totalMessages.value = response.total || list.length;
         hasMore.value = list.length < totalMessages.value;
         currentGroupName.value = list.length > 0
@@ -682,6 +792,8 @@ export default {
         stopFallbackPoll();
         messages.value = [];
         currentGroupName.value = '';
+        groupDigest.value = null;
+        digestExpanded.value = false;
       }
     }, { immediate: true, deep: true });
 
@@ -887,6 +999,14 @@ export default {
       renderMessages,
       isSummarizing,
       summarizeOne,
+      // 群日报「今日速览」
+      groupDigest,
+      digestTags,
+      digestSentimentLabel,
+      digestGenerating,
+      digestExpanded,
+      toggleDigestExpand,
+      generateDigest,
       isLoading,
       currentGroupName,
       messagesContainer,
@@ -1190,6 +1310,114 @@ export default {
 .theme-dark .ai-sentiment.st-negative { background: rgba(239, 154, 154, 0.18); color: #ef9a9a; }
 .theme-dark .ai-sentiment.st-neutral { background: rgba(176, 190, 197, 0.18); color: #b0bec5; }
 .theme-dark .ai-tag { background: rgba(144, 202, 249, 0.16); color: #90caf9; }
+
+/* ===== 群日报「今日速览」卡片（AI 摘要阶段 3）=====
+   全部使用主题变量，暗色模式下由 .theme-dark 的变量自动适配，不写死浅色背景 */
+.group-digest {
+  flex-shrink: 0;
+  margin: 10px 16px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color, #e0e0e0);
+  border-radius: 8px;
+  background-color: var(--bg-tertiary, #f8f9fa);
+  font-size: 13px;
+}
+
+.digest-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.digest-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 600;
+  color: var(--accent-color, #3498db);
+}
+
+.digest-date {
+  font-size: 12px;
+  color: var(--text-muted, #999);
+}
+
+.digest-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+/* 卡片内情感徽章不需要再撑开左侧空间 */
+.group-digest .ai-sentiment { margin-left: 0; }
+
+.digest-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border: 1px solid var(--border-color, #d8dee9);
+  border-radius: 999px;
+  background-color: var(--card-bg, #fff);
+  color: var(--text-secondary, #666);
+  font-size: 11.5px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.digest-btn:hover:not(:disabled) {
+  border-color: var(--accent-color, #3498db);
+  color: var(--accent-color, #3498db);
+}
+.digest-btn:disabled { cursor: progress; opacity: 0.75; }
+.digest-btn.primary { color: var(--accent-color, #3498db); border-color: var(--accent-color, #3498db); }
+
+.digest-summary {
+  margin-top: 6px;
+  color: var(--text-primary, #333);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+/* 折叠时最多两行；「展开」后显示完整文本 */
+.digest-summary:not(.expanded) {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.digest-meta {
+  margin-top: 6px;
+  font-size: 11.5px;
+  color: var(--text-muted, #999);
+}
+
+/* 无日报时的一行淡提示（不占空间） */
+.digest-empty {
+  margin: 4px 16px 0;
+  padding: 4px 12px;
+  display: flex;
+  justify-content: center;
+  border: none;
+  background: transparent;
+}
+
+.digest-empty-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted, #999);
+  font-size: 12px;
+  cursor: pointer;
+  transition: color 0.15s;
+}
+.digest-empty-btn:hover:not(:disabled) { color: var(--accent-color, #3498db); }
+.digest-empty-btn:disabled { cursor: progress; }
 
 /* 按需摘要按钮（平时隐藏，鼠标悬停消息时出现） */
 .msg-actions {

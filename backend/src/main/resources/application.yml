@@ -145,6 +145,14 @@ app:
     # 逗号分隔的跨域白名单；可用环境变量 CORS_ALLOWED_ORIGINS 覆盖（不设时用下面这份本地默认值）。
     # 该值在 CorsConfig 里按逗号拆分，所以默认值里的逗号不会引起绑定问题。
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174,http://localhost:5175,http://127.0.0.1:5175,http://localhost:5176,http://127.0.0.1:5176}
+
+# AI 摘要（阶段 1 单条按需 / 阶段 2 批量 / 阶段 3 群日报）
+ai:
+  summary:
+    enabled: ${AI_SUMMARY_ENABLED:true}          # 总开关，关闭后摘要接口返回 403
+    daily-limit: ${AI_SUMMARY_DAILY_LIMIT:300}   # 全站每日摘要条数上限（按 ai_summarized_at 统计）
+    min-length: ${AI_SUMMARY_MIN_LENGTH:8}       # 参与摘要的最短内容长度
+    max-input-chars: ${AI_SUMMARY_MAX_INPUT_CHARS:12000}  # 群日报拼接上限（两端保留）
   admin:
     init-password: ${ADMIN_INIT_PASSWORD:}
   debug:

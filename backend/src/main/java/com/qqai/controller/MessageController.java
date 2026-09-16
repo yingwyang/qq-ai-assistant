@@ -314,19 +314,94 @@ public class MessageController {
 
     private final java.util.concurrent.locks.ReentrantLock processLock = new java.util.concurrent.locks.ReentrantLock();
 
+    @Autowired
+    private com.qqai.service.AiSummaryBatchService aiSummaryBatchService;
+
+    /**
+     * 批量补摘要（AI 摘要阶段 2）。
+     * 请求体（可选字段）：{@code {groupId, start, end, limit, minLength, onlyText}}
+     * — 必须带 groupId 或 start，否则 400；limit 上限 500（管理员 2000）；有任务进行中 409。
+     */
     @PostMapping("/process")
     @PreAuthorize("hasRole('ADMIN')")
-    public ResponseEntity<ApiResponse<Void>> processAllMessages() {
+    public ResponseEntity<ApiResponse<Map<String, Object>>> processAllMessages(
+            @RequestBody(required = false) Map<String, Object> body) {
         if (!processLock.tryLock()) {
             return ResponseEntity.status(HttpStatus.CONFLICT)
                     .body(ApiResponse.error(409, "任务正在执行中，请勿重复调用"));
         }
         try {
-            messageService.processAllUnprocessedMessages();
-            return ResponseEntity.ok(ApiResponse.success());
+            String groupId = str(body, "groupId");
+            java.time.LocalDateTime start = time(body, "start");
+            java.time.LocalDateTime end = time(body, "end");
+            Integer limit = num(body, "limit");
+            Integer minLength = num(body, "minLength");
+            Boolean onlyText = bool(body, "onlyText");
+            Map<String, Object> data = aiSummaryBatchService.start(groupId, start, end, limit, minLength, onlyText);
+            return ResponseEntity.ok(ApiResponse.success(data));
+        } catch (com.qqai.exception.BizException e) {
+            return ResponseEntity.status(e.getCode() >= 400 && e.getCode() < 600 ? e.getCode() : 400)
+                    .body(ApiResponse.error(e.getCode(), e.getMessage()));
         } finally {
             processLock.unlock();
         }
+    }
+
+    /** 批量任务进度：队列深度 / 今日已完成 / 剩余待处理 / 是否进行中 */
+    @GetMapping("/process/status")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> processStatus() {
+        return ResponseEntity.ok(ApiResponse.success(aiSummaryBatchService.status()));
+    }
+
+    /** 停止批量任务：清空 ai.analysis.queue（保留 DLQ），写审计 */
+    @PostMapping("/process/stop")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> processStop() {
+        try {
+            return ResponseEntity.ok(ApiResponse.success(aiSummaryBatchService.stop()));
+        } catch (com.qqai.exception.BizException e) {
+            return ResponseEntity.status(500).body(ApiResponse.error(e.getCode(), e.getMessage()));
+        }
+    }
+
+    /** 从请求体取字符串（空串归一为 null） */
+    private String str(Map<String, Object> body, String key) {
+        if (body == null) return null;
+        Object v = body.get(key);
+        if (v == null) return null;
+        String s = String.valueOf(v).trim();
+        return s.isEmpty() ? null : s;
+    }
+
+    /** 取时间参数，支持 "2026-09-16" 与 "2026-09-16 00:00:00" 两种写法；日期单独给时按 00:00:00 计 */
+    private java.time.LocalDateTime time(Map<String, Object> body, String key) {
+        String s = str(body, key);
+        if (s == null) return null;
+        try {
+            if (s.length() <= 10) {
+                java.time.LocalDate d = java.time.LocalDate.parse(s);
+                return "end".equals(key) ? d.atTime(java.time.LocalTime.MAX) : d.atStartOfDay();
+            }
+            return java.time.LocalDateTime.parse(s.replace(' ', 'T'));
+        } catch (Exception e) {
+            throw new com.qqai.exception.BizException(400, "时间格式不合法：" + key + "=" + s + "（应为 2026-09-16 或 2026-09-16 12:00:00）");
+        }
+    }
+
+    private Integer num(Map<String, Object> body, String key) {
+        String s = str(body, key);
+        if (s == null) return null;
+        try {
+            return (int) Double.parseDouble(s);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private Boolean bool(Map<String, Object> body, String key) {
+        String s = str(body, key);
+        return s == null ? null : Boolean.parseBoolean(s);
     }
 
     /**

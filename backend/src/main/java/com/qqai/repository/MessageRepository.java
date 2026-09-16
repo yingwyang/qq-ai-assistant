@@ -41,6 +41,35 @@ public interface MessageRepository extends JpaRepository<Message, Long> {
      * 查询未处理的消息
      */
     List<Message> findByProcessedFalse();
+
+    // ===== AI 摘要阶段 2：批量补摘要的候选集与统计 =====
+    /** 未处理且未删除的消息（批量投递候选集，具体过滤条件在服务层按参数处理） */
+    List<Message> findByProcessedFalseAndDeletedFalse();
+
+    /** 剩余待处理条数 */
+    long countByProcessedFalseAndDeletedFalse();
+
+    /** 指定时间之后完成摘要的条数（用于统计"今日已完成"） */
+    long countByAiSummarizedAtGreaterThanEqual(LocalDateTime time);
+
+    // ===== AI 摘要阶段 3：群日报的当天消息候选集 =====
+    /**
+     * 查询某群在 [start, end) 内参与群日报的消息：
+     * 未被删除、指定消息类型、内容非空且长度不小于 minLength，按发送时间升序。
+     *
+     * <p>消息类型以参数传入（而不是在 JPQL 里写枚举字面量），
+     * 避免不同 Hibernate 版本对枚举字面量写法的差异。</p>
+     */
+    @Query("SELECT m FROM Message m WHERE m.groupId = :groupId AND m.deleted = false "
+            + "AND m.messageType = :messageType AND m.content IS NOT NULL "
+            + "AND LENGTH(m.content) >= :minLength "
+            + "AND m.sendTime >= :start AND m.sendTime < :end "
+            + "ORDER BY m.sendTime ASC, m.id ASC")
+    List<Message> findDigestCandidates(@Param("groupId") String groupId,
+                                       @Param("messageType") Message.MessageType messageType,
+                                       @Param("minLength") int minLength,
+                                       @Param("start") LocalDateTime start,
+                                       @Param("end") LocalDateTime end);
     
     /**
      * 根据消息类型查询

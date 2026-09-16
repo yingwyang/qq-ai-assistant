@@ -227,6 +227,33 @@ export const messageApi = {
   summarize: (messageId, force = false) =>
     request(`/messages/${messageId}/summarize?force=${force ? 'true' : 'false'}`, { method: 'POST' }),
 
+  // ===== AI 摘要阶段 2：批量补摘要（管理后台「数据维护 → AI 摘要」）=====
+  /** 批量投递摘要任务；参数：{ groupId?, start?, end?, limit?, minLength?, onlyText? } */
+  batchSummarize: (params) => request('/messages/process', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params || {})
+  }),
+  /** 批量任务状态：{ queueDepth, processing, doneToday, totalPending, running, config } */
+  batchSummarizeStatus: () => request('/messages/process/status'),
+  /** 停止批量任务（清空 ai.analysis.queue，保留 DLQ） */
+  batchSummarizeStop: () => request('/messages/process/stop', { method: 'POST' }),
+
+  // ===== AI 摘要阶段 3：群日报 =====
+  /** 生成/获取指定日期群日报（幂等：当天已有则直接返回；force=true 才重新调用大模型生成） */
+  generateGroupDigest: (groupId, date, force = false) => {
+    const qs = [];
+    if (date) qs.push(`date=${date}`);
+    if (force) qs.push('force=true');
+    return request(`/groups/${encodeURIComponent(groupId)}/digest${qs.length ? `?${qs.join('&')}` : ''}`, { method: 'POST' });
+  },
+  /** 最新一期群日报 */
+  getLatestGroupDigest: (groupId) =>
+    request(`/groups/${encodeURIComponent(groupId)}/digest/latest`),
+  /** 历史群日报列表 */
+  getGroupDigests: (groupId, limit = 30) =>
+    request(`/groups/${encodeURIComponent(groupId)}/digests?limit=${limit}`),
+
   uploadFile: (file, fileType) => {
     const formData = new FormData();
     formData.append('file', file);
