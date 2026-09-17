@@ -103,6 +103,52 @@
           {{ stopping ? '停止中...' : '停止并清空队列' }}
         </button>
       </div>
+
+      <!-- 摘要设置（运行时生效，不用改配置文件/重启） -->
+      <div class="ai-settings">
+        <div class="ai-settings-header">
+          <span class="ai-settings-title">摘要设置</span>
+          <span class="ai-settings-note">保存后立即生效，无需重启后端</span>
+        </div>
+        <div class="ai-form-grid">
+          <div class="ai-field">
+            <label>功能开关</label>
+            <label class="ai-checkbox">
+              <input type="checkbox" v-model="settings.enabled" /> 开启 AI 摘要（关闭后所有摘要接口返回 403）
+            </label>
+          </div>
+          <div class="ai-field">
+            <label>每日额度（条）</label>
+            <input v-model.number="settings.dailyLimit" type="number" min="0" max="100000" />
+          </div>
+          <div class="ai-field">
+            <label>最短内容长度</label>
+            <input v-model.number="settings.minLength" type="number" min="1" max="200" />
+          </div>
+          <div class="ai-field">
+            <label>日报拼接上限（字符）</label>
+            <input v-model.number="settings.maxInputChars" type="number" min="1000" max="200000" />
+          </div>
+          <div class="ai-field">
+            <label>群白名单（逗号分隔，空=全部）</label>
+            <input v-model.trim="settings.groupWhitelist" type="text" placeholder="如 674405515,697381755" />
+          </div>
+          <div class="ai-field">
+            <label>定时日报 cron（Spring 表达式，空=不定时）</label>
+            <input v-model.trim="settings.digestCron" type="text" placeholder="如 0 50 23 * * ?" />
+          </div>
+          <div class="ai-field">
+            <label>定时日报的群（逗号分隔，空=当天有消息的群）</label>
+            <input v-model.trim="settings.digestGroups" type="text" placeholder="如 674405515" />
+          </div>
+        </div>
+        <div class="ai-actions">
+          <button class="btn-action promote" :disabled="settingsSaving" @click="saveSettings">
+            {{ settingsSaving ? '保存中...' : '保存设置' }}
+          </button>
+          <button class="btn-action" :disabled="settingsLoading" @click="loadSettings">重新读取</button>
+        </div>
+      </div>
     </div>
 
     <!-- 消息归档 -->
@@ -124,7 +170,7 @@
 <script>
 import { computed, inject, onMounted, onUnmounted, reactive, ref } from 'vue';
 import Icon from '../../components/Icon.vue';
-import { messageApi } from '../../services/api';
+import { adminApi, messageApi } from '../../services/api';
 import { showToast } from '../../components/Toast.vue';
 
 export default {
@@ -212,8 +258,54 @@ export default {
     };
 
     let timer = null;
+
+    // ===== 摘要设置（阶段 2/3 收尾：后台可视化配置，PUT 后运行时生效） =====
+    const settings = reactive({
+      enabled: true,
+      dailyLimit: 300,
+      minLength: 8,
+      maxInputChars: 12000,
+      groupWhitelist: '',
+      digestCron: '',
+      digestGroups: '',
+    });
+    const settingsLoading = ref(false);
+    const settingsSaving = ref(false);
+
+    const loadSettings = async () => {
+      settingsLoading.value = true;
+      try {
+        const cfg = await adminApi.getAiSummaryConfig() || {};
+        settings.enabled = cfg.enabled !== false;
+        settings.dailyLimit = cfg.dailyLimit ?? 300;
+        settings.minLength = cfg.minLength ?? 8;
+        settings.maxInputChars = cfg.maxInputChars ?? 12000;
+        settings.groupWhitelist = cfg.groupWhitelist ?? '';
+        settings.digestCron = cfg.digestCron ?? '';
+        settings.digestGroups = cfg.digestGroups ?? '';
+      } catch (e) {
+        showToast(e?.message || '读取摘要设置失败', 'error');
+      } finally {
+        settingsLoading.value = false;
+      }
+    };
+
+    const saveSettings = async () => {
+      settingsSaving.value = true;
+      try {
+        await adminApi.updateAiSummaryConfig({ ...settings });
+        showToast('摘要设置已保存并生效', 'success');
+        await Promise.all([loadSettings(), loadStatus()]);
+      } catch (e) {
+        showToast(e?.message || '保存摘要设置失败', 'error');
+      } finally {
+        settingsSaving.value = false;
+      }
+    };
+
     onMounted(() => {
       loadStatus();
+      loadSettings();
       timer = setInterval(loadStatus, 10000);   // 面板打开时每 10 秒刷新进度
     });
     onUnmounted(() => { if (timer) clearInterval(timer); });
@@ -238,6 +330,11 @@ export default {
       loadStatus,
       submit,
       stop,
+      settings,
+      settingsLoading,
+      settingsSaving,
+      loadSettings,
+      saveSettings,
     };
   },
 };
@@ -307,6 +404,16 @@ export default {
 
 .ai-actions { display: flex; gap: 12px; }
 .btn-action.danger { color: #e74c3c; border-color: #e74c3c; }
+
+/* 摘要设置区块 */
+.ai-settings {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px dashed var(--border-color, #e0e0e0);
+}
+.ai-settings-header { display: flex; align-items: baseline; gap: 10px; margin-bottom: 12px; }
+.ai-settings-title { font-size: 14px; font-weight: 600; color: var(--text-primary, #333); }
+.ai-settings-note { font-size: 11.5px; color: var(--text-muted, #999); }
 
 @media (max-width: 1100px) {
   .ai-status-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }

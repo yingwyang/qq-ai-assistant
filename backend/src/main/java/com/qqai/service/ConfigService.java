@@ -23,6 +23,10 @@ public class ConfigService {
 
     private static final String MASK = "***";
 
+    /** 覆盖文件所在目录与文件名（与 writeOverrides 共用，保证读写同一份文件） */
+    private static final String OVERRIDE_DIR = "data";
+    private static final String OVERRIDE_FILE = "application-override.properties";
+
     private static final List<ConfigGroupDef> GROUP_DEFS = List.of(
             new ConfigGroupDef("AstrBot", List.of(
                     new ConfigItemDef("astrbot.api-url", "API 地址", false, false),
@@ -96,25 +100,14 @@ public class ConfigService {
     }
 
     private void writeOverrides(Map<String, String> updates) throws IOException {
-        Path configDir = Path.of("data");
+        Path configDir = Path.of(OVERRIDE_DIR);
         if (!Files.exists(configDir)) {
             Files.createDirectories(configDir);
         }
-        Path overrideFile = configDir.resolve("application-override.properties");
+        Path overrideFile = configDir.resolve(OVERRIDE_FILE);
 
         // Read existing overrides
-        Map<String, String> existing = new LinkedHashMap<>();
-        if (Files.exists(overrideFile)) {
-            for (String line : Files.readAllLines(overrideFile)) {
-                line = line.trim();
-                if (!line.isEmpty() && !line.startsWith("#")) {
-                    int eq = line.indexOf('=');
-                    if (eq > 0) {
-                        existing.put(line.substring(0, eq).trim(), line.substring(eq + 1).trim());
-                    }
-                }
-            }
-        }
+        Map<String, String> existing = readOverrides(overrideFile);
 
         existing.putAll(updates);
 
@@ -125,6 +118,38 @@ public class ConfigService {
         }
         Files.writeString(overrideFile, sb.toString(), StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
         log.info("配置覆盖已写入: {}", overrideFile.toAbsolutePath());
+    }
+
+    /**
+     * 读取已落盘的配置覆盖（data/application-override.properties）。
+     *
+     * <p>与 {@link #updateConfig(Map)} 写的是同一份文件，供需要「后台改完、重启后仍生效」的配置项
+     * （如 AI 摘要设置）读取初值。文件不存在或读取失败返回空 Map，不影响启动。</p>
+     */
+    public Map<String, String> getPersistedOverrides() {
+        return readOverrides(Path.of(OVERRIDE_DIR).resolve(OVERRIDE_FILE));
+    }
+
+    /** 解析 override 文件为 key=value（忽略空行与 # 注释行） */
+    private Map<String, String> readOverrides(Path overrideFile) {
+        Map<String, String> existing = new LinkedHashMap<>();
+        if (!Files.exists(overrideFile)) {
+            return existing;
+        }
+        try {
+            for (String line : Files.readAllLines(overrideFile)) {
+                line = line.trim();
+                if (!line.isEmpty() && !line.startsWith("#")) {
+                    int eq = line.indexOf('=');
+                    if (eq > 0) {
+                        existing.put(line.substring(0, eq).trim(), line.substring(eq + 1).trim());
+                    }
+                }
+            }
+        } catch (IOException e) {
+            log.warn("读取配置覆盖文件失败: {} ({})", overrideFile.toAbsolutePath(), e.getMessage());
+        }
+        return existing;
     }
 
     // --- Inner DTOs ---

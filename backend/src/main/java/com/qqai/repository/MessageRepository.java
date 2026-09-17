@@ -70,6 +70,19 @@ public interface MessageRepository extends JpaRepository<Message, Long> {
                                        @Param("minLength") int minLength,
                                        @Param("start") LocalDateTime start,
                                        @Param("end") LocalDateTime end);
+
+    /**
+     * 查询在 [start, end) 内有消息的群号（定时群日报用来确定「今天有消息的群」）。
+     *
+     * <p>这里只做粗筛（未被删除 + 有非空内容），更严格的「消息类型 = TEXT、长度 ≥ minLength」
+     * 由 {@code GroupDigestService} 按运行时配置处理：粗筛结果偏多只会多投递几条任务，
+     * 消费者会以 400「当天没有可摘要的消息」快速确认掉，不会重复消耗大模型额度。</p>
+     */
+    @Query("SELECT DISTINCT m.groupId FROM Message m WHERE m.deleted = false "
+            + "AND m.content IS NOT NULL AND LENGTH(m.content) > 0 "
+            + "AND m.sendTime >= :start AND m.sendTime < :end")
+    List<String> findGroupIdsWithMessagesBetween(@Param("start") LocalDateTime start,
+                                                 @Param("end") LocalDateTime end);
     
     /**
      * 根据消息类型查询

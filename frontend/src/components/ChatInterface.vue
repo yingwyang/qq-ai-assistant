@@ -136,6 +136,17 @@
         <span v-if="groupDigest.messageCount != null">共 {{ groupDigest.messageCount }} 条消息参与生成</span>
         <span v-if="groupDigest.model"> · 模型 {{ groupDigest.model }}</span>
       </div>
+      <!-- 历史速览：点击切换查看某一期（只用已拉到的数据，不触发新的生成） -->
+      <div v-if="digestExpanded && digestHistory.length > 1" class="digest-history">
+        <span class="digest-history-label">历史速览</span>
+        <button
+          v-for="item in digestHistory"
+          :key="item.digestDate"
+          class="digest-history-chip"
+          :class="{ active: item.digestDate === groupDigest.digestDate }"
+          @click="viewHistoryDigest(item)"
+        >{{ item.digestDate }}</button>
+      </div>
     </div>
     <!-- 无日报：一行很淡的提示，点击即可生成（不占空间） -->
     <div v-else-if="groupId" class="group-digest digest-empty">
@@ -376,6 +387,13 @@ export default {
     const groupDigest = ref(null);        // 当前群最新一期日报（后端视图：summary/tags/sentiment/digestDate/messageCount）
     const digestGenerating = ref(false);  // 生成中（按钮转圈 + 禁用）
     const digestExpanded = ref(false);    // 是否展开完整内容
+    const digestHistory = ref([]);        // 历史日报（用于展开后的日期切换）
+
+    /** 查看历史某一期：直接用已拉到的数据切换显示，不触发新的生成（不烧额度） */
+    const viewHistoryDigest = (item) => {
+      if (!item) return;
+      groupDigest.value = item;
+    };
 
     const DIGEST_SENTIMENT_LABELS = { positive: '积极', neutral: '中性', negative: '消极' };
     const digestSentimentLabel = computed(() => DIGEST_SENTIMENT_LABELS[groupDigest.value?.sentiment] || '');
@@ -401,6 +419,7 @@ export default {
     const loadGroupDigest = async (gid) => {
       if (!gid) {
         groupDigest.value = null;
+        digestHistory.value = [];
         return;
       }
       try {
@@ -410,6 +429,14 @@ export default {
         // 没有日报 / 无权限都不应影响群聊浏览
         groupDigest.value = null;
         logger.warn('[digest] 加载今日速览失败:', error);
+      }
+      // 历史列表（失败静默，仅用于展开后的日期切换）
+      try {
+        const list = await messageApi.getGroupDigests(gid, 10);
+        const arr = Array.isArray(list) ? list : (Array.isArray(list?.data) ? list.data : []);
+        digestHistory.value = arr.filter(Boolean);
+      } catch (e) {
+        digestHistory.value = [];
       }
     };
 
@@ -1005,6 +1032,8 @@ export default {
       digestSentimentLabel,
       digestGenerating,
       digestExpanded,
+      digestHistory,
+      viewHistoryDigest,
       toggleDigestExpand,
       generateDigest,
       isLoading,
@@ -1393,6 +1422,30 @@ export default {
   font-size: 11.5px;
   color: var(--text-muted, #999);
 }
+
+/* 历史速览日期切换 */
+.digest-history {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border-color, #e0e0e0);
+}
+.digest-history-label { font-size: 11.5px; color: var(--text-muted, #999); }
+.digest-history-chip {
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border-color, #e0e0e0);
+  background: var(--card-bg, #fff);
+  color: var(--text-secondary, #666);
+  font-size: 11.5px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.digest-history-chip:hover { border-color: var(--accent-color, #3498db); color: var(--accent-color, #3498db); }
+.digest-history-chip.active { background: rgba(52, 152, 219, 0.12); border-color: var(--accent-color, #3498db); color: var(--accent-color, #3498db); }
 
 /* 无日报时的一行淡提示（不占空间） */
 .digest-empty {

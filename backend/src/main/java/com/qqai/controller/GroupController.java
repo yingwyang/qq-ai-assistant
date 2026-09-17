@@ -3,12 +3,14 @@ package com.qqai.controller;
 import com.qqai.common.SecurityHelper;
 import com.qqai.constant.GroupType;
 import com.qqai.dto.common.ApiResponse;
+import com.qqai.dto.webhook.GroupDigestPayload;
 import com.qqai.entity.Group;
 import com.qqai.entity.GroupDigest;
 import com.qqai.repository.GroupRepository;
 import com.qqai.service.CreditService;
 import com.qqai.service.GroupDigestService;
 import com.qqai.service.GroupTypeRecognitionService;
+import com.qqai.service.MessageQueueService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -19,6 +21,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -47,6 +50,9 @@ public class GroupController {
 
     @Autowired
     private GroupDigestService groupDigestService;
+
+    @Autowired
+    private MessageQueueService messageQueueService;
 
     /**
      * 查询群类型 + 推荐分析类型
@@ -199,6 +205,46 @@ public class GroupController {
     }
 
     /**
+     * 异步生成群日报：{@code POST /api/groups/{groupId}/digest/async?date=YYYY-MM-DD&force=false}
+     *
+     * <p>把 {@code {groupId, date, force}} 投递到独立队列 {@code group.digest.queue} 后
+     * <b>立即返回</b>（前端拿到 {@code data = {status:"queued", groupId, date, force}}），
+     * 生成结果由消费者写库，前端再通过 {@code /digest/latest} 轮询查看。</p>
+     *
+     * <p>与同步接口的分工：同步接口（{@code POST /digest}）保持原样、等大模型返回后给出结果，
+     * 现有链路不受影响；本接口用于「不想等」或定时任务这类场景。</p>
+     *
+     * <p>权限：与其余 digest 接口同一套 {@link #checkGroupAccess(String)}
+     * （未登录 401 / 未绑定 QQ 403 / 无群可见性 403），并额外过
+     * {@link GroupDigestService#assertDigestAllowed(String)}（{@code enabled=false} 或不在群白名单 → 403）。</p>
+     */
+    @PostMapping("/{groupId}/digest/async")
+    public ResponseEntity<ApiResponse<?>> generateGroupDigestAsync(
+            @PathVariable String groupId,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date,
+            @RequestParam(defaultValue = "false") boolean force) {
+
+        ResponseEntity<ApiResponse<?>> denied = checkGroupAccess(groupId);
+        if (denied != null) {
+            return denied;
+        }
+
+        LocalDate targetDate = (date == null) ? LocalDate.now() : date;
+        // 开关 / 群白名单：不满足直接 403（BizException 由 GlobalExceptionHandler 统一转 ApiResponse）
+        groupDigestService.assertDigestAllowed(groupId);
+
+        messageQueueService.sendGroupDigest(new GroupDigestPayload(groupId, targetDate.toString(), force));
+        log.info("群日报任务已投递到 group.digest.queue groupId={}, date={}, force={}", groupId, targetDate, force);
+
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("status", "queued");
+        data.put("groupId", groupId);
+        data.put("date", targetDate.toString());
+        data.put("force", force);
+        return ResponseEntity.ok(ApiResponse.success(data));
+    }
+
+    /**
      * 最新一期日报：{@code GET /api/groups/{groupId}/digest/latest}
      *
      * <p>该群还没有任何日报时 {@code data} 为 null（不是错误），前端据此显示「今日暂无速览」。</p>
@@ -209,6 +255,8 @@ public class GroupController {
         if (denied != null) {
             return denied;
         }
+        // 白名单外的群连日报也不允许读取（enabled=false 时同理 → 403）
+        groupDigestService.assertDigestAllowed(groupId);
 
         Optional<GroupDigest> latest = groupDigestService.findLatest(groupId);
         return ResponseEntity.ok(ApiResponse.success(latest.map(groupDigestService::toView).orElse(null)));
@@ -228,6 +276,7 @@ public class GroupController {
         if (denied != null) {
             return denied;
         }
+        groupDigestService.assertDigestAllowed(groupId);
 
         List<Map<String, Object>> views = groupDigestService.findHistory(groupId, limit)
                 .stream()

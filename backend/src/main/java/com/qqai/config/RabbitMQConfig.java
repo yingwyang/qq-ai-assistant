@@ -22,11 +22,12 @@ import java.util.Map;
 /**
  * RabbitMQ 配置类
  *
- * 队列架构（共 4 组）：
+ * 队列架构（共 5 组）：
  *  1. qqai.media     (Direct)  → media.download.queue     + 死信 media.download.dlq
  *  2. qqai.voice     (Direct)  → voice.transcode.queue    + 死信 voice.transcode.dlq
  *  3. qqai.ai        (Direct)  → ai.analysis.queue        + 死信 ai.analysis.dlq
  *  4. qqai.broadcast (Fanout)  → broadcast.queue
+ *  5. qqai.digest    (Direct)  → group.digest.queue       + 死信 group.digest.queue.dlq
  *
  * 死信路由策略：业务队列消费失败 reject(requeue=false) 后，
  * 通过该队列所属的 Direct Exchange 路由到对应的 *.dlq 死信队列。
@@ -41,6 +42,7 @@ public class RabbitMQConfig {
     public static final String VOICE_EXCHANGE = "qqai.voice";
     public static final String AI_EXCHANGE = "qqai.ai";
     public static final String BROADCAST_EXCHANGE = "qqai.broadcast";
+    public static final String DIGEST_EXCHANGE = "qqai.digest";
 
     // ==================== Queue 名称 ====================
     public static final String MEDIA_DOWNLOAD_QUEUE = "media.download.queue";
@@ -50,6 +52,9 @@ public class RabbitMQConfig {
     public static final String AI_ANALYSIS_QUEUE = "ai.analysis.queue";
     public static final String AI_ANALYSIS_DLQ = "ai.analysis.dlq";
     public static final String BROADCAST_QUEUE = "broadcast.queue";
+    /** 群日报独立队列（避免与单条摘要互相阻塞：单条摘要可能积压几十分钟） */
+    public static final String GROUP_DIGEST_QUEUE = "group.digest.queue";
+    public static final String GROUP_DIGEST_DLQ = "group.digest.queue.dlq";
 
     // ==================== Routing Key ====================
     public static final String MEDIA_DOWNLOAD_KEY = "media.download";
@@ -58,6 +63,8 @@ public class RabbitMQConfig {
     public static final String VOICE_TRANSCODE_DLQ_KEY = "voice.transcode.dlq";
     public static final String AI_ANALYSIS_KEY = "ai.analysis";
     public static final String AI_ANALYSIS_DLQ_KEY = "ai.analysis.dlq";
+    public static final String GROUP_DIGEST_KEY = "group.digest";
+    public static final String GROUP_DIGEST_DLQ_KEY = "group.digest.dlq";
 
     // ==================== 死信参数 Key ====================
     private static final String DLX_ARG = "x-dead-letter-exchange";
@@ -182,6 +189,40 @@ public class RabbitMQConfig {
                 .to(broadcastExchange());
     }
 
+    // ==================== 5. 群日报（AI 摘要阶段 3） ====================
+    @Bean
+    public DirectExchange digestExchange() {
+        return new DirectExchange(DIGEST_EXCHANGE, true, false);
+    }
+
+    @Bean
+    public Queue groupDigestQueue() {
+        return QueueBuilder.durable(GROUP_DIGEST_QUEUE)
+                .withArguments(Map.of(
+                        DLX_ARG, DIGEST_EXCHANGE,
+                        DLK_ARG, GROUP_DIGEST_DLQ_KEY))
+                .build();
+    }
+
+    @Bean
+    public Queue groupDigestDlq() {
+        return QueueBuilder.durable(GROUP_DIGEST_DLQ).build();
+    }
+
+    @Bean
+    public Binding groupDigestBinding() {
+        return BindingBuilder.bind(groupDigestQueue())
+                .to(digestExchange())
+                .with(GROUP_DIGEST_KEY);
+    }
+
+    @Bean
+    public Binding groupDigestDlqBinding() {
+        return BindingBuilder.bind(groupDigestDlq())
+                .to(digestExchange())
+                .with(GROUP_DIGEST_DLQ_KEY);
+    }
+
     // ==================== 消息序列化 ====================
     @Bean
     public MessageConverter jacksonMessageConverter() {
@@ -231,6 +272,12 @@ public class RabbitMQConfig {
     @Bean("aiContainerFactory")
     public SimpleRabbitListenerContainerFactory aiContainerFactory(ConnectionFactory connectionFactory) {
         return buildListenerFactory(connectionFactory, 3);
+    }
+
+    /** 群日报消费者容器：prefetch=1（单条日报要读完当天几百条消息再调大模型，耗时可达 20s+，串行执行） */
+    @Bean("digestContainerFactory")
+    public SimpleRabbitListenerContainerFactory digestContainerFactory(ConnectionFactory connectionFactory) {
+        return buildListenerFactory(connectionFactory, 1);
     }
 
     private SimpleRabbitListenerContainerFactory buildListenerFactory(ConnectionFactory connectionFactory, int prefetch) {

@@ -559,11 +559,18 @@ export const adminApi = {
     method: 'POST',
     body: JSON.stringify({ newPassword }),
   }),
+  // ===== AI 摘要配置（阶段 2/3 收尾：后台可视化设置，值运行时生效）=====
+  // 字段：{ enabled, dailyLimit, minLength, maxInputChars, groupWhitelist, digestCron, digestGroups }
+  getAiSummaryConfig: () => request('/admin/ai-summary/config'),
+  updateAiSummaryConfig: (data) => request('/admin/ai-summary/config', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data || {}),
+  }),
   getConfig: () => request('/admin/config'),
   updateConfig: (data) => request('/admin/config', {
     method: 'PUT',
-    body: JSON.stringify(data),
-  }),
+    body: JSON.stringify(data),  }),
   triggerBackup: () => request('/admin/backup', { method: 'POST' }),
   getBackupList: () => request('/admin/backup/list'),
   downloadBackupUrl: (fileName) => {

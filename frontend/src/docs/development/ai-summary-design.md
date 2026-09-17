@@ -4,7 +4,7 @@ description: 摘要功能的现状缺口、数据模型、接口与落地计划�
 updated: 2026-09-16
 ---
 
-> **状态：阶段 0、1、2、3 均已实装（2026-09-16）。**
+> **状态：阶段 0、1、2、3 及其收尾项均已实装（2026-09-16 ~ 09-17）。**
 >
 > - 阶段 0（结构化存储与卡片展示）：`messages` 新增 `ai_tags/ai_sentiment/ai_summary_short/ai_summarized_at/ai_model`，
 >   由 `AiSummaryParser` 解析模型 JSON 后回填；前端渲染「标签 + 情感 + 一句话摘要」卡片，老数据在前端兼容解析。
@@ -13,9 +13,14 @@ updated: 2026-09-16
 >   `GET /api/messages/process/status`、`POST /api/messages/process/stop`，后台「数据维护 → AI 摘要」面板。
 > - 阶段 3（群日报）：`group_digest` 表 + `POST /api/groups/{id}/digest?date=&force=`、
 >   `GET /api/groups/{id}/digest/latest`、`GET /api/groups/{id}/digests`，聊天页顶部「今日速览」卡片。
-> - 配置项见 `application.yml` 的 `ai.summary.*`（enabled / daily-limit / min-length / max-input-chars），
->   **后台可视化设置页尚未做**（当前改环境变量或配置文件生效）。
-> - 仍未做：独立的 `group.digest.queue`（当前群日报同步生成）、定时日报 `digestCron`、群白名单。
+> - 配置项见 `application.yml` 的 `ai.summary.*`（enabled / daily-limit / min-length / max-input-chars /
+>   group-whitelist / digest-cron / digest-groups），**并已有后台可视化设置页**
+>   （管理后台 → 数据维护 → 「摘要设置」）：保存后运行时立刻生效（开关/额度/白名单/cron 都实测过），
+>   重启后仍保留（写入 `data/application-override.properties`，优先于 yml 与环境变量）。
+> - 群日报收尾已完成：独立 `group.digest.queue`（+ DLQ，prefetch=1；异步入口 `POST /api/groups/{id}/digest/async`）、
+>   定时生成（`digest-cron` 用 `SchedulingConfigurer` 动态注册，cron 为空或非法都不影响启动、保存后即时重注册）、
+>   群白名单（生成与读取都受约束）、聊天页「历史速览」日期切换。
+> - 仍未做：日报历史的分页浏览 UI（当前只展示最近 10 期 chip）、日报导出。
 > 讨论背景：2026-09-16 移除了「消息入库即自动摘要」链路（每条消息一次 LLM 调用、队列长期积压），
 > 摘要改为按需触发；但按需侧目前只有一个人工 curl 的批量接口，因此需要把这条链路真正"做实"。
 

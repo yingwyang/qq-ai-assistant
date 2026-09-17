@@ -153,6 +153,12 @@ ai:
     daily-limit: ${AI_SUMMARY_DAILY_LIMIT:300}   # 全站每日摘要条数上限（按 ai_summarized_at 统计）
     min-length: ${AI_SUMMARY_MIN_LENGTH:8}       # 参与摘要的最短内容长度
     max-input-chars: ${AI_SUMMARY_MAX_INPUT_CHARS:12000}  # 群日报拼接上限（两端保留）
+    # 以下三项同属「后台 → 数据维护 → 摘要设置」的运行时配置：保存后立即生效，并落盘到
+    # data/application-override.properties（重启后仍生效）。这里的值只是没有落盘覆盖时的默认值。
+    group-whitelist: ${AI_SUMMARY_GROUP_WHITELIST:}   # 群白名单，逗号分隔；空 = 不限制
+    # 定时日报 cron：必须 6 段含秒（如 0 50 23 * * ?）；留空 = 不启用定时任务（应用照常启动）
+    digest-cron: ${AI_SUMMARY_DIGEST_CRON:}
+    digest-groups: ${AI_SUMMARY_DIGEST_GROUPS:}       # 定时日报的群号，逗号分隔；空 = 今天有消息的群
   admin:
     init-password: ${ADMIN_INIT_PASSWORD:}
   debug:

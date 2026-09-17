@@ -26,4 +26,7 @@ public interface GroupDigestRepository extends JpaRepository<GroupDigest, Long> 
 
     /** 查询某群历史日报（按日期倒序，配合 {@link Pageable} 限制条数） */
     List<GroupDigest> findByGroupIdOrderByDigestDateDesc(String groupId, Pageable pageable);
+
+    /** 查询某天所有已生成的日报（定时任务用来一次性得到「当天已有日报的群」，避免 N+1 查询） */
+    List<GroupDigest> findByDigestDate(LocalDate digestDate);
 }

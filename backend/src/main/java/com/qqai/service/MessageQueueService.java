@@ -69,6 +69,14 @@ public class MessageQueueService {
         send(RabbitMQConfig.AI_EXCHANGE, RabbitMQConfig.AI_ANALYSIS_KEY, payload);
     }
 
+    /**
+     * 投递群日报任务（独立队列 group.digest.queue，避免与单条摘要互相阻塞）。
+     * 载荷约定为 {@link com.qqai.dto.webhook.GroupDigestPayload}。
+     */
+    public void sendGroupDigest(Object payload) {
+        send(RabbitMQConfig.DIGEST_EXCHANGE, RabbitMQConfig.GROUP_DIGEST_KEY, payload);
+    }
+
     /** 广播消息（新消息 / 媒体更新 / AI 更新等） */
     public void sendBroadcast(Object payload) {
         sendToFanout(RabbitMQConfig.BROADCAST_EXCHANGE, payload);

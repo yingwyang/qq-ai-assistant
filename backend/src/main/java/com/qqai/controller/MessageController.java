@@ -55,12 +55,17 @@ public class MessageController {
     @Autowired
     private com.qqai.service.MessageBroadcastService messageBroadcastService;
 
+    /** AI 摘要运行时配置（总开关 / 额度 / 白名单），由后台「摘要设置」维护 */
+    @Autowired
+    private com.qqai.service.AiSummarySettingsService aiSummarySettingsService;
+
 
     /**
      * 单条按需摘要（阶段 1）：POST /api/messages/{id}/summarize?force=false
      *
      * <ul>
      *   <li>权限：登录用户 + 该消息所属群对当前用户可见；管理员不受限</li>
+     *   <li>总开关：{@code ai.summary.enabled=false} → 403（唯一的统一开关校验，其余行为保持不变）</li>
      *   <li>限流：每用户 10 次/分钟（超出 429）</li>
      *   <li>幂等：已有摘要且 force=false 时直接返回 {@code cached:true}，不再调用大模型、不计额度</li>
      *   <li>同步返回：单条通常 2–16 秒</li>
@@ -74,6 +79,11 @@ public class MessageController {
         Long userId = securityHelper.getCurrentUserId();
         if (userId == null) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(ApiResponse.error(401, "未登录"));
+        }
+
+        // AI 摘要总开关：关闭后所有摘要接口统一 403（本接口只增加这一条校验）
+        if (!aiSummarySettingsService.isEnabled()) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(ApiResponse.error(403, "AI 摘要功能已关闭"));
         }
 
         Optional<Message> opt = messageService.getMessageById(id);

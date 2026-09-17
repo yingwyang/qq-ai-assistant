@@ -11,7 +11,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.amqp.core.AmqpAdmin;
 import org.springframework.amqp.core.QueueInformation;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
@@ -30,7 +29,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * <ul>
  *   <li>必须带 {@code groupId} 或 {@code start}，杜绝"一键 2200 条"；</li>
  *   <li>{@code limit} 硬上限 500（管理员 2000）；</li>
- *   <li>全站每日额度 {@code ai.summary.daily-limit}，超限直接拒绝；</li>
+ *   <li>全站每日额度、最短长度、总开关、群白名单全部取 {@link AiSummarySettingsService} 的
+ *       <b>运行时值</b>（后台「摘要设置」改完立即生效，不再只读 yml）；</li>
  *   <li>已有任务进行中（队列非空）返回 409；</li>
  *   <li>停止 = 清空 {@code ai.analysis.queue}（<b>保留 DLQ</b>），并写审计。</li>
  * </ul>
@@ -45,14 +45,9 @@ public class AiSummaryBatchService {
     /** 每条消息的估算耗时（秒），用于给出"约 Y 分钟" */
     private static final int ESTIMATED_SECONDS_PER_MSG = 8;
 
-    @Value("${ai.summary.enabled:true}")
-    private boolean enabled;
-
-    @Value("${ai.summary.daily-limit:300}")
-    private int dailyLimit;
-
-    @Value("${ai.summary.min-length:8}")
-    private int minLength;
+    /** AI 摘要运行时配置（enabled / dailyLimit / minLength / 群白名单） */
+    @Autowired
+    private AiSummarySettingsService aiSummarySettingsService;
 
     @Autowired
     private MessageRepository messageRepository;
@@ -102,13 +97,20 @@ public class AiSummaryBatchService {
      */
     public Map<String, Object> start(String groupId, LocalDateTime start, LocalDateTime end,
                                      Integer limit, Integer minLengthOverride, Boolean onlyText) {
-        if (!enabled) {
+        if (!aiSummarySettingsService.isEnabled()) {
             throw new BizException(403, "AI 摘要功能已关闭（ai.summary.enabled=false）");
         }
         boolean hasGroup = groupId != null && !groupId.isBlank();
         if (!hasGroup && start == null) {
             throw new BizException(400, "必须指定 groupId 或 start（避免一次性投递全部历史消息）");
         }
+        // 群白名单：非空时指定群必须在名单内（未指定群时由下面的候选集过滤逐条保证）
+        if (hasGroup && !aiSummarySettingsService.isGroupAllowed(groupId)) {
+            throw new BizException(403, "该群未开启 AI 摘要");
+        }
+
+        int dailyLimit = aiSummarySettingsService.getDailyLimit();
+        int minLength = aiSummarySettingsService.getMinLength();
 
         boolean admin = securityHelper.isAdmin();
         int hardCap = admin ? 2000 : 500;
@@ -142,6 +144,8 @@ public class AiSummaryBatchService {
         for (Message m : candidates) {
             if (selected.size() >= Math.min(want, remainingQuota)) break;
             if (hasGroup && !groupId.equals(m.getGroupId())) { skipped++; continue; }
+            // 群白名单非空时：名单外的群不参与摘要（白名单为空 → 恒为 true，行为与之前一致）
+            if (!aiSummarySettingsService.isGroupAllowed(m.getGroupId())) { skipped++; continue; }
             if (start != null && (m.getSendTime() == null || m.getSendTime().isBefore(start))) { skipped++; continue; }
             if (end != null && (m.getSendTime() == null || m.getSendTime().isAfter(end))) { skipped++; continue; }
             String c = m.getContent() == null ? "" : m.getContent().trim();
@@ -186,9 +190,10 @@ public class AiSummaryBatchService {
         }
         long batchDone = batchSize.get() <= 0 ? 0 : Math.max(0, doneToday - doneAtStart.get());
         Map<String, Object> cfg = new LinkedHashMap<>();
-        cfg.put("enabled", enabled);
-        cfg.put("dailyLimit", dailyLimit);
-        cfg.put("minLength", minLength);
+        cfg.put("enabled", aiSummarySettingsService.isEnabled());
+        cfg.put("dailyLimit", aiSummarySettingsService.getDailyLimit());
+        cfg.put("minLength", aiSummarySettingsService.getMinLength());
+        cfg.put("groupWhitelist", aiSummarySettingsService.getGroupWhitelist());
 
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("queueDepth", queueDepth);

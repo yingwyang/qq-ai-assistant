@@ -28,13 +28,19 @@ import java.util.Optional;
  *
  * <p>一次调用覆盖该群当天几百条消息，成本远低于逐条摘要：</p>
  * <ol>
- *   <li>取当天消息（未删除 + TEXT + 内容长度 ≥ {@value #MIN_CONTENT_LENGTH}，按发送时间升序）；</li>
- *   <li>逐条截断到 {@value #PER_MESSAGE_MAX_CHARS} 字符后拼接，总长超 {@value #MAX_INPUT_CHARS} 字符时
- *       「保留前 {@value #KEEP_CHARS_PER_SIDE} + 中间省略 + 保留后 {@value #KEEP_CHARS_PER_SIDE}」；</li>
+ *   <li>取当天消息（未删除 + TEXT + 内容长度 ≥ {@value #MIN_CONTENT_LENGTH}，按发送时间升序）；
+ *       长度下限运行时由 {@link AiSummarySettingsService#getMinLength()} 覆盖；</li>
+ *   <li>逐条截断到 {@value #PER_MESSAGE_MAX_CHARS} 字符后拼接，总长超
+ *       {@link AiSummarySettingsService#getMaxInputChars()}（默认 {@value #MAX_INPUT_CHARS}）字符时
+ *       「保留前半 + 中间省略 + 保留后半」；</li>
  *   <li>调用 {@link AstrBotService#chat(String, String, String)}（tag = {@value #MODEL_TAG}），
  *       提示词要求模型只输出 JSON；</li>
  *   <li>解析 JSON（剥离 ```json 围栏；失败则把纯文本当 summary，不抛异常），写入 {@code group_digest}。</li>
  * </ol>
+ *
+ * <p><b>开关与白名单</b>：生成与读取都先过 {@link #assertDigestAllowed(String)}
+ * —— {@code ai.summary.enabled=false} → 403「AI 摘要功能已关闭」；
+ * 群白名单非空且群不在名单内 → 403「该群未开启 AI 摘要」。</p>
  *
  * <p><b>幂等</b>：同群同天已有记录时直接返回已有记录，不调用大模型（表上有
  * {@code UNIQUE(group_id, digest_date)} 兜底）。</p>
@@ -47,16 +53,16 @@ public class GroupDigestService {
     /** 调用大模型时使用的日志标记（与 prompts.yml 的模板 key 无关，仅用于区分来源） */
     public static final String MODEL_TAG = "group.digest";
 
-    /** 参与日报的最短内容长度（与设计稿 minLength 默认值一致） */
+    /** 参与日报的最短内容长度（默认值；运行时以 {@link AiSummarySettingsService#getMinLength()} 为准） */
     public static final int MIN_CONTENT_LENGTH = 8;
 
     /** 单条消息截断长度 */
     public static final int PER_MESSAGE_MAX_CHARS = 200;
 
-    /** 拼接后的输入总长上限 */
+    /** 拼接后的输入总长上限（默认值；运行时以 {@link AiSummarySettingsService#getMaxInputChars()} 为准） */
     public static final int MAX_INPUT_CHARS = 12000;
 
-    /** 超长时两端各保留的字符数（6000 + 6000 = 12000） */
+    /** 超长时两端各保留的字符数（默认 6000 + 6000 = 12000） */
     public static final int KEEP_CHARS_PER_SIDE = 6000;
 
     /** 历史列表单次返回上限（防止一次拉全表） */
@@ -78,6 +84,13 @@ public class GroupDigestService {
     private AstrBotService astrBotService;
 
     /**
+     * 运行时配置（enabled / 群白名单 / minLength / maxInputChars）。
+     * 允许为空：单元测试直接 {@code new GroupDigestService()} 时回退到本类常量默认值。
+     */
+    @Autowired(required = false)
+    private AiSummarySettingsService aiSummarySettingsService;
+
+    /**
      * 生成日报时实际使用的模型名。
      * 与 {@code AstrBotService} 读同一个配置项，保证 {@code group_digest.model} 记录的就是真实调用模型。
      */
@@ -92,7 +105,7 @@ public class GroupDigestService {
      * @param groupId 群号
      * @param date    归属日期，为空表示今天
      * @return 已存在或新生成的日报记录
-     * @throws BizException 400 当天没有可摘要的消息；503 大模型不可用
+     * @throws BizException 400 当天没有可摘要的消息；403 功能已关闭 / 群不在白名单；503 大模型不可用
      */
     public GroupDigest generateDailyDigest(String groupId, LocalDate date) {
         return generateDailyDigest(groupId, date, false);
@@ -105,12 +118,14 @@ public class GroupDigestService {
      * @param date    归属日期，为空表示今天
      * @param force   true = 即使当天已有日报也重新调用大模型生成（就地覆盖同一条记录，不新增行）
      * @return 已存在或新生成的日报记录
-     * @throws BizException 400 当天没有可摘要的消息；503 大模型不可用
+     * @throws BizException 400 当天没有可摘要的消息；403 功能已关闭 / 群不在白名单；503 大模型不可用
      */
     public GroupDigest generateDailyDigest(String groupId, LocalDate date, boolean force) {
         if (groupId == null || groupId.isBlank()) {
             throw new BizException(400, "群号不能为空");
         }
+        // 总开关 + 群白名单：不在白名单的群不允许生成日报（也不允许读取，见 assertDigestAllowed 的调用方）
+        assertDigestAllowed(groupId);
         LocalDate target = (date == null) ? LocalDate.now() : date;
 
         // 幂等：同群同天已有日报且未要求重算 → 直接返回缓存，不调用大模型、不重复消耗额度
@@ -159,7 +174,7 @@ public class GroupDigestService {
         return saved;
     }
 
-    /** 最新一期日报（无则空） */
+    /** 最新一期日报（无则空）。调用前建议先过 {@link #assertDigestAllowed(String)} */
     public Optional<GroupDigest> findLatest(String groupId) {
         if (groupId == null || groupId.isBlank()) {
             return Optional.empty();
@@ -199,20 +214,56 @@ public class GroupDigestService {
         return view;
     }
 
+    // ==================== 开关与白名单 ====================
+
+    /**
+     * 群日报统一开关校验：生成日报前必过，读取日报的接口（latest / digests）也调用它，
+     * 保证「白名单外的群既不能生成也不能读取日报」。
+     *
+     * @throws BizException 403 {@code ai.summary.enabled=false} → 「AI 摘要功能已关闭」；
+     *                      群白名单非空且该群不在名单内 → 「该群未开启 AI 摘要」
+     */
+    public void assertDigestAllowed(String groupId) {
+        AiSummarySettingsService settings = aiSummarySettingsService;
+        if (settings == null) {
+            return;   // 单元测试直接 new 的场景：无配置服务，按默认（开启 + 不限制）处理
+        }
+        if (!settings.isEnabled()) {
+            throw new BizException(403, "AI 摘要功能已关闭");
+        }
+        if (!settings.isGroupAllowed(groupId)) {
+            throw new BizException(403, "该群未开启 AI 摘要");
+        }
+    }
+
+    /** 参与日报的最短内容长度（运行时配置优先，未注入配置服务时用常量默认值） */
+    private int configuredMinLength() {
+        AiSummarySettingsService settings = aiSummarySettingsService;
+        int value = settings == null ? MIN_CONTENT_LENGTH : settings.getMinLength();
+        return value > 0 ? value : MIN_CONTENT_LENGTH;
+    }
+
+    /** 拼接输入总长上限（运行时配置优先，未注入配置服务时用常量默认值） */
+    private int configuredMaxInputChars() {
+        AiSummarySettingsService settings = aiSummarySettingsService;
+        int value = settings == null ? MAX_INPUT_CHARS : settings.getMaxInputChars();
+        return value > 0 ? value : MAX_INPUT_CHARS;
+    }
+
     // ==================== 取数与拼接（纯逻辑，便于单测） ====================
 
-    /** 取某群某天的日报候选消息 */
+    /** 取某群某天的日报候选消息（长度下限取运行时配置的 minLength） */
     public List<Message> loadDailyMessages(String groupId, LocalDate date) {
         LocalDateTime start = date.atStartOfDay();
         LocalDateTime end = start.plusDays(1);
         List<Message> list = messageRepository.findDigestCandidates(
-                groupId, Message.MessageType.TEXT, MIN_CONTENT_LENGTH, start, end);
+                groupId, Message.MessageType.TEXT, configuredMinLength(), start, end);
         return list == null ? Collections.emptyList() : list;
     }
 
     /**
      * 把当天消息拼成模型输入：逐条截断到 {@value #PER_MESSAGE_MAX_CHARS} 字符（格式「昵称: 内容」），
-     * 最后按总长做「两端保留 + 中间省略」处理。
+     * 最后按总长（运行时配置的 maxInputChars）做「两端保留 + 中间省略」处理。
      */
     public String buildDigestInput(List<Message> messages) {
         if (messages == null || messages.isEmpty()) {
@@ -238,18 +289,25 @@ public class GroupDigestService {
         return clipMiddle(sb.toString());
     }
 
-    /** 超长输入处理：保留前 6000 字符 + 中间省略标记 + 保留后 6000 字符 */
+    /** 超长输入处理：按运行时配置的上限保留两端（默认前 6000 + 中间省略 + 后 6000） */
     public String clipMiddle(String text) {
+        return clipMiddle(text, configuredMaxInputChars());
+    }
+
+    /** 超长输入处理（显式指定上限，便于单测） */
+    public String clipMiddle(String text, int maxInputChars) {
         if (text == null) {
             return "";
         }
-        if (text.length() <= MAX_INPUT_CHARS) {
+        int max = maxInputChars > 0 ? maxInputChars : MAX_INPUT_CHARS;
+        if (text.length() <= max) {
             return text;
         }
-        int omitted = text.length() - KEEP_CHARS_PER_SIDE * 2;
-        return text.substring(0, KEEP_CHARS_PER_SIDE)
+        int keep = max / 2;
+        int omitted = text.length() - keep * 2;
+        return text.substring(0, keep)
                 + "\n…（中间省略 " + omitted + " 字）…\n"
-                + text.substring(text.length() - KEEP_CHARS_PER_SIDE);
+                + text.substring(text.length() - keep);
     }
 
     /** 群日报提示词：要求模型只输出 JSON */
