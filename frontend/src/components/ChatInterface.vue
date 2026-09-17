@@ -146,6 +146,41 @@
           :class="{ active: item.digestDate === groupDigest.digestDate }"
           @click="viewHistoryDigest(item)"
         >{{ item.digestDate }}</button>
+        <span class="digest-history-tools">
+          <button class="digest-btn" @click="toggleHistoryPanel">
+            {{ historyPanelOpen ? '收起列表' : '全部历史' }}
+          </button>
+          <button class="digest-btn" :disabled="digestExporting" @click="exportDigests">
+            {{ digestExporting ? '导出中…' : '导出 Markdown' }}
+          </button>
+        </span>
+      </div>
+      <!-- 全部历史：日期 / 条数 / 一句话，点击即在该群速览卡片中查看 -->
+      <div v-if="digestExpanded && historyPanelOpen" class="digest-history-panel">
+        <div v-if="digestHistoryLoading" class="digest-history-loading">加载中…</div>
+        <template v-else>
+          <button
+            v-for="item in digestHistory"
+            :key="'h-' + item.digestDate"
+            class="digest-history-row"
+            :class="{ active: item.digestDate === groupDigest.digestDate }"
+            @click="viewHistoryDigest(item)"
+          >
+            <span class="digest-history-row-date">{{ item.digestDate }}</span>
+            <span class="digest-history-row-count">{{ item.messageCount ?? '-' }} 条</span>
+            <span class="digest-history-row-summary">{{ item.summary }}</span>
+          </button>
+          <div class="digest-history-footer">
+            <span class="digest-history-total">已加载 {{ digestHistory.length }} 期</span>
+            <button
+              v-if="digestHistory.length >= digestHistoryLimit && digestHistoryLimit < 200"
+              class="digest-btn"
+              :disabled="digestHistoryLoading"
+              @click="loadMoreHistory"
+            >加载更多（每页 30）</button>
+            <span v-else class="digest-history-total">已到最早一期</span>
+          </div>
+        </template>
       </div>
     </div>
     <!-- 无日报：一行很淡的提示，点击即可生成（不占空间） -->
@@ -393,6 +428,93 @@ export default {
     const viewHistoryDigest = (item) => {
       if (!item) return;
       groupDigest.value = item;
+    };
+
+    // ===== 历史分页浏览 + 导出 =====
+    const historyPanelOpen = ref(false);
+    const digestHistoryLoading = ref(false);
+    const digestHistoryLimit = ref(30);      // 每页 30，最多 200（后端 limit 上限）
+    const digestExporting = ref(false);
+
+    /** 拉取历史列表（limit 递增即"加载更多"） */
+    const fetchDigestHistory = async (gid, limit) => {
+      if (!gid) return [];
+      const res = await messageApi.getGroupDigests(gid, limit);
+      const arr = Array.isArray(res) ? res : (Array.isArray(res?.data) ? res.data : []);
+      return arr.filter(Boolean);
+    };
+
+    const toggleHistoryPanel = async () => {
+      historyPanelOpen.value = !historyPanelOpen.value;
+      if (!historyPanelOpen.value || !groupId.value) return;
+      digestHistoryLoading.value = true;
+      try {
+        digestHistory.value = await fetchDigestHistory(groupId.value, digestHistoryLimit.value);
+      } catch (e) {
+        showToast(e?.message || '加载历史速览失败', 'error');
+      } finally {
+        digestHistoryLoading.value = false;
+      }
+    };
+
+    const loadMoreHistory = async () => {
+      if (!groupId.value) return;
+      const next = Math.min(digestHistoryLimit.value + 30, 200);
+      digestHistoryLoading.value = true;
+      try {
+        const list = await fetchDigestHistory(groupId.value, next);
+        digestHistory.value = list;
+        digestHistoryLimit.value = next;
+      } catch (e) {
+        showToast(e?.message || '加载更多失败', 'error');
+      } finally {
+        digestHistoryLoading.value = false;
+      }
+    };
+
+    /** 导出为 Markdown（纯前端拼装 + Blob 下载，不新增后端接口） */
+    const exportDigests = async () => {
+      if (!groupId.value || digestExporting.value) return;
+      digestExporting.value = true;
+      try {
+        const list = await fetchDigestHistory(groupId.value, 200);
+        if (!list.length) {
+          showToast('该群还没有速览可以导出', 'warning');
+          return;
+        }
+        const SENT = { positive: '积极', neutral: '中性', negative: '消极' };
+        const lines = [
+          `# 群 ${groupId.value} 群日报`,
+          '',
+          `> 导出时间：${new Date().toLocaleString('zh-CN')} · 共 ${list.length} 期`,
+          ''
+        ];
+        list.forEach(d => {
+          lines.push(`## ${d.digestDate}（${d.messageCount ?? '-'} 条消息${d.sentiment ? ' · ' + (SENT[d.sentiment] || d.sentiment) : ''}）`);
+          lines.push('');
+          lines.push(d.summary || '');
+          const tags = Array.isArray(d.tags) ? d.tags : String(d.tags || '').split(',').filter(Boolean);
+          if (tags.length) {
+            lines.push('');
+            lines.push('标签：' + tags.map(t => String(t).trim()).filter(Boolean).join('、'));
+          }
+          lines.push('');
+        });
+        const blob = new Blob([lines.join('\n')], { type: 'text/markdown;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `群日报-${groupId.value}-${new Date().toISOString().slice(0, 10)}.md`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        showToast(`已导出 ${list.length} 期速览`, 'success');
+      } catch (e) {
+        showToast(e?.message || '导出失败', 'error');
+      } finally {
+        digestExporting.value = false;
+      }
     };
 
     const DIGEST_SENTIMENT_LABELS = { positive: '积极', neutral: '中性', negative: '消极' };
@@ -1034,6 +1156,13 @@ export default {
       digestExpanded,
       digestHistory,
       viewHistoryDigest,
+      historyPanelOpen,
+      digestHistoryLoading,
+      digestHistoryLimit,
+      digestExporting,
+      toggleHistoryPanel,
+      loadMoreHistory,
+      exportDigests,
       toggleDigestExpand,
       generateDigest,
       isLoading,
@@ -1446,6 +1575,50 @@ export default {
 }
 .digest-history-chip:hover { border-color: var(--accent-color, #3498db); color: var(--accent-color, #3498db); }
 .digest-history-chip.active { background: rgba(52, 152, 219, 0.12); border-color: var(--accent-color, #3498db); color: var(--accent-color, #3498db); }
+.digest-history-tools { display: inline-flex; gap: 6px; margin-left: auto; }
+
+/* 全部历史面板 */
+.digest-history-panel {
+  margin-top: 8px;
+  max-height: 260px;
+  overflow-y: auto;
+  border: 1px solid var(--border-color, #e0e0e0);
+  border-radius: 8px;
+  background: var(--card-bg, #fff);
+}
+.digest-history-loading { padding: 12px; text-align: center; font-size: 12px; color: var(--text-muted, #999); }
+.digest-history-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  border-bottom: 1px solid var(--border-color, #eef1f5);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.digest-history-row:hover { background: var(--bg-tertiary, #f8f9fa); }
+.digest-history-row.active { background: rgba(52, 152, 219, 0.1); }
+.digest-history-row-date { flex-shrink: 0; font-size: 12px; font-weight: 600; color: var(--text-primary, #333); }
+.digest-history-row-count { flex-shrink: 0; font-size: 11.5px; color: var(--text-muted, #999); }
+.digest-history-row-summary {
+  font-size: 12px;
+  color: var(--text-secondary, #666);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.digest-history-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 12px;
+}
+.digest-history-total { font-size: 11.5px; color: var(--text-muted, #999); }
 
 /* 无日报时的一行淡提示（不占空间） */
 .digest-empty {
