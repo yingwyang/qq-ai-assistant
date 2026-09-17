@@ -192,6 +192,18 @@ public class GroupDigestService {
     }
 
     /**
+     * 查询某群某天<b>已存在</b>的日报（不生成、不调用大模型）。
+     *
+     * <p>「手动推送到 QQ 群」接口用它判断「当天还没有速览」：没有就 400，绝不隐式生成。</p>
+     */
+    public Optional<GroupDigest> findByDate(String groupId, LocalDate date) {
+        if (groupId == null || groupId.isBlank() || date == null) {
+            return Optional.empty();
+        }
+        return groupDigestRepository.findByGroupIdAndDigestDate(groupId, date);
+    }
+
+    /**
      * 组装给前端的视图。字段名与前端约定一致：
      * {@code id / groupId / digestDate / summary / tags / sentiment / messageCount / model / createdAt}。
      *
@@ -212,6 +224,53 @@ public class GroupDigestService {
         view.put("model", digest.getModel());
         view.put("createdAt", digest.getCreatedAt() == null ? null : digest.getCreatedAt().toString());
         return view;
+    }
+
+    /**
+     * 拼「手动推送到 QQ 群」的纯文本（前端二次确认弹窗展示的也是同一份文本）。
+     *
+     * <pre>
+     * 【今日速览】2026-09-17
+     * 一句话总览
+     * 标签：组队、攻略
+     * —— 由 AI 生成
+     * </pre>
+     *
+     * <p>标签为空时整行「标签：」省略；summary 为空时该行留空。</p>
+     */
+    public String buildPushText(GroupDigest digest) {
+        if (digest == null) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append("【今日速览】")
+                .append(digest.getDigestDate() == null ? "" : digest.getDigestDate().toString());
+        sb.append('\n').append(digest.getSummary() == null ? "" : digest.getSummary().trim());
+        String tags = formatTagsForPush(digest.getTags());
+        if (!tags.isEmpty()) {
+            sb.append('\n').append("标签：").append(tags);
+        }
+        sb.append('\n').append("—— 由 AI 生成");
+        return sb.toString();
+    }
+
+    /** 逗号分隔标签（兼容中英文逗号）转成「标签1、标签2」，空白标签丢弃 */
+    private static String formatTagsForPush(String tags) {
+        if (tags == null || tags.isBlank()) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (String raw : tags.split("[,，]")) {
+            String tag = raw == null ? "" : raw.trim();
+            if (tag.isEmpty()) {
+                continue;
+            }
+            if (sb.length() > 0) {
+                sb.append('、');
+            }
+            sb.append(tag);
+        }
+        return sb.toString();
     }
 
     // ==================== 开关与白名单 ====================

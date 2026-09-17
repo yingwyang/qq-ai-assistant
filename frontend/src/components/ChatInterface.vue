@@ -122,6 +122,16 @@
           <button class="digest-btn" @click="toggleDigestExpand" :title="digestExpanded ? '收起速览' : '展开完整速览'">
             {{ digestExpanded ? '收起' : '展开' }}
           </button>
+          <button
+            v-if="isAdmin"
+            class="digest-btn"
+            :disabled="digestPushing"
+            title="把这一期速览发送到该 QQ 群（手动触发）"
+            @click="openPushConfirm"
+          >
+            <span v-if="digestPushing" class="msg-action-spinner"></span>
+            {{ digestPushing ? '推送中…' : '推送到群' }}
+          </button>
           <button class="digest-btn primary" :disabled="digestGenerating" @click="generateDigest">
             <span v-if="digestGenerating" class="msg-action-spinner"></span>
             {{ digestGenerating ? '生成中…' : '重新生成' }}
@@ -130,7 +140,7 @@
       </div>
       <div class="digest-summary" :class="{ expanded: digestExpanded }">{{ groupDigest.summary }}</div>
       <div v-if="digestTags.length" class="ai-summary-tags">
-        <span v-for="tag in digestTags" :key="tag" class="ai-tag">#{{ tag }}</span>
+        <button v-for="tag in digestTags" :key="tag" class="ai-tag clickable" title="搜索该标签" @click="openTagSearch(tag)">#{{ tag }}</button>
       </div>
       <div v-if="digestExpanded" class="digest-meta">
         <span v-if="groupDigest.messageCount != null">共 {{ groupDigest.messageCount }} 条消息参与生成</span>
@@ -265,7 +275,13 @@
                 </div>
                 <div class="ai-summary-content">{{ message.aiSummaryView.text }}</div>
                 <div v-if="message.aiSummaryView.tags.length" class="ai-summary-tags">
-                  <span v-for="tag in message.aiSummaryView.tags" :key="tag" class="ai-tag">#{{ tag }}</span>
+                  <button
+                    v-for="tag in message.aiSummaryView.tags"
+                    :key="tag"
+                    class="ai-tag clickable"
+                    title="搜索该标签"
+                    @click.stop="openTagSearch(tag)"
+                  >#{{ tag }}</button>
                 </div>
               </div>
             </div>
@@ -303,7 +319,64 @@
         </div>
       </div>
     </div>
-    
+
+    <!-- 推送日报确认弹窗（手动触发，发送前展示原文） -->
+    <div v-if="pushConfirmOpen" class="push-confirm-mask" @click.self="pushConfirmOpen = false">
+      <div class="push-confirm">
+        <div class="push-confirm-title">推送到 QQ 群</div>
+        <div class="push-confirm-sub">将向群 <b>{{ groupId }}</b> 发送以下内容（手动触发，不可撤回）：</div>
+        <pre class="push-confirm-text">{{ pushPreviewText }}</pre>
+        <div class="push-confirm-actions">
+          <button class="digest-btn" @click="pushConfirmOpen = false">取消</button>
+          <button class="digest-btn primary" :disabled="digestPushing" @click="confirmPush">
+            {{ digestPushing ? '推送中…' : '确认发送' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 标签 / 关键词搜索面板 -->
+    <div v-if="searchOpen" class="tag-search-panel">
+      <div class="tag-search-header">
+        <span class="tag-search-title">
+          <Icon name="search" :size="14" />
+          {{ searchTag ? `标签：${searchTag}` : '搜索消息' }}
+        </span>
+        <button class="tag-search-close" @click="closeSearch">✕</button>
+      </div>
+      <div class="tag-search-bar">
+        <input
+          v-model.trim="searchKeyword"
+          type="text"
+          :placeholder="searchTag ? '在该标签下继续筛选关键词…' : '输入关键词搜索本群消息'"
+          @keyup.enter="runSearch"
+        />
+        <button class="digest-btn primary" :disabled="searchLoading" @click="runSearch">
+          {{ searchLoading ? '搜索中…' : '搜索' }}
+        </button>
+      </div>
+      <div class="tag-search-body">
+        <div v-if="searchFallbackNote" class="tag-search-note">{{ searchFallbackNote }}</div>
+        <div v-if="searchLoading" class="tag-search-empty">搜索中…</div>
+        <div v-else-if="!searchResults.length" class="tag-search-empty">
+          {{ searchSearched ? '没有匹配的消息' : '点击摘要里的标签，或输入关键词开始搜索' }}
+        </div>
+        <button
+          v-for="item in searchResults"
+          :key="item.id"
+          class="tag-search-item"
+          @click="jumpToMessage(item)"
+        >
+          <div class="tag-search-item-head">
+            <span class="tag-search-item-user">{{ item.userNickname || item.userQq || '未知' }}</span>
+            <span class="tag-search-item-time">{{ formatTime(item.sendTime) }}</span>
+          </div>
+          <div class="tag-search-item-text">{{ item.contentSnippet || item.aiSummaryShort }}</div>
+          <div v-if="item.aiTags" class="tag-search-item-tags">{{ String(item.aiTags).split(',').map(t => '#' + t.trim()).join(' ') }}</div>
+        </button>
+      </div>
+    </div>
+
   </div>
 </template>
 
@@ -331,6 +404,11 @@ export default {
     group: {
       type: Object,
       default: null
+    },
+    /** 是否管理员（决定是否显示「推送到群」按钮；后端同样要求 ADMIN） */
+    isAdmin: {
+      type: Boolean,
+      default: false
     }
   },
   emits: ['analysis-result', 'new-message-arrived'],
@@ -338,6 +416,8 @@ export default {
   setup(props, { emit }) {
     const groupId = computed(() => props.group?.groupId || '');
     const selfQq = computed(() => props.group?.ownerQq || '');
+    // 兼容：父组件未传 isAdmin 时回退到登录时缓存的角色，避免按钮消失
+    const isAdmin = computed(() => props.isAdmin || (localStorage.getItem('user_role') || '') === 'ADMIN');
     const messages = ref([]);
     const isLoading = ref(false);
     // 当前会话已加载消息里的全部图片（按消息顺序）→ 供图片预览左右切换
@@ -472,8 +552,126 @@ export default {
       }
     };
 
-    /** 导出为 Markdown（纯前端拼装 + Blob 下载，不新增后端接口） */
-    const exportDigests = async () => {
+    // ===== 手动推送日报到 QQ 群（仅管理员，发送前二次确认） =====
+    const pushConfirmOpen = ref(false);
+    const digestPushing = ref(false);
+
+    /** 与后端 push 接口拼装口径保持一致，用于发送前预览 */
+    const pushPreviewText = computed(() => {
+      const d = groupDigest.value;
+      if (!d) return '';
+      const lines = [`【今日速览】${d.digestDate || ''}`, d.summary || ''];
+      if (digestTags.value.length) lines.push('标签：' + digestTags.value.join('、'));
+      lines.push('—— 由 AI 生成');
+      return lines.join('\n');
+    });
+
+    const openPushConfirm = () => {
+      if (!groupDigest.value) {
+        showToast('当前没有可推送的速览', 'warning');
+        return;
+      }
+      pushConfirmOpen.value = true;
+    };
+
+    const confirmPush = async () => {
+      if (!groupId.value || !groupDigest.value) return;
+      digestPushing.value = true;
+      try {
+        const res = await messageApi.pushGroupDigest(groupId.value, groupDigest.value.digestDate);
+        pushConfirmOpen.value = false;
+        showToast(res?.pushed ? '已推送到群' : '推送完成', 'success');
+      } catch (e) {
+        showToast(e?.message || '推送失败', 'error');
+      } finally {
+        digestPushing.value = false;
+      }
+    };
+
+    // ===== 标签 / 关键词搜索（点击摘要标签跳转搜索） =====
+    const searchOpen = ref(false);
+    const searchTag = ref('');
+    const searchKeyword = ref('');
+    const searchResults = ref([]);
+    const searchLoading = ref(false);
+    const searchSearched = ref(false);
+    // 兜底提示：日报标签未必存在于消息级 ai_tags，此时会退化为关键词搜索并在此说明
+    const searchFallbackNote = ref('');
+
+    const runSearch = async () => {
+      if (!groupId.value) return;
+      if (!searchTag.value && !searchKeyword.value) {
+        showToast('请输入关键词', 'warning');
+        return;
+      }
+      searchLoading.value = true;
+      searchFallbackNote.value = '';
+      try {
+        let list = await messageApi.searchMessages({
+          groupId: groupId.value,
+          tag: searchTag.value,
+          keyword: searchKeyword.value,
+          limit: 50
+        });
+        let arr = Array.isArray(list) ? list : (Array.isArray(list?.data) ? list.data : []);
+        // 兜底：日报的标签存在 group_digest.tags，消息本身可能没有 ai_tags → 标签查不到时退化为关键词搜索
+        if (!arr.length && searchTag.value && !searchKeyword.value) {
+          const kwList = await messageApi.searchMessages({
+            groupId: groupId.value,
+            tag: '',
+            keyword: searchTag.value,
+            limit: 50
+          });
+          const kwArr = Array.isArray(kwList) ? kwList : (Array.isArray(kwList?.data) ? kwList.data : []);
+          if (kwArr.length) {
+            arr = kwArr;
+            searchFallbackNote.value = `没有带「${searchTag.value}」标签的消息，已按关键词搜索`;
+          }
+        }
+        searchResults.value = arr;
+        searchSearched.value = true;
+      } catch (e) {
+        showToast(e?.message || '搜索失败', 'error');
+        searchResults.value = [];
+      } finally {
+        searchLoading.value = false;
+      }
+    };
+
+    /** 点击标签：打开面板并立即按该标签搜索 */
+    const openTagSearch = (tag) => {
+      searchTag.value = String(tag || '').replace(/^#/, '').trim();
+      searchKeyword.value = '';
+      searchResults.value = [];
+      searchSearched.value = false;
+      searchOpen.value = true;
+      if (searchTag.value) runSearch();
+    };
+
+    const closeSearch = () => {
+      searchOpen.value = false;
+      searchTag.value = '';
+      searchKeyword.value = '';
+      searchResults.value = [];
+      searchSearched.value = false;
+      searchFallbackNote.value = '';
+    };
+
+    /** 点击结果：若该消息已在当前加载范围内则滚动高亮，否则提示 */
+    const jumpToMessage = async (item) => {
+      if (!item?.id) return;
+      const el = document.getElementById('msg-' + item.id);
+      if (!el) {
+        showToast('该消息不在当前加载范围内（可上滑加载更早消息后重试）', 'info');
+        return;
+      }
+      highlightedMessageId.value = item.id;
+      await nextTick();
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      setTimeout(() => { if (highlightedMessageId.value === item.id) highlightedMessageId.value = null; }, 2500);
+    };
+
+    /** 导出为 Markdown（纯前端拼装 + Blob 下载，不新增后端接口） */    const exportDigests = async () => {
       if (!groupId.value || digestExporting.value) return;
       digestExporting.value = true;
       try {
@@ -1163,6 +1361,24 @@ export default {
       toggleHistoryPanel,
       loadMoreHistory,
       exportDigests,
+      // 手动推送 + 标签搜索
+      isAdmin,
+      pushConfirmOpen,
+      digestPushing,
+      pushPreviewText,
+      openPushConfirm,
+      confirmPush,
+      searchOpen,
+      searchTag,
+      searchKeyword,
+      searchResults,
+      searchLoading,
+      searchSearched,
+      searchFallbackNote,
+      runSearch,
+      openTagSearch,
+      closeSearch,
+      jumpToMessage,
       toggleDigestExpand,
       generateDigest,
       isLoading,
@@ -1213,6 +1429,7 @@ export default {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  position: relative;   /* 推送确认弹窗与搜索面板以此为定位基准 */
 }
 
 .chat-header {
@@ -1619,6 +1836,130 @@ export default {
   padding: 8px 12px;
 }
 .digest-history-total { font-size: 11.5px; color: var(--text-muted, #999); }
+
+/* 可点击的标签 chip */
+.ai-tag.clickable {
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.15s;
+}
+.ai-tag.clickable:hover { background: rgba(52, 152, 219, 0.22); }
+
+/* 推送确认弹窗 */
+.push-confirm-mask {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.42);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 60;
+}
+.push-confirm {
+  width: min(520px, 88%);
+  background: var(--card-bg, #fff);
+  border: 1px solid var(--border-color, #e0e0e0);
+  border-radius: 12px;
+  padding: 18px 20px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.22);
+}
+.push-confirm-title { font-size: 15px; font-weight: 600; color: var(--text-primary, #333); margin-bottom: 6px; }
+.push-confirm-sub { font-size: 12.5px; color: var(--text-secondary, #666); margin-bottom: 10px; }
+.push-confirm-text {
+  margin: 0 0 14px 0;
+  padding: 10px 12px;
+  max-height: 220px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--text-primary, #333);
+  background: var(--bg-tertiary, #f8f9fa);
+  border-radius: 8px;
+}
+.push-confirm-actions { display: flex; justify-content: flex-end; gap: 10px; }
+
+/* 标签 / 关键词搜索面板 */
+.tag-search-panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(420px, 92%);
+  background: var(--card-bg, #fff);
+  border-left: 1px solid var(--border-color, #e0e0e0);
+  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.16);
+  display: flex;
+  flex-direction: column;
+  z-index: 55;
+}
+.tag-search-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border-color, #eef1f5);
+}
+.tag-search-title { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--text-primary, #333); }
+.tag-search-close {
+  border: none;
+  background: transparent;
+  color: var(--text-muted, #999);
+  font-size: 15px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 6px;
+}
+.tag-search-close:hover { background: var(--bg-tertiary, #f8f9fa); color: var(--text-primary, #333); }
+.tag-search-bar { display: flex; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--border-color, #eef1f5); }
+.tag-search-bar input {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 10px;
+  border: 1px solid var(--border-color, #d8dee9);
+  border-radius: 6px;
+  background: var(--card-bg, #fff);
+  color: var(--text-primary, #333);
+  font-size: 12.5px;
+}
+.tag-search-body { flex: 1; overflow-y: auto; padding: 6px 0 12px; }
+.tag-search-empty { padding: 24px 16px; text-align: center; font-size: 12.5px; color: var(--text-muted, #999); }
+.tag-search-note {
+  margin: 8px 14px 2px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: rgba(52, 152, 219, 0.1);
+  color: var(--accent-color, #3498db);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+.tag-search-item {
+  display: block;
+  width: 100%;
+  padding: 10px 14px;
+  border: none;
+  border-bottom: 1px solid var(--border-color, #f2f4f7);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.tag-search-item:hover { background: var(--bg-tertiary, #f8f9fa); }
+.tag-search-item-head { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
+.tag-search-item-user { font-size: 12px; font-weight: 600; color: var(--text-primary, #333); }
+.tag-search-item-time { font-size: 11px; color: var(--text-muted, #999); }
+.tag-search-item-text {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-secondary, #555);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.tag-search-item-tags { margin-top: 5px; font-size: 11px; color: var(--accent-color, #3498db); }
 
 /* 无日报时的一行淡提示（不占空间） */
 .digest-empty {

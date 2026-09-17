@@ -1203,4 +1203,121 @@ public class NapCatService {
             return false;
         }
     }
+
+    /**
+     * 发送群消息到指定 QQ 群（OneBot 11 {@code send_group_msg}）。
+     *
+     * <p>与 {@link #sendPrivateMessage(String, String)} 的差异：本方法用 <b>消息段数组</b>
+     * （{@code [{"type":"text","data":{"text":...}}]}）而不是纯字符串发送。
+     * OneBot 对字符串形式的 message 会解析其中的 CQ 码，而日报文本来自大模型输出，
+     * 万一出现 {@code [CQ:at,qq=all]} 之类的内容会被当成指令执行；数组形式不做 CQ 解析，按纯文本发送。</p>
+     *
+     * <p>方法本身不抛异常：网络不可达 / NapCat 未登录 / 群号非法等一律以
+     * {@code success=false} + {@code errorMessage} 返回，由调用方决定 HTTP 状态码。</p>
+     *
+     * @param groupId 目标群号
+     * @param message 文本内容（不做 CQ 码解析）
+     * @return 发送结果；成功时 {@link SendGroupMessageResult#getMessageId()} 为 NapCat 返回的
+     *         {@code message_id}（NapCat 未返回时为 null）
+     */
+    public SendGroupMessageResult sendGroupMessage(String groupId, String message) {
+        if (groupId == null || groupId.isBlank() || message == null || message.isEmpty()) {
+            log.warn("发送群消息参数为空: groupId={}, messageLength={}", groupId, message == null ? 0 : message.length());
+            return new SendGroupMessageResult(false, null, "群号或消息内容为空");
+        }
+
+        String baseUrl = onebotApiUrl != null && !onebotApiUrl.isBlank() ? onebotApiUrl : napcatApiUrl;
+        CloseableHttpClient httpClient = this.httpClient;
+        HttpPost httpPost = new HttpPost(baseUrl + "/send_group_msg");
+        httpPost.setHeader("Content-Type", "application/json");
+        httpPost.setHeader("Authorization", "Bearer " + napcatToken);
+        httpPost.setHeader("token", napcatToken);
+
+        ObjectNode body = objectMapper.createObjectNode();
+        try {
+            body.put("group_id", Long.parseLong(groupId));
+        } catch (NumberFormatException e) {
+            body.put("group_id", groupId);
+        }
+        // 消息段数组：文本按纯文本发送，不解析 CQ 码
+        ArrayNode segments = objectMapper.createArrayNode();
+        ObjectNode textSegment = objectMapper.createObjectNode();
+        textSegment.put("type", "text");
+        textSegment.putObject("data").put("text", message);
+        segments.add(textSegment);
+        body.set("message", segments);
+        body.put("auto_escape", false);
+
+        try {
+            httpPost.setEntity(new StringEntity(body.toString(), java.nio.charset.StandardCharsets.UTF_8));
+            try (CloseableHttpResponse response = httpClient.execute(httpPost)) {
+                String responseStr = new String(response.getEntity().getContent().readAllBytes(),
+                        java.nio.charset.StandardCharsets.UTF_8);
+                log.info("发送群消息到群{}响应: {}", groupId,
+                        responseStr.length() > 500 ? responseStr.substring(0, 500) + "..." : responseStr);
+
+                JsonNode json = objectMapper.readTree(responseStr);
+                boolean success = "ok".equals(json.path("status").asText());
+                // message_id 通常在 data.message_id，个别实现直接放在顶层
+                String messageId = null;
+                JsonNode data = json.get("data");
+                if (data != null && data.hasNonNull("message_id")) {
+                    messageId = data.get("message_id").asText();
+                } else if (json.hasNonNull("message_id")) {
+                    messageId = json.get("message_id").asText();
+                }
+
+                if (success) {
+                    log.info("群消息发送成功 groupId={}, messageId={}", groupId, messageId);
+                    return new SendGroupMessageResult(true, messageId, null);
+                }
+                String detail = describeSendFailure(json);
+                log.warn("群消息发送失败 groupId={}, detail={}", groupId, detail);
+                return new SendGroupMessageResult(false, messageId, detail);
+            }
+        } catch (Exception e) {
+            log.error("发送群消息到群{}异常: {}", groupId, e.getMessage());
+            return new SendGroupMessageResult(false, null, e.getClass().getSimpleName() + ": " + e.getMessage());
+        }
+    }
+
+    /** 从 NapCat 失败响应中提取可读原因（message/wording/msg/error，其次 retcode）；取不到返回 null */
+    private String describeSendFailure(JsonNode json) {
+        if (json == null) {
+            return null;
+        }
+        for (String field : new String[]{"message", "wording", "msg", "error"}) {
+            JsonNode node = json.get(field);
+            if (node != null && !node.isNull() && !node.asText("").isBlank()) {
+                return node.asText().trim();
+            }
+        }
+        if (json.hasNonNull("retcode")) {
+            return "retcode=" + json.get("retcode").asText();
+        }
+        return null;
+    }
+
+    /**
+     * 群消息发送结果（同 {@code FilePurgeService.PurgeResult} 的写法：方法不抛异常，用结果对象表达失败）。
+     */
+    public static class SendGroupMessageResult {
+        private final boolean success;
+        private final String messageId;
+        private final String errorMessage;
+
+        public SendGroupMessageResult(boolean success, String messageId, String errorMessage) {
+            this.success = success;
+            this.messageId = messageId;
+            this.errorMessage = errorMessage;
+        }
+
+        public boolean isSuccess() { return success; }
+
+        /** NapCat 返回的 message_id；成功但 NapCat 未返回该字段时为 null */
+        public String getMessageId() { return messageId; }
+
+        /** 失败原因（成功时为 null） */
+        public String getErrorMessage() { return errorMessage; }
+    }
 }

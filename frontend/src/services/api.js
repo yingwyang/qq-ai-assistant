@@ -253,6 +253,25 @@ export const messageApi = {
   /** 历史群日报列表 */
   getGroupDigests: (groupId, limit = 30) =>
     request(`/groups/${encodeURIComponent(groupId)}/digests?limit=${limit}`),
+  /**
+   * 手动把某期日报推送到该 QQ 群（仅管理员；后端不隐式生成，当天没有日报会返回 400）
+   * @returns {Promise<{pushed:boolean, groupId:string, digestDate:string, text:string, napcatMessageId:any}>}
+   */
+  pushGroupDigest: (groupId, date) =>
+    request(`/groups/${encodeURIComponent(groupId)}/digest/push${date ? `?date=${date}` : ''}`, { method: 'POST' }),
+
+  /**
+   * 按标签 / 关键词搜索群内消息（tag 与 keyword 至少给一个）
+   * @returns {Promise<Array<{id,groupId,sendTime,userNickname,userQq,messageType,contentSnippet,aiTags,aiSummaryShort,aiSentiment}>>}
+   */
+  searchMessages: ({ groupId, tag = '', keyword = '', limit = 50 }) => {
+    const qs = new URLSearchParams();
+    qs.append('groupId', groupId);
+    if (tag) qs.append('tag', tag);
+    if (keyword) qs.append('keyword', keyword);
+    qs.append('limit', limit);
+    return request(`/messages/search?${qs.toString()}`);
+  },
 
   uploadFile: (file, fileType) => {
     const formData = new FormData();

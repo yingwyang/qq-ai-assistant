@@ -6,17 +6,21 @@ import com.qqai.dto.common.ApiResponse;
 import com.qqai.dto.webhook.GroupDigestPayload;
 import com.qqai.entity.Group;
 import com.qqai.entity.GroupDigest;
+import com.qqai.exception.BizException;
 import com.qqai.repository.GroupRepository;
+import com.qqai.service.AuditLogService;
 import com.qqai.service.CreditService;
 import com.qqai.service.GroupDigestService;
 import com.qqai.service.GroupTypeRecognitionService;
 import com.qqai.service.MessageQueueService;
+import com.qqai.service.NapCatService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
@@ -53,6 +57,14 @@ public class GroupController {
 
     @Autowired
     private MessageQueueService messageQueueService;
+
+    /** 手动推送日报到 QQ 群（仅管理员）用的 NapCat 发送能力 */
+    @Autowired
+    private NapCatService napCatService;
+
+    /** 手动推送日报的审计日志 */
+    @Autowired
+    private AuditLogService auditLogService;
 
     /**
      * 查询群类型 + 推荐分析类型
@@ -283,6 +295,75 @@ public class GroupController {
                 .map(groupDigestService::toView)
                 .toList();
         return ResponseEntity.ok(ApiResponse.success(views));
+    }
+
+    /**
+     * 手动把某天的日报推送到该 QQ 群：{@code POST /api/groups/{groupId}/digest/push?date=YYYY-MM-DD}
+     *
+     * <p><b>仅管理员</b>（{@code @PreAuthorize("hasRole('ADMIN')")}），并且与其余日报接口一样过
+     * {@link GroupDigestService#assertDigestAllowed(String)}（{@code enabled=false} 或群不在白名单 → 403）。</p>
+     *
+     * <p><b>只推送、不生成</b>：{@code date} 为空表示今天；当天没有已存在的日报时直接 400
+     * 「该群当天还没有速览，请先生成」，绝不隐式调用大模型。</p>
+     *
+     * <p>推送文本由 {@link GroupDigestService#buildPushText(GroupDigest)} 生成，与前端二次确认弹窗展示的一致；
+     * 经 {@link NapCatService#sendGroupMessage(String, String)} 发到 QQ 群，NapCat 不可用 / 未登录 / 发送失败 → 503。</p>
+     *
+     * <p>成功返回 {@code data = {pushed, groupId, digestDate, text, napcatMessageId}}；
+     * 成功与失败都会写审计（action = {@code AI_SUMMARY_DIGEST_PUSH}）。</p>
+     */
+    @PostMapping("/{groupId}/digest/push")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<?>> pushGroupDigest(
+            @PathVariable String groupId,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
+
+        LocalDate targetDate = (date == null) ? LocalDate.now() : date;
+        String username = securityHelper.getCurrentUsername();
+
+        try {
+            // 开关 / 群白名单：不满足直接 403（BizException 由 GlobalExceptionHandler 统一转 ApiResponse）
+            groupDigestService.assertDigestAllowed(groupId);
+        } catch (BizException e) {
+            auditLogService.log(username, "AI_SUMMARY_DIGEST_PUSH", "group:" + groupId, "FAIL",
+                    "推送 " + targetDate + " 速览到群 " + groupId + " 被拒绝：" + e.getMessage());
+            throw e;
+        }
+
+        // 不隐式生成：当天没有日报 → 400
+        Optional<GroupDigest> existing = groupDigestService.findByDate(groupId, targetDate);
+        if (existing.isEmpty()) {
+            auditLogService.log(username, "AI_SUMMARY_DIGEST_PUSH", "group:" + groupId, "FAIL",
+                    "推送 " + targetDate + " 速览到群 " + groupId + " 失败：该群当天还没有速览");
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(ApiResponse.error(400, "该群当天还没有速览，请先生成"));
+        }
+
+        GroupDigest digest = existing.get();
+        String text = groupDigestService.buildPushText(digest);
+        String digestDate = digest.getDigestDate() == null ? targetDate.toString() : digest.getDigestDate().toString();
+
+        NapCatService.SendGroupMessageResult sendResult = napCatService.sendGroupMessage(groupId, text);
+        if (sendResult == null || !sendResult.isSuccess()) {
+            String detail = (sendResult == null || sendResult.getErrorMessage() == null) ? "未知原因" : sendResult.getErrorMessage();
+            log.warn("推送群日报失败 groupId={}, date={}: {}", groupId, digestDate, detail);
+            auditLogService.log(username, "AI_SUMMARY_DIGEST_PUSH", "group:" + groupId, "FAIL",
+                    "推送 " + digestDate + " 速览到群 " + groupId + " 失败：" + detail);
+            // 提示文案与契约保持一致（具体原因只进日志/审计，不泄漏内部细节给前端）
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                    .body(ApiResponse.error(503, "NapCat 未登录或不可用，推送失败"));
+        }
+
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("pushed", true);
+        data.put("groupId", groupId);
+        data.put("digestDate", digestDate);
+        data.put("text", text);
+        data.put("napcatMessageId", sendResult.getMessageId());
+
+        auditLogService.log(username, "AI_SUMMARY_DIGEST_PUSH", "group:" + groupId, "SUCCESS",
+                "推送 " + digestDate + " 速览到群 " + groupId + " 成功, napcatMessageId=" + sendResult.getMessageId());
+        return ResponseEntity.ok(ApiResponse.success(data));
     }
 
     /**

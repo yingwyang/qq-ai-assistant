@@ -2,14 +2,19 @@ package com.qqai.service;
 
 import com.qqai.entity.Message;
 import com.qqai.entity.Group;
+import com.qqai.exception.BizException;
 import com.qqai.repository.GroupRepository;
 import com.qqai.repository.MessageRepository;
 import com.qqai.dto.webhook.AiAnalysisPayload;
+import jakarta.persistence.criteria.Predicate;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -685,6 +690,77 @@ public class MessageService {
             log.warn("将用户 {} 全部群聊标为已读失败: {}", userId, e.getMessage());
             return false;
         }
+    }
+
+    // ==================== 按标签 / 关键词搜索（新增能力，不影响既有查询方法） ====================
+
+    /** 搜索结果单次返回上限（与接口契约一致：limit 收敛到 1 ~ 200） */
+    public static final int MAX_SEARCH_LIMIT = 200;
+
+    /**
+     * LIKE 通配符转义字符（显式写给 SQL 的 {@code ESCAPE}，不依赖 MySQL「默认反斜杠转义」这一方言行为）。
+     */
+    public static final char LIKE_ESCAPE_CHAR = '!';
+
+    /**
+     * 转义 LIKE 模式中的通配符：先转义转义字符本身，再转义 {@code %} 与 {@code _}。
+     *
+     * <p>例：{@code "50%_a"} → {@code "50!%!_a"}。配合 {@code ESCAPE '!'} 使用时按字面量匹配，
+     * 避免用户输入的 {@code %} / {@code _} 把整表扫成「全匹配」。</p>
+     */
+    public static String escapeLikePattern(String raw) {
+        if (raw == null) {
+            return null;
+        }
+        return raw.replace("!", "!!").replace("%", "!%").replace("_", "!_");
+    }
+
+    /**
+     * 按标签 / 关键词搜索某群消息（接口 2：{@code GET /api/messages/search}）。
+     *
+     * <ul>
+     *   <li>只返回 {@code deleted = false} 的消息；</li>
+     *   <li>{@code tag} 匹配 {@code ai_tags LIKE %tag%}，{@code keyword} 匹配 {@code content LIKE %keyword%}，
+     *       两者都给时用 {@code AND} 取<b>交集</b>；</li>
+     *   <li>通配符 {@code %} {@code _} 按字面量处理（见 {@link #escapeLikePattern(String)}）；</li>
+     *   <li>按 {@code sendTime} 倒序（同一时间再按 id 倒序，保证分页/截断结果稳定），
+     *       {@code limit} 收敛到 1 ~ {@value #MAX_SEARCH_LIMIT}（未传时由接口层的
+     *       {@code @RequestParam(defaultValue = "50")} 给出默认值 50）。</li>
+     * </ul>
+     *
+     * @throws BizException 400 tag 与 keyword 都没给
+     */
+    public List<Message> searchMessages(String groupId, String tag, String keyword, int limit) {
+        String tagValue = tag == null ? null : tag.trim();
+        String keywordValue = keyword == null ? null : keyword.trim();
+        boolean hasTag = tagValue != null && !tagValue.isEmpty();
+        boolean hasKeyword = keywordValue != null && !keywordValue.isEmpty();
+        if (!hasTag && !hasKeyword) {
+            throw new BizException(400, "请提供 tag 或 keyword");
+        }
+
+        // 收敛写法与 GroupDigestService.findHistory 一致：进入 [1, 200]
+        int size = Math.min(Math.max(limit, 1), MAX_SEARCH_LIMIT);
+
+        // tag / keyword 的谓词按「有才加」的方式拼装：两者都有时 CriteriaBuilder 生成 AND，即交集
+        Specification<Message> spec = (root, query, cb) -> {
+            List<Predicate> predicates = new ArrayList<>();
+            predicates.add(cb.equal(root.get("groupId"), groupId));
+            predicates.add(cb.isFalse(root.get("deleted")));
+            if (hasTag) {
+                predicates.add(cb.like(root.get("aiTags"),
+                        "%" + escapeLikePattern(tagValue) + "%", LIKE_ESCAPE_CHAR));
+            }
+            if (hasKeyword) {
+                predicates.add(cb.like(root.get("content"),
+                        "%" + escapeLikePattern(keywordValue) + "%", LIKE_ESCAPE_CHAR));
+            }
+            return cb.and(predicates.toArray(new Predicate[0]));
+        };
+
+        Pageable pageable = PageRequest.of(0, size,
+                Sort.by(Sort.Direction.DESC, "sendTime").and(Sort.by(Sort.Direction.DESC, "id")));
+        return messageRepository.findAll(spec, pageable).getContent();
     }
 
     /**

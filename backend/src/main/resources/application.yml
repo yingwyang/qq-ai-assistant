@@ -50,7 +50,7 @@ server:
 
 # AstrBot配置
 astrbot:
-  api-url: ${ASTRBOT_API_URL:http://localhost:6185}
+  api-url: ${ASTRBOT_API_URL:http://127.0.0.1:6185}
   token: ${ASTRBOT_TOKEN:}
   data-path: ${ASTRBOT_DATA_PATH:D:/ai/Documents/qq-web/Astrbot/data}
   # 后台自动摘要使用的模型;留空 = 交给 AstrBot 用默认模型(不要硬编码模型名)
@@ -58,8 +58,8 @@ astrbot:
 
 # NapCat配置
 napcat:
-  api-url: ${NAPCAT_API_URL:http://localhost:6100}
-  onebot-api-url: ${NAPCAT_ONEBOT_API_URL:http://localhost:6100}
+  api-url: ${NAPCAT_API_URL:http://127.0.0.1:6100}
+  onebot-api-url: ${NAPCAT_ONEBOT_API_URL:http://127.0.0.1:6100}
   webui-url: ${NAPCAT_WEBUI_URL:http://127.0.0.1:6099}
   token: ${NAPCAT_TOKEN:}
   webhook-token: ${NAPCAT_WEBHOOK_TOKEN:}
@@ -67,7 +67,7 @@ napcat:
 
 # GPT-SoVITS配置
 gpt-sovits:
-  api-url: ${GPT_SOVITS_API_URL:http://localhost:8000}
+  api-url: ${GPT_SOVITS_API_URL:http://127.0.0.1:8000}
   token: ${GPT_SOVITS_TOKEN:}
   ref-audio-path: ${GPT_SOVITS_REF_AUDIO_PATH:D:/ai/Documents/qq-web/GPT-SoVITS-v2pro-20250604-nvidia50/reference/ref_01.wav}
   prompt-text: ${GPT_SOVITS_PROMPT_TEXT:大家好，今天是个美好的日子。}
@@ -96,7 +96,7 @@ gpt-sovits:
 
 # MinIO配置
 minio:
-  endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
+  endpoint: ${MINIO_ENDPOINT:http://127.0.0.1:9000}
   access-key: ${MINIO_ACCESS_KEY:}
   secret-key: ${MINIO_SECRET_KEY:}
   bucket-name: ${MINIO_BUCKET:qq-chat-files}

@@ -31,6 +31,13 @@ public class MessageController {
     @Autowired
     private MessageService messageService;
 
+    /** 搜索结果 contentSnippet 的截断长度（契约：内容前 120 字，超出加 …） */
+    private static final int SEARCH_SNIPPET_MAX_CHARS = 120;
+
+    /** 搜索结果 sendTime 的输出格式（契约示例：2026-09-17T12:42:54） */
+    private static final java.time.format.DateTimeFormatter SEARCH_TIME_FORMATTER =
+            java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss");
+
     @Autowired
     private com.qqai.service.FilePurgeService filePurgeService;
 
@@ -1080,6 +1087,94 @@ public class MessageController {
             return ResponseEntity.badRequest()
                     .body(ApiResponse.error(400, "全部标为已读失败: " + e.getMessage()));
         }
+    }
+
+    /**
+     * 按标签 / 关键词搜索群内消息：{@code GET /api/messages/search?groupId=&tag=&keyword=&limit=50}
+     *
+     * <ul>
+     *   <li>权限口径与 {@link #getMessagesByGroupId(String, String)} 一致：未登录 401；未绑 QQ → 403
+     *       「请先绑定QQ账号」；无群可见性 → 403「无权访问该群聊」；管理员跳过群可见性校验；</li>
+     *   <li>{@code tag} 与 {@code keyword} 至少给一个，都不给 → 400「请提供 tag 或 keyword」；
+     *       两者都给时取<b>交集</b>（{@code ai_tags LIKE %tag% AND content LIKE %keyword%}）；</li>
+     *   <li>只返回未删除消息，按 {@code sendTime} 倒序，{@code limit} 收敛到 1 ~ 200（默认 50）。</li>
+     * </ul>
+     *
+     * <p>返回 {@code data} 为数组，每项固定 10 个字段：
+     * {@code id / groupId / sendTime / userNickname / userQq / messageType / contentSnippet / aiTags / aiSummaryShort / aiSentiment}。</p>
+     */
+    @GetMapping("/search")
+    public ResponseEntity<ApiResponse<List<Map<String, Object>>>> searchMessages(
+            @RequestParam String groupId,
+            @RequestParam(required = false) String tag,
+            @RequestParam(required = false) String keyword,
+            @RequestParam(defaultValue = "50") int limit) {
+
+        Long userId = securityHelper.getCurrentUserId();
+        if (userId == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(ApiResponse.error(401, "未登录"));
+        }
+
+        // 管理员跳过群可见性校验（非管理员仍需绑定 QQ + 群可见）
+        if (!securityHelper.isAdmin()) {
+            List<String> userQqList = securityHelper.getCurrentUserQqBindings();
+            if (userQqList.isEmpty()) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                        .body(ApiResponse.error(403, "请先绑定QQ账号"));
+            }
+            if (!securityHelper.hasGroupAccess(groupId, userQqList)) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                        .body(ApiResponse.error(403, "无权访问该群聊"));
+            }
+        }
+
+        boolean hasTag = tag != null && !tag.isBlank();
+        boolean hasKeyword = keyword != null && !keyword.isBlank();
+        if (!hasTag && !hasKeyword) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(ApiResponse.error(400, "请提供 tag 或 keyword"));
+        }
+
+        List<Map<String, Object>> views = messageService.searchMessages(groupId, tag, keyword, limit)
+                .stream()
+                .map(this::toSearchView)
+                .toList();
+        return ResponseEntity.ok(ApiResponse.success(views));
+    }
+
+    /** 搜索结果条目视图：字段名与前端契约逐字一致（messageType 用枚举 name()） */
+    private Map<String, Object> toSearchView(Message message) {
+        Map<String, Object> view = new LinkedHashMap<>();
+        view.put("id", message.getId());
+        view.put("groupId", message.getGroupId());
+        view.put("sendTime", formatSearchTime(message.getSendTime()));
+        view.put("userNickname", message.getUserNickname());
+        view.put("userQq", message.getUserQq());
+        view.put("messageType", message.getMessageType() == null ? null : message.getMessageType().name());
+        view.put("contentSnippet", buildContentSnippet(message.getContent(), SEARCH_SNIPPET_MAX_CHARS));
+        view.put("aiTags", message.getAiTags());
+        view.put("aiSummaryShort", message.getAiSummaryShort());
+        view.put("aiSentiment", message.getAiSentiment());
+        return view;
+    }
+
+    /** 搜索结果的 sendTime 统一成 {@code yyyy-MM-dd'T'HH:mm:ss}（避免 LocalDateTime.toString() 省略秒/带纳秒） */
+    private static String formatSearchTime(java.time.LocalDateTime sendTime) {
+        return sendTime == null ? null : SEARCH_TIME_FORMATTER.format(sendTime);
+    }
+
+    /**
+     * 内容摘要：前 {@code max} 个字符（按码点截断，避免把 emoji 等代理对切成半个字符），超出补「…」。
+     */
+    private static String buildContentSnippet(String content, int max) {
+        if (content == null) {
+            return null;
+        }
+        if (content.codePointCount(0, content.length()) <= max) {
+            return content;
+        }
+        return content.substring(0, content.offsetByCodePoints(0, max)) + "…";
     }
 
     private FileRecord.FileType getFileTypeFromMessageType(String messageType) {
