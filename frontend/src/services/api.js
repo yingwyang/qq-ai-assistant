@@ -337,12 +337,36 @@ export const messageApi = {
    * 从网页以「机器人账号」身份向该群发送一条文本消息。
    * 有群可见性的用户都能发；限流 10 次/分钟、长度 ≤2000 字；NapCat 未登录 → 503。
    * 本地不插入记录，消息由 NapCat 回传后正常入库（避免重复）。
+   * @param {string} groupId
+   * @param {string|{text?:string, replyToId?:number, atQqs?:string[]}} payload 传字符串等价于 {text}
    */
-  sendGroupText: (groupId, text) => request(`/groups/${encodeURIComponent(groupId)}/send`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text }),
-  }),
+  sendGroupText: (groupId, payload) => {
+    const body = (typeof payload === 'string') ? { text: payload } : (payload || {});
+    return request(`/groups/${encodeURIComponent(groupId)}/send`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        text: body.text || '',
+        replyToId: body.replyToId || null,
+        atQqs: Array.isArray(body.atQqs) ? body.atQqs : []
+      })
+    });
+  },
+
+  /**
+   * 向该群发送图片或文件（multipart）。
+   * 图片 ≤4MB 走 base64 图片段，更大的图片与其它文件走 NapCat upload_group_file；上限 20MB。
+   * @param {string} groupId
+   * @param {{file:File, text?:string, replyToId?:number, atQqs?:string[]}} params
+   */
+  sendGroupMedia: (groupId, params) => {
+    const formData = new FormData();
+    formData.append('file', params.file);
+    if (params.text) formData.append('text', params.text);
+    if (params.replyToId) formData.append('replyToId', String(params.replyToId));
+    if (Array.isArray(params.atQqs) && params.atQqs.length) formData.append('atQqs', params.atQqs.join(','));
+    return uploadRequest(`/groups/${encodeURIComponent(groupId)}/send-media`, formData);
+  },
   setGroupType: (groupId, groupType) =>
     request(`/groups/${encodeURIComponent(groupId)}/type`, {
       method: 'PUT',

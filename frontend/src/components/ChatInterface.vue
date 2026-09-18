@@ -260,6 +260,9 @@
               <MessageContent :message="message" :qq-nickname-map="qqNicknameMap" :gallery="chatImageGallery" @navigate-to-message="handleNavigateToMessage" />
               <!-- 按需摘要按钮（悬停显示） -->
               <div class="msg-actions" @click.stop>
+                <button class="msg-action-btn" title="回复这条消息（发送身份：机器人）" @click="startReply(message)">
+                  <Icon name="back" :size="12" /> 回复
+                </button>
                 <button
                   class="msg-action-btn"
                   :disabled="isSummarizing(message.id)"
@@ -310,6 +313,9 @@
               <MessageContent :message="message" :qq-nickname-map="qqNicknameMap" :gallery="chatImageGallery" @navigate-to-message="handleNavigateToMessage" />
               <!-- 按需摘要按钮（悬停显示） -->
               <div class="msg-actions" @click.stop>
+                <button class="msg-action-btn" title="回复这条消息（发送身份：机器人）" @click="startReply(message)">
+                  <Icon name="back" :size="12" /> 回复
+                </button>
                 <button
                   class="msg-action-btn"
                   :disabled="isSummarizing(message.id)"
@@ -386,26 +392,65 @@
 
     <!-- 消息输入栏：以机器人账号身份发到该群（Enter 发送 / Shift+Enter 换行） -->
     <div v-if="groupId" class="chat-composer">
-      <textarea
-        ref="composerRef"
-        v-model="composerText"
-        class="composer-input"
-        rows="1"
-        :placeholder="`以机器人身份发送到「${currentGroupName || groupId}」…（Enter 发送 / Shift+Enter 换行）`"
-        :disabled="composerSending"
-        @keydown.enter.exact.prevent="sendComposerText"
-        @input="autoGrowComposer"
-      ></textarea>
-      <button
-        class="composer-send"
-        :disabled="composerSending || !composerText.trim()"
-        title="发送到该 QQ 群（发送身份为机器人账号，不可撤回）"
-        @click="sendComposerText"
-      >
-        <span v-if="composerSending" class="msg-action-spinner"></span>
-        <Icon v-else name="send" :size="15" />
-        {{ composerSending ? '发送中' : '发送' }}
-      </button>
+      <!-- 回复 / @ 目标提示条 -->
+      <div v-if="replyTarget || atTargets.length" class="composer-chips">
+        <span v-if="replyTarget" class="composer-chip chip-reply">
+          <Icon name="back" :size="11" />
+          回复 {{ replyTarget.userNickname || replyTarget.userQq || '该消息' }}：{{ replyPreview }}
+          <button class="chip-close" title="取消回复" @click="cancelReply">✕</button>
+        </span>
+        <span v-for="t in atTargets" :key="'at-' + t.qq" class="composer-chip chip-at">
+          @{{ t.nickname }}
+          <button class="chip-close" :title="'取消 @' + t.nickname" @click="removeAtTarget(t.qq)">✕</button>
+        </span>
+      </div>
+
+      <!-- 成员选择（@） -->
+      <div v-if="showAtPicker" class="at-picker">
+        <div class="at-picker-head">
+          <input v-model.trim="atSearch" type="text" placeholder="搜索群成员昵称或 QQ…" class="at-picker-search" />
+          <button class="at-picker-close" @click="showAtPicker = false">✕</button>
+        </div>
+        <div class="at-picker-body">
+          <div v-if="membersLoading" class="at-picker-empty">加载中…</div>
+          <div v-else-if="!filteredMembers.length" class="at-picker-empty">没有匹配的成员</div>
+          <button v-for="m in filteredMembers" :key="'m-' + m.qq" class="at-picker-item" @click="addAtTarget(m)">
+            <span class="at-picker-name">{{ m.nickname || m.qq }}</span>
+            <span class="at-picker-qq">{{ m.qq }}</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="composer-row">
+        <button class="composer-icon-btn" :class="{ active: showAtPicker }" title="提及群成员" @click="toggleAtPicker">
+          <Icon name="person" :size="15" />
+        </button>
+        <button class="composer-icon-btn" :disabled="attachUploading" title="发送图片或文件（≤20MB）" @click="triggerAttach">
+          <span v-if="attachUploading" class="msg-action-spinner"></span>
+          <Icon v-else name="image" :size="15" />
+        </button>
+        <input ref="fileInputRef" type="file" class="composer-file-input" @change="onAttachChange" />
+        <textarea
+          ref="composerRef"
+          v-model="composerText"
+          class="composer-input"
+          rows="1"
+          :placeholder="composerPlaceholder"
+          :disabled="composerSending || attachUploading"
+          @keydown.enter.exact.prevent="sendComposerText"
+          @input="autoGrowComposer"
+        ></textarea>
+        <button
+          class="composer-send"
+          :disabled="composerSending || attachUploading || !composerText.trim()"
+          title="发送到该 QQ 群（发送身份为机器人账号，不可撤回）"
+          @click="sendComposerText"
+        >
+          <span v-if="composerSending" class="msg-action-spinner"></span>
+          <Icon v-else name="send" :size="15" />
+          {{ composerSending ? '发送中' : '发送' }}
+        </button>
+      </div>
     </div>
 
   </div>
@@ -624,6 +669,91 @@ export default {
     const composerSending = ref(false);
     const composerRef = ref(null);
 
+    // 回复 / @ / 附件
+    const replyTarget = ref(null);        // 被回复的消息（用于 replyToId 与提示条）
+    const atTargets = ref([]);            // [{qq, nickname}] 待 @ 的成员
+    const showAtPicker = ref(false);
+    const atSearch = ref('');
+    const groupMembers = ref([]);
+    const membersLoading = ref(false);
+    const attachUploading = ref(false);
+    const fileInputRef = ref(null);
+
+    const composerPlaceholder = computed(() => {
+      const name = currentGroupName.value || groupId.value;
+      const prefix = replyTarget.value ? `回复 ${replyTarget.value.userNickname || replyTarget.value.userQq}：` : '';
+      return `${prefix}以机器人身份发送到「${name}」…（Enter 发送 / Shift+Enter 换行）`;
+    });
+
+    /** 被回复消息的文本摘要（去掉 CQ 码，截断） */
+    const replyPreview = computed(() => {
+      const m = replyTarget.value;
+      if (!m) return '';
+      const raw = m.aiSummaryShort || m.content || '';
+      const text = String(raw).replace(/\[CQ:[^\]]*\]/g, '').replace(/\s+/g, ' ').trim();
+      return text.length > 36 ? text.slice(0, 36) + '…' : text;
+    });
+
+    const filteredMembers = computed(() => {
+      const kw = atSearch.value.trim().toLowerCase();
+      const list = groupMembers.value || [];
+      if (!kw) return list.slice(0, 60);
+      return list
+        .filter(m => String(m.nickname || '').toLowerCase().includes(kw) || String(m.qq || '').includes(kw))
+        .slice(0, 60);
+    });
+
+    const loadAtMembers = async () => {
+      if (!groupId.value) return;
+      membersLoading.value = true;
+      try {
+        const res = await messageApi.getGroupMembers(groupId.value);
+        const arr = Array.isArray(res) ? res : (Array.isArray(res?.data) ? res.data : []);
+        groupMembers.value = arr.filter(m => m && m.qq);
+      } catch (e) {
+        showToast(e?.message || '获取群成员失败', 'error');
+        groupMembers.value = [];
+      } finally {
+        membersLoading.value = false;
+      }
+    };
+
+    const toggleAtPicker = async () => {
+      showAtPicker.value = !showAtPicker.value;
+      atSearch.value = '';
+      if (showAtPicker.value && groupMembers.value.length === 0) await loadAtMembers();
+    };
+
+    const addAtTarget = (m) => {
+      if (!m || !m.qq) return;
+      if (!atTargets.value.some(t => t.qq === m.qq)) {
+        atTargets.value = [...atTargets.value, { qq: m.qq, nickname: m.nickname || m.qq }];
+      }
+      showAtPicker.value = false;
+      atSearch.value = '';
+      nextTick(() => composerRef.value?.focus());
+    };
+
+    const removeAtTarget = (qq) => {
+      atTargets.value = atTargets.value.filter(t => t.qq !== qq);
+    };
+
+    const startReply = (message) => {
+      if (!message) return;
+      replyTarget.value = message;
+      nextTick(() => composerRef.value?.focus());
+    };
+
+    const cancelReply = () => { replyTarget.value = null; };
+
+    /** 清空回复/@ 状态（发送成功后调用） */
+    const resetComposerExtras = () => {
+      replyTarget.value = null;
+      atTargets.value = [];
+      showAtPicker.value = false;
+      atSearch.value = '';
+    };
+
     /** 输入框随内容自动增高（最高 120px） */
     const autoGrowComposer = () => {
       const el = composerRef.value;
@@ -634,15 +764,20 @@ export default {
 
     const sendComposerText = async () => {
       const text = composerText.value.trim();
-      if (!text || composerSending.value || !groupId.value) return;
+      if ((!text && atTargets.value.length === 0) || composerSending.value || !groupId.value) return;
       if (text.length > 2000) {
         showToast('消息过长，最多 2000 字', 'warning');
         return;
       }
       composerSending.value = true;
       try {
-        await messageApi.sendGroupText(groupId.value, text);
+        await messageApi.sendGroupText(groupId.value, {
+          text,
+          replyToId: replyTarget.value?.id || null,
+          atQqs: atTargets.value.map(t => t.qq)
+        });
         composerText.value = '';
+        resetComposerExtras();
         await nextTick();
         autoGrowComposer();
         scrollToBottom();
@@ -651,6 +786,43 @@ export default {
         showToast(e?.message || '发送失败', 'error');
       } finally {
         composerSending.value = false;
+      }
+    };
+
+    // ===== 图片 / 文件发送 =====
+    const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
+
+    const triggerAttach = () => {
+      if (attachUploading.value) return;
+      fileInputRef.value?.click();
+    };
+
+    const onAttachChange = async (e) => {
+      const file = e?.target?.files?.[0];
+      if (e?.target) e.target.value = '';   // 允许重复选同一个文件
+      if (!file || !groupId.value) return;
+      if (file.size > MAX_UPLOAD_BYTES) {
+        showToast(`文件过大（${(file.size / 1024 / 1024).toFixed(1)}MB），最大 20MB`, 'warning');
+        return;
+      }
+      attachUploading.value = true;
+      try {
+        await messageApi.sendGroupMedia(groupId.value, {
+          file,
+          text: composerText.value.trim(),
+          replyToId: replyTarget.value?.id || null,
+          atQqs: atTargets.value.map(t => t.qq)
+        });
+        composerText.value = '';
+        resetComposerExtras();
+        await nextTick();
+        autoGrowComposer();
+        scrollToBottom();
+        showToast(`已发送 ${file.name}`, 'success');
+      } catch (err) {
+        showToast(err?.message || '发送失败', 'error');
+      } finally {
+        attachUploading.value = false;
       }
     };
 
@@ -1451,6 +1623,24 @@ export default {
       composerRef,
       autoGrowComposer,
       sendComposerText,
+      // 回复 / @ / 附件
+      replyTarget,
+      replyPreview,
+      atTargets,
+      showAtPicker,
+      atSearch,
+      membersLoading,
+      filteredMembers,
+      attachUploading,
+      fileInputRef,
+      composerPlaceholder,
+      startReply,
+      cancelReply,
+      toggleAtPicker,
+      addAtTarget,
+      removeAtTarget,
+      triggerAttach,
+      onAttachChange,
       toggleDigestExpand,
       generateDigest,
       isLoading,
@@ -1583,13 +1773,134 @@ export default {
 /* ===== 消息输入栏（以机器人身份发到该群）===== */
 .chat-composer {
   flex-shrink: 0;
+  position: relative;
   display: flex;
-  align-items: flex-end;
-  gap: 10px;
+  flex-direction: column;
+  gap: 8px;
   padding: 10px 16px 12px;
   border-top: 1px solid var(--border-color, #e0e0e0);
   background: var(--card-bg, #fff);
 }
+.composer-row { display: flex; align-items: flex-end; gap: 8px; }
+
+/* 回复 / @ 提示条 */
+.composer-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.composer-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  padding: 3px 8px;
+  border-radius: 8px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chip-reply { background: rgba(52, 152, 219, 0.12); color: var(--accent-color, #3498db); }
+.chip-at { background: rgba(39, 174, 96, 0.12); color: #219a52; }
+.chip-close {
+  border: none;
+  background: transparent;
+  color: inherit;
+  opacity: 0.7;
+  font-size: 11px;
+  cursor: pointer;
+  padding: 0 2px;
+}
+.chip-close:hover { opacity: 1; }
+
+/* 图标按钮（@、附件） */
+.composer-icon-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--border-color, #dfe4ea);
+  border-radius: 10px;
+  background: var(--card-bg, #fff);
+  color: var(--text-secondary, #5b6b7c);
+  cursor: pointer;
+  transition: all 0.18s;
+}
+.composer-icon-btn:hover:not(:disabled) {
+  border-color: var(--accent-color, #3498db);
+  color: var(--accent-color, #3498db);
+  background: rgba(52, 152, 219, 0.08);
+}
+.composer-icon-btn.active {
+  border-color: var(--accent-color, #3498db);
+  color: var(--accent-color, #3498db);
+  background: rgba(52, 152, 219, 0.12);
+}
+.composer-icon-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.composer-file-input { display: none; }
+
+/* 成员选择弹层 */
+.at-picker {
+  position: absolute;
+  left: 16px;
+  bottom: calc(100% - 4px);
+  width: min(320px, 74%);
+  max-height: 300px;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border-color, #dfe4ea);
+  border-radius: 10px;
+  background: var(--card-bg, #fff);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.16);
+  overflow: hidden;
+  z-index: 40;
+}
+.at-picker-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-color, #eef1f5);
+}
+.at-picker-search {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--border-color, #dfe4ea);
+  border-radius: 6px;
+  background: var(--bg-tertiary, #f8f9fa);
+  color: var(--text-primary, #333);
+  font-size: 12px;
+}
+.at-picker-search:focus { outline: none; border-color: var(--accent-color, #3498db); }
+.at-picker-close {
+  border: none;
+  background: transparent;
+  color: var(--text-muted, #999);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 2px 4px;
+}
+.at-picker-body { flex: 1; overflow-y: auto; }
+.at-picker-empty { padding: 18px; text-align: center; font-size: 12px; color: var(--text-muted, #999); }
+.at-picker-item {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 12px;
+  border: none;
+  border-bottom: 1px solid var(--border-color, #f4f6f9);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.at-picker-item:hover { background: var(--bg-tertiary, #f8f9fa); }
+.at-picker-name { font-size: 12.5px; color: var(--text-primary, #333); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.at-picker-qq { flex-shrink: 0; font-size: 11px; color: var(--text-muted, #999); }
+
 .composer-input {
   flex: 1;
   min-width: 0;

@@ -1,5 +1,6 @@
 package com.qqai.controller;
 
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.qqai.common.SecurityHelper;
 import com.qqai.constant.GroupType;
 import com.qqai.dto.common.ApiResponse;
@@ -14,16 +15,21 @@ import com.qqai.service.GroupDigestService;
 import com.qqai.service.GroupTypeRecognitionService;
 import com.qqai.service.MessageQueueService;
 import com.qqai.service.NapCatService;
+import com.qqai.service.OutboundMediaService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -72,6 +78,10 @@ public class GroupController {
     /** 网页发送群消息的限流（每用户 10 次/分钟） */
     @Autowired
     private com.qqai.common.RateLimiterService rateLimiterService;
+
+    /** 网页发送媒体的落盘与消息段编排（replyToId → OneBot message_id 的解析也在这里） */
+    @Autowired
+    private OutboundMediaService outboundMediaService;
 
     /**
      * 查询群类型 + 推荐分析类型
@@ -374,13 +384,28 @@ public class GroupController {
     }
 
     /**
-     * 从网页向该 QQ 群发送一条文本消息：{@code POST /api/groups/{groupId}/send}，body {@code {"text":"..."}}。
+     * 从网页向该 QQ 群发送一条消息：{@code POST /api/groups/{groupId}/send}。
+     *
+     * <p>请求体（{@code replyToId} / {@code atQqs} 为可选新增字段，旧客户端只传 {@code text} 行为不变）：</p>
+     * <pre>{@code
+     * { "text": "内容", "replyToId": 100602, "atQqs": ["123456", "7890"] }
+     * }</pre>
+     *
+     * <ul>
+     *   <li>{@code text}：允许为空，但「text 非空 或 atQqs 非空」必须成立，否则 400「消息内容不能为空」；≤2000 字；</li>
+     *   <li>{@code replyToId}：<b>数据库自增 id</b>（前端消息列表里的 id）。取该消息的 {@code message_id}
+     *       （OneBot id）拼 reply 段。消息不存在 → 400「被回复的消息不存在」；
+     *       不属于 URL 里的 groupId → 400「被回复的消息不属于该群」；{@code message_id} 为空 → 忽略 reply 段（不报错）；</li>
+     *   <li>{@code atQqs}：QQ 号字符串数组，最多 10 个（超出只取前 10 并 warn）；</li>
+     *   <li><b>段顺序固定</b>：{@code reply? → at×N → text?}（text 为空则不加 text 段）。</li>
+     * </ul>
      *
      * <p>权限：登录 + 该群对当前用户可见（管理员不受限），即"有群可见性的用户都能发"。</p>
-     * <p>风控：每用户 10 次/分钟（超限 429）；文本 1~2000 字（空 → 400，超长 → 400）。</p>
+     * <p>风控：每用户 10 次/分钟（超限 429，与 {@code send-media} 共用 {@code group-send:<userId>} 键）。</p>
      * <p>发送身份是 <b>NapCat 登录的机器人账号</b>，不是网页登录用户；消息会真实发到群里、不可撤回。
      * 本地不插入消息记录 —— NapCat 会把机器人自己发的消息通过 webhook 回传，由正常链路入库（避免重复）。</p>
-     * <p>成功返回 {@code data = {sent, groupId, napcatMessageId, length}}；成功与失败都写审计。</p>
+     * <p>成功返回 {@code data = {sent, groupId, napcatMessageId, length, segmentTypes}}（{@code segmentTypes} 为新增字段，
+     * 其余字段与扩展前一致）；成功与失败都写审计，detail 里带上段类型与 at 个数。</p>
      */
     @PostMapping("/{groupId}/send")
     public ResponseEntity<ApiResponse<?>> sendGroupText(
@@ -394,7 +419,11 @@ public class GroupController {
 
         String username = securityHelper.getCurrentUsername();
         String text = (body == null || body.get("text") == null) ? "" : String.valueOf(body.get("text")).trim();
-        if (text.isEmpty()) {
+        Long replyToId = parseReplyToId(body);
+        List<String> atQqs = parseAtQqs(body);
+
+        // 契约：text 非空 或 atQqs 非空（纯 @ / 纯引用也能发）
+        if (text.isEmpty() && atQqs.isEmpty()) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ApiResponse.error(400, "消息内容不能为空"));
         }
         if (text.length() > MAX_GROUP_SEND_LENGTH) {
@@ -404,6 +433,19 @@ public class GroupController {
                     .body(ApiResponse.error(400, "消息过长，最多 " + MAX_GROUP_SEND_LENGTH + " 字"));
         }
 
+        // 段组装（reply → at×N → text）：replyToId 非法时 400；message_id 为空则忽略 reply 段
+        String replyMessageId;
+        ArrayNode segments;
+        try {
+            replyMessageId = outboundMediaService.resolveReplyMessageId(groupId, replyToId);
+            segments = outboundMediaService.buildTextSegments(replyMessageId, atQqs, text);
+        } catch (BizException e) {
+            auditLogService.log(username, "GROUP_SEND", "group:" + groupId, "FAIL", "发送被拒绝：" + e.getMessage());
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(ApiResponse.error(400, e.getMessage()));
+        }
+        List<String> segmentTypes = outboundMediaService.segmentTypes(segments);
+
         Long userId = securityHelper.getCurrentUserId();
         if (!rateLimiterService.isAllowed("group-send:" + userId, 10, 1)) {
             auditLogService.log(username, "GROUP_SEND", "group:" + groupId, "FAIL", "发送被限流（每分钟最多 10 条）");
@@ -411,11 +453,12 @@ public class GroupController {
                     .body(ApiResponse.error(429, "发送过于频繁，请稍后再试（每分钟最多 10 条）"));
         }
 
-        NapCatService.SendGroupMessageResult sendResult = napCatService.sendGroupMessage(groupId, text);
+        NapCatService.SendGroupMessageResult sendResult = napCatService.sendGroupSegments(groupId, segments);
         if (sendResult == null || !sendResult.isSuccess()) {
             String detail = (sendResult == null || sendResult.getErrorMessage() == null) ? "未知原因" : sendResult.getErrorMessage();
             log.warn("网页发送群消息失败 groupId={}: {}", groupId, detail);
-            auditLogService.log(username, "GROUP_SEND", "group:" + groupId, "FAIL", "发送失败：" + detail);
+            auditLogService.log(username, "GROUP_SEND", "group:" + groupId, "FAIL",
+                    "发送失败：" + detail + buildSegmentDetail(segmentTypes, atQqs.size()));
             return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
                     .body(ApiResponse.error(503, "NapCat 未登录或不可用，发送失败"));
         }
@@ -425,12 +468,188 @@ public class GroupController {
         data.put("groupId", groupId);
         data.put("napcatMessageId", sendResult.getMessageId());
         data.put("length", text.length());
+        // 新增字段：本次实际发出的段类型，如 ["reply","at","text"]
+        data.put("segmentTypes", segmentTypes);
 
-        // 审计只记长度与预览，不整条落库（群消息本身已在 messages 表）
+        // 审计只记长度与预览，不整条落库（群消息本身已在 messages 表）；另带上段类型与 at 个数
         String preview = text.length() > 30 ? text.substring(0, 30) + "…" : text;
         auditLogService.log(username, "GROUP_SEND", "group:" + groupId, "SUCCESS",
-                "发送 " + text.length() + " 字：[" + preview + "], napcatMessageId=" + sendResult.getMessageId());
+                "发送 " + text.length() + " 字：[" + preview + "]" + buildSegmentDetail(segmentTypes, atQqs.size())
+                        + ", napcatMessageId=" + sendResult.getMessageId());
         return ResponseEntity.ok(ApiResponse.success(data));
+    }
+
+    /**
+     * 从网页向该 QQ 群发送一个文件（图片 / 其他文件）：{@code POST /api/groups/{groupId}/send-media}，
+     * {@code Content-Type: multipart/form-data}。
+     *
+     * <table border="1">
+     *   <caption>表单字段</caption>
+     *   <tr><th>字段</th><th>必填</th><th>说明</th></tr>
+     *   <tr><td>{@code file}</td><td>是</td><td>要发送的文件，≤20MB（超出 400「文件过大，最大 20MB」）</td></tr>
+     *   <tr><td>{@code text}</td><td>否</td><td>附带文字；图片时与图片同一条消息发出，其他文件时作为一条独立文本消息先发</td></tr>
+     *   <tr><td>{@code replyToId}</td><td>否</td><td>数据库自增 id，语义与 {@code /send} 完全一致</td></tr>
+     *   <tr><td>{@code atQqs}</td><td>否</td><td>逗号分隔的 QQ 号字符串（multipart 里只能传字符串），最多 10 个</td></tr>
+     * </table>
+     *
+     * <p><b>图片判定</b>：扩展名（jpg/jpeg/png/gif/webp/bmp）与 Content-Type（{@code image/*}）同时满足才走图片分支；
+     * ≤4MB 用 {@code base64://} 图片段，&gt;4MB 用本地绝对路径图片段（NapCat 与后端同机）。
+     * 段顺序 {@code reply? → at×N → image → text?}。</p>
+     *
+     * <p><b>其他文件</b>：先（可选）发一条 {@code reply? → at×N → text?} 文本消息，
+     * 再调 NapCat {@code upload_group_file}（body {@code {"group_id":<数字>,"file":"<本地绝对路径>","name":"<原始文件名>"}}）。
+     * 文件落盘于 {@code backend/uploads/outbound/<groupId>/<uuid>.<ext>}（已被 .gitignore 覆盖）。</p>
+     *
+     * <p>权限与限流同 {@code /send}（同一个 {@code group-send:<userId>} 键，10 次/分钟）；
+     * 审计 action 为 {@code GROUP_SEND_MEDIA}。
+     * 成功返回 {@code data = {sent, groupId, kind, fileName, size, napcatMessageId, segmentTypes}}
+     * （其他文件且带文字时额外含 {@code textMessageId}）。
+     * NapCat 不可用 / 发送失败 → 503「NapCat 未登录或不可用，发送失败」。</p>
+     */
+    @PostMapping(value = "/{groupId}/send-media", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<ApiResponse<?>> sendGroupMedia(
+            @PathVariable String groupId,
+            @RequestParam("file") MultipartFile file,
+            @RequestParam(value = "text", required = false) String text,
+            @RequestParam(value = "replyToId", required = false) String replyToIdRaw,
+            @RequestParam(value = "atQqs", required = false) String atQqsRaw) {
+
+        ResponseEntity<ApiResponse<?>> denied = checkGroupAccess(groupId);
+        if (denied != null) {
+            return denied;
+        }
+
+        String username = securityHelper.getCurrentUsername();
+        String content = text == null ? "" : text.trim();
+        if (content.length() > MAX_GROUP_SEND_LENGTH) {
+            auditLogService.log(username, "GROUP_SEND_MEDIA", "group:" + groupId, "FAIL",
+                    "发送被拒绝：文字超过 " + MAX_GROUP_SEND_LENGTH + " 字（实际 " + content.length() + " 字）");
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(ApiResponse.error(400, "消息过长，最多 " + MAX_GROUP_SEND_LENGTH + " 字"));
+        }
+
+        Long replyToId = parseReplyToId(replyToIdRaw);
+        List<String> atQqs = outboundMediaService.normalizeAtQqs(splitQqList(atQqsRaw));
+
+        try {
+            Map<String, Object> data =
+                    outboundMediaService.sendMedia(groupId, file, content, replyToId, atQqs);
+            // 与其他发消息接口同一处口径：审计 detail 记 kind/文件名/大小/段类型/napcatMessageId
+            auditLogService.log(username, "GROUP_SEND_MEDIA", "group:" + groupId, "SUCCESS",
+                    "发送媒体 kind=" + data.get("kind")
+                            + ", fileName=" + safeForAudit(String.valueOf(data.get("fileName")))
+                            + ", size=" + data.get("size") + "B"
+                            + ", segmentTypes=" + data.get("segmentTypes")
+                            + ", napcatMessageId=" + data.get("napcatMessageId"));
+            return ResponseEntity.ok(ApiResponse.success(data));
+        } catch (BizException e) {
+            return handleSendMediaFailure(groupId, username, e.getMessage(), e.getCode());
+        } catch (Exception e) {
+            log.error("网页发送媒体异常 groupId={}: {}", groupId, e.getMessage(), e);
+            return handleSendMediaFailure(groupId, username, e.getMessage(), 500);
+        }
+    }
+
+    /**
+     * 媒体发送失败的统一收尾：写 FAIL 审计 + 按业务码回错误体。
+     * 仅 {@link BizException} 的 400/401/403/429 原样返回，其余（含 500）统一按 NapCat 不可用 503 口径。
+     */
+    private ResponseEntity<ApiResponse<?>> handleSendMediaFailure(String groupId, String username,
+                                                                 String reason, int code) {
+        String detail = (reason == null || reason.isBlank()) ? "未知原因" : reason;
+        if (code == 400 || code == 401 || code == 403 || code == 429) {
+            log.warn("网页发送媒体被拒绝 groupId={}, code={}: {}", groupId, code, detail);
+            auditLogService.log(username, "GROUP_SEND_MEDIA", "group:" + groupId, "FAIL",
+                    "发送被拒绝：" + detail);
+            return ResponseEntity.status(code).body(ApiResponse.error(code, detail));
+        }
+        log.warn("网页发送媒体失败 groupId={}: {}", groupId, detail);
+        auditLogService.log(username, "GROUP_SEND_MEDIA", "group:" + groupId, "FAIL", "发送失败：" + detail);
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .body(ApiResponse.error(503, "NapCat 未登录或不可用，发送失败"));
+    }
+
+    /**
+     * 解析 {@code replyToId}（JSON 请求体）：数字 / 数字字符串都接受，非法值返回 null（等同未传）。
+     */
+    private Long parseReplyToId(Map<String, Object> body) {
+        if (body == null || body.get("replyToId") == null) {
+            return null;
+        }
+        return parseReplyToId(String.valueOf(body.get("replyToId")));
+    }
+
+    /**
+     * 解析 {@code replyToId}（multipart 表单）：字符串形式，空白或非法值返回 null（等同未传）。
+     */
+    private Long parseReplyToId(String raw) {
+        if (raw == null) {
+            return null;
+        }
+        String trimmed = raw.trim();
+        if (trimmed.isEmpty()) {
+            return null;
+        }
+        try {
+            return Long.valueOf(trimmed);
+        } catch (NumberFormatException e) {
+            log.warn("replyToId 不是合法数字，按未传处理: {}", trimmed);
+            return null;
+        }
+    }
+
+    /**
+     * 解析请求体里的 {@code atQqs}：只接受数组（multipart 用 {@link #splitQqList(String)}）。
+     * 非数组、非字符串元素一律忽略。
+     */
+    private List<String> parseAtQqs(Map<String, Object> body) {
+        if (body == null || body.get("atQqs") == null) {
+            return new ArrayList<>();
+        }
+        Object raw = body.get("atQqs");
+        if (!(raw instanceof List<?> list)) {
+            log.warn("atQqs 不是数组，已忽略: {}", raw.getClass().getSimpleName());
+            return new ArrayList<>();
+        }
+        List<String> qqs = new ArrayList<>();
+        for (Object item : list) {
+            if (item == null) {
+                continue;
+            }
+            String qq = String.valueOf(item).trim();
+            if (!qq.isEmpty()) {
+                qqs.add(qq);
+            }
+        }
+        return qqs;
+    }
+
+    /** 把 multipart 里的 {@code "123456,7890"} 拆成 QQ 号列表（逗号 / 换行 / 分号分隔，去空白） */
+    private List<String> splitQqList(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return new ArrayList<>();
+        }
+        return Arrays.stream(raw.split("[,;\\s]+"))
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .toList();
+    }
+
+    /** 审计 detail 片段：段类型 + at 个数（口径：审计里带上段类型与 at 个数） */
+    private String buildSegmentDetail(List<String> segmentTypes, int atCount) {
+        if (segmentTypes == null || segmentTypes.isEmpty()) {
+            return ", segmentTypes=[], atCount=" + atCount;
+        }
+        return ", segmentTypes=" + segmentTypes + ", atCount=" + atCount;
+    }
+
+    /** 审计 detail 里去掉可能破坏日志可读性的换行/引号 */
+    private String safeForAudit(String value) {
+        if (value == null) {
+            return "";
+        }
+        String cleaned = value.replaceAll("[\\r\\n\"]", "_");
+        return cleaned.length() > 100 ? cleaned.substring(0, 100) + "…" : cleaned;
     }
 
     /**

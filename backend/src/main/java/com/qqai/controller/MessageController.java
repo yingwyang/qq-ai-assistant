@@ -313,16 +313,20 @@ public class MessageController {
                     .body(ApiResponse.error(401, "未登录"));
         }
 
-        List<String> userQqList = securityHelper.getCurrentUserQqBindings();
-        if (userQqList.isEmpty()) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                    .body(ApiResponse.error(403, "请先绑定QQ账号"));
-        }
+        // 管理员不受群可见性限制：否则未绑定 QQ 的管理员在群聊页点「@」会拿到 403，
+        // 而同一页面的发送接口是允许管理员发的，体验上自相矛盾。
+        if (!securityHelper.isAdmin()) {
+            List<String> userQqList = securityHelper.getCurrentUserQqBindings();
+            if (userQqList.isEmpty()) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                        .body(ApiResponse.error(403, "请先绑定QQ账号"));
+            }
 
-        boolean hasAccess = securityHelper.hasGroupAccess(groupId, userQqList);
-        if (!hasAccess) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                    .body(ApiResponse.error(403, "无权访问该群聊"));
+            boolean hasAccess = securityHelper.hasGroupAccess(groupId, userQqList);
+            if (!hasAccess) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                        .body(ApiResponse.error(403, "无权访问该群聊"));
+            }
         }
 
         List<Map<String, Object>> members = messageService.getGroupMemberNicknames(groupId);

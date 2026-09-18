@@ -1221,8 +1221,38 @@ public class NapCatService {
      *         {@code message_id}（NapCat 未返回时为 null）
      */
     public SendGroupMessageResult sendGroupMessage(String groupId, String message) {
-        if (groupId == null || groupId.isBlank() || message == null || message.isEmpty()) {
-            log.warn("发送群消息参数为空: groupId={}, messageLength={}", groupId, message == null ? 0 : message.length());
+        if (message == null || message.isEmpty()) {
+            log.warn("发送群消息参数为空: groupId={}, messageLength=0", groupId);
+            return new SendGroupMessageResult(false, null, "群号或消息内容为空");
+        }
+        // 单一文本段：与扩展前完全等价（同样的段顺序、同样的 auto_escape=false）；
+        // 群号为空 / 段为空等情况由 sendGroupSegments 兜住，错误文案一致
+        ArrayNode segments = objectMapper.createArrayNode();
+        ObjectNode textSegment = objectMapper.createObjectNode();
+        textSegment.put("type", "text");
+        textSegment.putObject("data").put("text", message);
+        segments.add(textSegment);
+        return sendGroupSegments(groupId, segments);
+    }
+
+    /**
+     * 用<b>消息段数组</b>发送群消息（OneBot 11 {@code send_group_msg} 的通用形态）。
+     *
+     * <p>「网页发送」的文本 / @ / 回复 / 图片都走这里：段顺序、段内容完全由调用方决定，
+     * 本方法只负责拼 {@code {group_id, message:[...], auto_escape:false}} 并解析响应。
+     * 数组形式不做 CQ 码解析，所以段里的文本按纯文本发送（日报文本含 {@code [CQ:...]} 也不会被当指令执行）。</p>
+     *
+     * <p>方法本身不抛异常：网络不可达 / NapCat 未登录 / 群号非法等一律以
+     * {@code success=false} + {@code errorMessage} 返回，由调用方决定 HTTP 状态码。</p>
+     *
+     * @param groupId  目标群号
+     * @param segments 消息段数组（如 {@code [{"type":"reply","data":{"id":"100602"}}]}）；空数组视为参数错误
+     * @return 发送结果；成功时 {@link SendGroupMessageResult#getMessageId()} 为 NapCat 返回的
+     *         {@code message_id}（NapCat 未返回时为 null）
+     */
+    public SendGroupMessageResult sendGroupSegments(String groupId, ArrayNode segments) {
+        if (groupId == null || groupId.isBlank() || segments == null || segments.isEmpty()) {
+            log.warn("发送群消息段参数为空: groupId={}, segmentCount={}", groupId, segments == null ? 0 : segments.size());
             return new SendGroupMessageResult(false, null, "群号或消息内容为空");
         }
 
@@ -1239,12 +1269,6 @@ public class NapCatService {
         } catch (NumberFormatException e) {
             body.put("group_id", groupId);
         }
-        // 消息段数组：文本按纯文本发送，不解析 CQ 码
-        ArrayNode segments = objectMapper.createArrayNode();
-        ObjectNode textSegment = objectMapper.createObjectNode();
-        textSegment.put("type", "text");
-        textSegment.putObject("data").put("text", message);
-        segments.add(textSegment);
         body.set("message", segments);
         body.put("auto_escape", false);
 
@@ -1253,19 +1277,12 @@ public class NapCatService {
             try (CloseableHttpResponse response = httpClient.execute(httpPost)) {
                 String responseStr = new String(response.getEntity().getContent().readAllBytes(),
                         java.nio.charset.StandardCharsets.UTF_8);
-                log.info("发送群消息到群{}响应: {}", groupId,
+                log.info("发送群消息到群{}响应({} 段): {}", groupId, segments.size(),
                         responseStr.length() > 500 ? responseStr.substring(0, 500) + "..." : responseStr);
 
                 JsonNode json = objectMapper.readTree(responseStr);
                 boolean success = "ok".equals(json.path("status").asText());
-                // message_id 通常在 data.message_id，个别实现直接放在顶层
-                String messageId = null;
-                JsonNode data = json.get("data");
-                if (data != null && data.hasNonNull("message_id")) {
-                    messageId = data.get("message_id").asText();
-                } else if (json.hasNonNull("message_id")) {
-                    messageId = json.get("message_id").asText();
-                }
+                String messageId = extractMessageId(json);
 
                 if (success) {
                     log.info("群消息发送成功 groupId={}, messageId={}", groupId, messageId);
@@ -1279,6 +1296,93 @@ public class NapCatService {
             log.error("发送群消息到群{}异常: {}", groupId, e.getMessage());
             return new SendGroupMessageResult(false, null, e.getClass().getSimpleName() + ": " + e.getMessage());
         }
+    }
+
+    /**
+     * 上传本地文件到群文件（OneBot 11 / NapCat {@code upload_group_file}）。
+     *
+     * <p><b>文件必须位于 NapCat 能读到的本机路径</b>（当前部署下后端与 NapCat 同机），
+     * 传的是绝对路径；NapCat 的 {@code timeout.uploadSpeedKBps} 会限制实际上传速率。</p>
+     *
+     * <p>方法本身不抛异常，失败以结果对象表达。与 {@link SendGroupMessageResult} 的区别：
+     * 这里额外带 {@link UploadGroupFileResult#getStatusCode()}（HTTP 状态码，0 表示未拿到响应），
+     * 便于调用方区分「NapCat 没起来 / 没登录（非 200）」与「上传被拒绝（200 但 status≠ok）」。</p>
+     *
+     * @param groupId       目标群号
+     * @param localFilePath 本地绝对路径
+     * @param fileName      群文件里展示的文件名（通常为原始文件名）
+     */
+    public UploadGroupFileResult uploadGroupFile(String groupId, String localFilePath, String fileName) {
+        if (groupId == null || groupId.isBlank() || localFilePath == null || localFilePath.isBlank()) {
+            log.warn("上传群文件参数为空: groupId={}, localFilePath={}", groupId, localFilePath);
+            return new UploadGroupFileResult(false, null, null, -1, "群号或文件路径为空");
+        }
+        File file = new File(localFilePath);
+        if (!file.isFile()) {
+            log.warn("上传群文件失败，本地文件不存在: {}", localFilePath);
+            return new UploadGroupFileResult(false, null, null, -1, "本地文件不存在");
+        }
+        String displayName = (fileName == null || fileName.isBlank()) ? file.getName() : fileName;
+
+        String baseUrl = onebotApiUrl != null && !onebotApiUrl.isBlank() ? onebotApiUrl : napcatApiUrl;
+        CloseableHttpClient httpClient = this.httpClient;
+        HttpPost httpPost = new HttpPost(baseUrl + "/upload_group_file");
+        httpPost.setHeader("Content-Type", "application/json");
+        httpPost.setHeader("Authorization", "Bearer " + napcatToken);
+        httpPost.setHeader("token", napcatToken);
+
+        ObjectNode body = objectMapper.createObjectNode();
+        try {
+            body.put("group_id", Long.parseLong(groupId));
+        } catch (NumberFormatException e) {
+            body.put("group_id", groupId);
+        }
+        body.put("file", file.getAbsolutePath());
+        body.put("name", displayName);
+
+        try {
+            httpPost.setEntity(new StringEntity(body.toString(), java.nio.charset.StandardCharsets.UTF_8));
+            try (CloseableHttpResponse response = httpClient.execute(httpPost)) {
+                int statusCode = response.getCode();
+                String responseStr = new String(response.getEntity().getContent().readAllBytes(),
+                        java.nio.charset.StandardCharsets.UTF_8);
+                log.info("上传群文件到群{}响应(HTTP {}): {}", groupId, statusCode,
+                        responseStr.length() > 500 ? responseStr.substring(0, 500) + "..." : responseStr);
+
+                JsonNode json = objectMapper.readTree(responseStr);
+                boolean success = "ok".equals(json.path("status").asText());
+                String messageId = extractMessageId(json);
+                if (success) {
+                    log.info("群文件上传成功 groupId={}, name={}, size={}", groupId, displayName, file.length());
+                    return new UploadGroupFileResult(true, messageId, displayName, statusCode, null);
+                }
+                String detail = describeSendFailure(json);
+                if (detail == null) {
+                    detail = "HTTP " + statusCode;
+                }
+                log.warn("群文件上传失败 groupId={}, name={}, detail={}", groupId, displayName, detail);
+                return new UploadGroupFileResult(false, messageId, displayName, statusCode, detail);
+            }
+        } catch (Exception e) {
+            log.error("上传群文件到群{}异常: {}", groupId, e.getMessage());
+            return new UploadGroupFileResult(false, null, displayName, 0,
+                    e.getClass().getSimpleName() + ": " + e.getMessage());
+        }
+    }
+
+    /** 解析响应里的 message_id（通常在 {@code data.message_id}，个别实现直接放在顶层）；取不到返回 null */
+    private String extractMessageId(JsonNode json) {
+        if (json == null) {
+            return null;
+        }
+        JsonNode data = json.get("data");
+        if (data != null && data.hasNonNull("message_id")) {
+            return data.get("message_id").asText();
+        }
+        if (json.hasNonNull("message_id")) {
+            return json.get("message_id").asText();
+        }
+        return null;
     }
 
     /** 从 NapCat 失败响应中提取可读原因（message/wording/msg/error，其次 retcode）；取不到返回 null */
@@ -1316,6 +1420,40 @@ public class NapCatService {
 
         /** NapCat 返回的 message_id；成功但 NapCat 未返回该字段时为 null */
         public String getMessageId() { return messageId; }
+
+        /** 失败原因（成功时为 null） */
+        public String getErrorMessage() { return errorMessage; }
+    }
+
+    /**
+     * 群文件上传结果（与 {@link SendGroupMessageResult} 同风格：方法不抛异常，用结果对象表达失败）。
+     */
+    public static class UploadGroupFileResult {
+        private final boolean success;
+        private final String messageId;
+        private final String fileName;
+        private final int statusCode;
+        private final String errorMessage;
+
+        public UploadGroupFileResult(boolean success, String messageId, String fileName,
+                                     int statusCode, String errorMessage) {
+            this.success = success;
+            this.messageId = messageId;
+            this.fileName = fileName;
+            this.statusCode = statusCode;
+            this.errorMessage = errorMessage;
+        }
+
+        public boolean isSuccess() { return success; }
+
+        /** NapCat 返回的 message_id；未返回该字段时为 null（群文件上传通常不返回） */
+        public String getMessageId() { return messageId; }
+
+        /** 群文件里展示的文件名 */
+        public String getFileName() { return fileName; }
+
+        /** NapCat 的 HTTP 状态码；0 表示请求根本没拿到响应（进程未启动 / 连接被拒） */
+        public int getStatusCode() { return statusCode; }
 
         /** 失败原因（成功时为 null） */
         public String getErrorMessage() { return errorMessage; }
