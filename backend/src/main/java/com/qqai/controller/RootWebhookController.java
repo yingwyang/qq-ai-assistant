@@ -23,6 +23,7 @@ import org.springframework.web.bind.annotation.*;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.util.List;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
@@ -272,8 +273,22 @@ public class RootWebhookController {
         if (qqNumber == null || qqNumber.isEmpty()) {
             return null;
         }
-        Optional<UserQqBinding> binding = userQqBindingRepository.findByQqNumber(qqNumber);
-        return binding.map(UserQqBinding::getUserId).orElse(null);
+        try {
+            Optional<UserQqBinding> binding = userQqBindingRepository.findByQqNumber(qqNumber);
+            return binding.map(UserQqBinding::getUserId).orElse(null);
+        } catch (org.springframework.dao.IncorrectResultSizeDataAccessException e) {
+            // 同一个 QQ 被绑定到多个用户（重复绑定 / 历史脏数据）时，findByQqNumber 会抛
+            // "Query did not return a unique result"，原来会让整条 webhook 500、消息丢失。
+            // 这里退化为取「启用绑定」中的第一条，保证消息照常入库。
+            List<UserQqBinding> actives = userQqBindingRepository.findByQqNumberAndActiveTrue(qqNumber);
+            if (!actives.isEmpty()) {
+                log.warn("QQ {} 存在重复绑定（启用 {} 条），取 user_id={} 作为归属用户，建议在个人中心清理重复绑定",
+                        qqNumber, actives.size(), actives.get(0).getUserId());
+                return actives.get(0).getUserId();
+            }
+            log.warn("QQ {} 存在重复绑定且没有启用记录，跳过 userId 解析（消息仍会入库）", qqNumber);
+            return null;
+        }
     }
 
     private ResponseEntity<Map<String, Object>> okResponse() {

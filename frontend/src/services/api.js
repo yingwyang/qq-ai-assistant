@@ -332,6 +332,17 @@ export const messageApi = {
 
   // 群类型管理（走 /api/groups/**）
   getGroupType: (groupId) => request(`/groups/${encodeURIComponent(groupId)}/type`),
+
+  /**
+   * 从网页以「机器人账号」身份向该群发送一条文本消息。
+   * 有群可见性的用户都能发；限流 10 次/分钟、长度 ≤2000 字；NapCat 未登录 → 503。
+   * 本地不插入记录，消息由 NapCat 回传后正常入库（避免重复）。
+   */
+  sendGroupText: (groupId, text) => request(`/groups/${encodeURIComponent(groupId)}/send`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text }),
+  }),
   setGroupType: (groupId, groupType) =>
     request(`/groups/${encodeURIComponent(groupId)}/type`, {
       method: 'PUT',

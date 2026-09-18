@@ -4,31 +4,33 @@
     <!-- 顶部群聊选择器 -->
     <div class="chat-header">
       <div class="group-selector">
-        <button @click="loadMessages" class="btn-refresh" :disabled="isLoading" title="刷新消息">
-          <svg v-if="!isLoading" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
-            <path d="M3 3v5h5"></path>
-            <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"></path>
-            <path d="M16 21h5v-5"></path>
-          </svg>
-          <span v-else>...</span>
+        <button @click="loadMessages" class="hdr-btn" :disabled="isLoading" title="刷新消息">
+          <Icon v-if="!isLoading" name="refresh" :size="16" />
+          <span v-else class="hdr-spinner"></span>
         </button>
-        <button 
-          @click="toggleSelectionMode" 
-          :class="['btn-selection', { active: isSelectionMode }]"
-          :title="isSelectionMode ? '退出选择' : '选择消息'"
+        <button
+          @click="toggleSelectionMode"
+          class="hdr-btn hdr-btn-selection"
+          :class="{ active: isSelectionMode }"
+          :title="isSelectionMode ? '退出多选' : '多选消息（批量删除 / AI 分析）'"
         >
+          <Icon :name="isSelectionMode ? 'close' : 'check-circle'" :size="16" />
+          <span class="hdr-btn-label">{{ isSelectionMode ? '退出多选' : '多选' }}</span>
         </button>
       </div>
       <div v-if="currentGroupName" class="current-group">
-        {{ currentGroupName }}
+        <Icon name="group" :size="14" />
+        <span class="current-group-name">{{ currentGroupName }}</span>
       </div>
     </div>
     
     <!-- 选择模式操作栏 -->
     <div v-if="isSelectionMode" class="selection-toolbar">
       <div class="selection-info">
-        <span class="selected-count">已选择 {{ selectedMessages.length }} 条消息</span>
+        <span class="selected-count">
+          <Icon name="check-circle" :size="13" />
+          已选择 <b>{{ selectedMessages.length }}</b> 条
+        </span>
         <label class="selection-mode-label">
           <input type="checkbox" v-model="isMultiSelect" />
           多选模式
@@ -36,29 +38,34 @@
       </div>
       <div class="selection-actions">
         <div class="quick-select">
-          <input 
-            type="number" 
-            v-model="quickSelectCount" 
-            min="1" 
-            placeholder="数量" 
+          <span class="quick-select-icon"><Icon name="list" :size="12" /></span>
+          <input
+            type="number"
+            v-model="quickSelectCount"
+            min="1"
+            placeholder="数量"
             class="quick-select-input"
           />
-          <button @click="selectRecentMessages" class="btn-quick-select">选择最近</button>
+          <button @click="selectRecentMessages" class="toolbar-btn">
+            <Icon name="schedule" :size="13" /> 选择最近
+          </button>
         </div>
-        <button @click="clearSelection" class="btn-clear">清空</button>
+        <button @click="clearSelection" class="toolbar-btn">
+          <Icon name="close" :size="13" /> 清空
+        </button>
         <button
           @click="deleteSelected"
           :disabled="selectedMessages.length === 0"
-          class="btn-delete"
+          class="toolbar-btn toolbar-btn-danger"
         >
-          <Icon name="trash" :size="14" /> 删除
+          <Icon name="trash" :size="13" /> 删除
         </button>
         <button
           @click="openAnalysisPicker"
           :disabled="selectedMessages.length === 0"
-          class="btn-analyze"
+          class="toolbar-btn toolbar-btn-primary"
         >
-          <Icon name="robot" :size="14" /> AI 分析
+          <Icon name="robot" :size="13" /> AI 分析
         </button>
       </div>
     </div>
@@ -377,6 +384,30 @@
       </div>
     </div>
 
+    <!-- 消息输入栏：以机器人账号身份发到该群（Enter 发送 / Shift+Enter 换行） -->
+    <div v-if="groupId" class="chat-composer">
+      <textarea
+        ref="composerRef"
+        v-model="composerText"
+        class="composer-input"
+        rows="1"
+        :placeholder="`以机器人身份发送到「${currentGroupName || groupId}」…（Enter 发送 / Shift+Enter 换行）`"
+        :disabled="composerSending"
+        @keydown.enter.exact.prevent="sendComposerText"
+        @input="autoGrowComposer"
+      ></textarea>
+      <button
+        class="composer-send"
+        :disabled="composerSending || !composerText.trim()"
+        title="发送到该 QQ 群（发送身份为机器人账号，不可撤回）"
+        @click="sendComposerText"
+      >
+        <span v-if="composerSending" class="msg-action-spinner"></span>
+        <Icon v-else name="send" :size="15" />
+        {{ composerSending ? '发送中' : '发送' }}
+      </button>
+    </div>
+
   </div>
 </template>
 
@@ -585,6 +616,41 @@ export default {
         showToast(e?.message || '推送失败', 'error');
       } finally {
         digestPushing.value = false;
+      }
+    };
+
+    // ===== 网页发送群消息（以机器人身份）=====
+    const composerText = ref('');
+    const composerSending = ref(false);
+    const composerRef = ref(null);
+
+    /** 输入框随内容自动增高（最高 120px） */
+    const autoGrowComposer = () => {
+      const el = composerRef.value;
+      if (!el) return;
+      el.style.height = 'auto';
+      el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+    };
+
+    const sendComposerText = async () => {
+      const text = composerText.value.trim();
+      if (!text || composerSending.value || !groupId.value) return;
+      if (text.length > 2000) {
+        showToast('消息过长，最多 2000 字', 'warning');
+        return;
+      }
+      composerSending.value = true;
+      try {
+        await messageApi.sendGroupText(groupId.value, text);
+        composerText.value = '';
+        await nextTick();
+        autoGrowComposer();
+        scrollToBottom();
+        showToast('已发送（发送身份：机器人账号）', 'success');
+      } catch (e) {
+        showToast(e?.message || '发送失败', 'error');
+      } finally {
+        composerSending.value = false;
       }
     };
 
@@ -1379,6 +1445,12 @@ export default {
       openTagSearch,
       closeSearch,
       jumpToMessage,
+      // 网页发送群消息
+      composerText,
+      composerSending,
+      composerRef,
+      autoGrowComposer,
+      sendComposerText,
       toggleDigestExpand,
       generateDigest,
       isLoading,
@@ -1444,41 +1516,62 @@ export default {
 
 .group-selector {
   display: flex;
-  gap: 10px;
-  flex: 1;
-  max-width: 400px;
+  gap: 8px;
+  align-items: center;
 }
 
-.btn-refresh {
-  width: 32px;
-  height: 32px;
-  padding: 0;
-  display: flex;
+/* 顶部图标按钮（统一 SVG 图标 + 悬停反馈） */
+.hdr-btn {
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  background-color: #3498db;
-  color: white;
-  border: none;
-  border-radius: 50%;
+  gap: 6px;
+  height: 32px;
+  min-width: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--border-color, #dfe4ea);
+  border-radius: 8px;
+  background: var(--card-bg, #fff);
+  color: var(--text-secondary, #5b6b7c);
+  font-size: 12.5px;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.18s;
 }
-
-.btn-refresh:hover:not(:disabled) {
-  background-color: #2980b9;
-  transform: rotate(180deg);
+.hdr-btn:hover:not(:disabled) {
+  border-color: var(--accent-color, #3498db);
+  color: var(--accent-color, #3498db);
+  background: rgba(52, 152, 219, 0.08);
 }
-
-.btn-refresh:disabled {
-  background-color: #bdc3c7;
-  cursor: not-allowed;
-  transform: none;
+.hdr-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+.hdr-btn-label { white-space: nowrap; }
+.hdr-btn-selection.active {
+  border-color: #e74c3c;
+  color: #e74c3c;
+  background: rgba(231, 76, 60, 0.08);
+}
+.hdr-spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(52, 152, 219, 0.35);
+  border-top-color: #3498db;
+  border-radius: 50%;
+  animation: msg-action-spin 0.7s linear infinite;
 }
 
 .current-group {
-  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
   color: var(--text-primary, #2c3e50);
   font-size: 14px;
+  min-width: 0;
+}
+.current-group-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 42vw;
 }
 
 .messages-area {
@@ -1486,6 +1579,58 @@ export default {
   overflow-y: auto;
   padding: 20px;
 }
+
+/* ===== 消息输入栏（以机器人身份发到该群）===== */
+.chat-composer {
+  flex-shrink: 0;
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  padding: 10px 16px 12px;
+  border-top: 1px solid var(--border-color, #e0e0e0);
+  background: var(--card-bg, #fff);
+}
+.composer-input {
+  flex: 1;
+  min-width: 0;
+  resize: none;
+  max-height: 120px;
+  padding: 9px 12px;
+  border: 1px solid var(--border-color, #dfe4ea);
+  border-radius: 10px;
+  background: var(--bg-tertiary, #f8f9fa);
+  color: var(--text-primary, #333);
+  font-size: 13px;
+  line-height: 1.5;
+  font-family: inherit;
+  transition: border-color 0.18s, background 0.18s;
+}
+.composer-input:focus {
+  outline: none;
+  border-color: var(--accent-color, #3498db);
+  background: var(--card-bg, #fff);
+}
+.composer-input:disabled { opacity: 0.6; cursor: not-allowed; }
+.composer-input::placeholder { color: var(--text-muted, #9aa5b1); }
+
+.composer-send {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 16px;
+  border: none;
+  border-radius: 10px;
+  background: var(--accent-color, #3498db);
+  color: #fff;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.18s, opacity 0.18s;
+}
+.composer-send:hover:not(:disabled) { background: #2980b9; }
+.composer-send:disabled { opacity: 0.5; cursor: not-allowed; }
+.composer-send .msg-action-spinner { border-color: rgba(255, 255, 255, 0.4); border-top-color: #fff; }
 
 .load-more-hint {
   text-align: center;
@@ -2045,68 +2190,31 @@ export default {
   background: #a8a8a8;
 }
 
-/* 选择模式按钮 */
-.btn-selection {
-  width: 32px;
-  height: 32px;
-  background-color: #9b59b6;
-  color: white;
-  border: none;
-  border-radius: 50%;
-  cursor: pointer;
-  font-size: 16px;
-  transition: all 0.2s;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  position: relative;
-}
-
-.btn-selection::after {
-  content: '';
-  position: absolute;
-  width: 12px;
-  height: 6px;
-  border-left: 2px solid white;
-  border-bottom: 2px solid white;
-  transform: rotate(-45deg);
-  top: 50%;
-  left: 50%;
-  margin-left: -5px;
-  margin-top: -3px;
-}
-
-.btn-selection:hover {
-  background-color: #8e44ad;
-  transform: scale(1.1);
-}
-
-.btn-selection.active {
-  background-color: #e74c3c;
-}
-
-/* 选择工具栏 */
+/* ===== 多选工具栏（统一 SVG 图标 + 规范按钮）===== */
 .selection-toolbar {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 12px 20px;
+  padding: 10px 16px;
   background-color: var(--bg-tertiary, #f8f9fa);
   border-bottom: 1px solid var(--border-color, #e0e0e0);
-  gap: 15px;
+  gap: 12px;
   flex-wrap: wrap;
 }
 
-.selection-info {
-  display: flex;
-  align-items: center;
-  gap: 20px;
-}
+.selection-info { display: flex; align-items: center; gap: 16px; }
 
 .selected-count {
-  font-weight: 500;
-  color: var(--text-primary, #2c3e50);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(52, 152, 219, 0.12);
+  color: var(--accent-color, #3498db);
+  font-size: 12.5px;
 }
+.selected-count b { font-weight: 700; }
 
 .selection-mode-label {
   display: flex;
@@ -2114,114 +2222,79 @@ export default {
   gap: 6px;
   cursor: pointer;
   color: var(--text-secondary, #666);
-  font-size: 14px;
+  font-size: 12.5px;
 }
-
 .selection-mode-label input[type="checkbox"] {
-  width: 16px;
-  height: 16px;
+  width: 15px;
+  height: 15px;
   cursor: pointer;
+  accent-color: var(--accent-color, #3498db);
 }
 
-.selection-actions {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-}
+.selection-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 
 .quick-select {
-  display: flex;
-  gap: 5px;
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  border: 1px solid var(--border-color, #dfe4ea);
+  border-radius: 8px;
+  background: var(--card-bg, #fff);
+  padding-left: 8px;
+  color: var(--text-muted, #8a97a5);
 }
-
+.quick-select-icon { display: inline-flex; align-items: center; }
 .quick-select-input {
-  width: 60px;
-  padding: 6px 10px;
-  border: 1px solid var(--border-color, #ddd);
-  border-radius: 4px;
-  font-size: 14px;
+  width: 56px;
+  padding: 6px 6px 6px 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-primary, #333);
+  font-size: 12.5px;
   text-align: center;
 }
+.quick-select-input:focus { outline: none; }
+.quick-select .toolbar-btn { border: none; border-left: 1px solid var(--border-color, #dfe4ea); border-radius: 0 8px 8px 0; }
 
-.quick-select-input:focus {
-  outline: none;
-  border-color: #3498db;
-}
-
-.btn-quick-select {
+/* 工具栏按钮：默认描边风格，主/危险态用色区分 */
+.toolbar-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   padding: 6px 12px;
-  background-color: #3498db;
-  color: white;
-  border: none;
-  border-radius: 4px;
+  border: 1px solid var(--border-color, #dfe4ea);
+  border-radius: 8px;
+  background: var(--card-bg, #fff);
+  color: var(--text-secondary, #5b6b7c);
+  font-size: 12.5px;
   cursor: pointer;
-  font-size: 14px;
-  transition: background-color 0.2s;
+  transition: all 0.18s;
+}
+.toolbar-btn:hover:not(:disabled) {
+  border-color: var(--accent-color, #3498db);
+  color: var(--accent-color, #3498db);
+  background: rgba(52, 152, 219, 0.08);
+}
+.toolbar-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.toolbar-btn-primary {
+  border-color: rgba(39, 174, 96, 0.5);
+  color: #219a52;
+}
+.toolbar-btn-primary:hover:not(:disabled) {
+  border-color: #27ae60;
+  color: #fff;
+  background: #27ae60;
 }
 
-.btn-quick-select:hover {
-  background-color: #2980b9;
+.toolbar-btn-danger {
+  border-color: rgba(231, 76, 60, 0.5);
+  color: #e74c3c;
 }
-
-.btn-clear {
-  padding: 8px 16px;
-  background-color: #95a5a6;
-  color: white;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 14px;
-  transition: background-color 0.2s;
-}
-
-.btn-clear:hover {
-  background-color: #7f8c8d;
-}
-
-.btn-analyze {
-  padding: 8px 16px;
-  background-color: #27ae60;
-  color: white;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 14px;
-  transition: all 0.2s;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.btn-analyze:hover:not(:disabled) {
-  background-color: #219a52;
-}
-
-.btn-analyze:disabled {
-  background-color: #bdc3c7;
-  cursor: not-allowed;
-}
-
-.btn-delete {
-  padding: 8px 16px;
-  background-color: #e74c3c;
-  color: white;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 14px;
-  transition: all 0.2s;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.btn-delete:hover:not(:disabled) {
-  background-color: #c0392b;
-}
-
-.btn-delete:disabled {
-  background-color: #bdc3c7;
-  cursor: not-allowed;
+.toolbar-btn-danger:hover:not(:disabled) {
+  border-color: #e74c3c;
+  color: #fff;
+  background: #e74c3c;
 }
 
 /* 消息选择框 */

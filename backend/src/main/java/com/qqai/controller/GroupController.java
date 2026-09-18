@@ -40,6 +40,9 @@ public class GroupController {
 
     private static final Logger log = LoggerFactory.getLogger(GroupController.class);
 
+    /** 网页发送群消息的长度上限（字符） */
+    private static final int MAX_GROUP_SEND_LENGTH = 2000;
+
     @Autowired
     private GroupRepository groupRepository;
 
@@ -65,6 +68,10 @@ public class GroupController {
     /** 手动推送日报的审计日志 */
     @Autowired
     private AuditLogService auditLogService;
+
+    /** 网页发送群消息的限流（每用户 10 次/分钟） */
+    @Autowired
+    private com.qqai.common.RateLimiterService rateLimiterService;
 
     /**
      * 查询群类型 + 推荐分析类型
@@ -363,6 +370,66 @@ public class GroupController {
 
         auditLogService.log(username, "AI_SUMMARY_DIGEST_PUSH", "group:" + groupId, "SUCCESS",
                 "推送 " + digestDate + " 速览到群 " + groupId + " 成功, napcatMessageId=" + sendResult.getMessageId());
+        return ResponseEntity.ok(ApiResponse.success(data));
+    }
+
+    /**
+     * 从网页向该 QQ 群发送一条文本消息：{@code POST /api/groups/{groupId}/send}，body {@code {"text":"..."}}。
+     *
+     * <p>权限：登录 + 该群对当前用户可见（管理员不受限），即"有群可见性的用户都能发"。</p>
+     * <p>风控：每用户 10 次/分钟（超限 429）；文本 1~2000 字（空 → 400，超长 → 400）。</p>
+     * <p>发送身份是 <b>NapCat 登录的机器人账号</b>，不是网页登录用户；消息会真实发到群里、不可撤回。
+     * 本地不插入消息记录 —— NapCat 会把机器人自己发的消息通过 webhook 回传，由正常链路入库（避免重复）。</p>
+     * <p>成功返回 {@code data = {sent, groupId, napcatMessageId, length}}；成功与失败都写审计。</p>
+     */
+    @PostMapping("/{groupId}/send")
+    public ResponseEntity<ApiResponse<?>> sendGroupText(
+            @PathVariable String groupId,
+            @RequestBody(required = false) Map<String, Object> body) {
+
+        ResponseEntity<ApiResponse<?>> denied = checkGroupAccess(groupId);
+        if (denied != null) {
+            return denied;
+        }
+
+        String username = securityHelper.getCurrentUsername();
+        String text = (body == null || body.get("text") == null) ? "" : String.valueOf(body.get("text")).trim();
+        if (text.isEmpty()) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ApiResponse.error(400, "消息内容不能为空"));
+        }
+        if (text.length() > MAX_GROUP_SEND_LENGTH) {
+            auditLogService.log(username, "GROUP_SEND", "group:" + groupId, "FAIL",
+                    "发送被拒绝：内容超过 " + MAX_GROUP_SEND_LENGTH + " 字（实际 " + text.length() + " 字）");
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(ApiResponse.error(400, "消息过长，最多 " + MAX_GROUP_SEND_LENGTH + " 字"));
+        }
+
+        Long userId = securityHelper.getCurrentUserId();
+        if (!rateLimiterService.isAllowed("group-send:" + userId, 10, 1)) {
+            auditLogService.log(username, "GROUP_SEND", "group:" + groupId, "FAIL", "发送被限流（每分钟最多 10 条）");
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                    .body(ApiResponse.error(429, "发送过于频繁，请稍后再试（每分钟最多 10 条）"));
+        }
+
+        NapCatService.SendGroupMessageResult sendResult = napCatService.sendGroupMessage(groupId, text);
+        if (sendResult == null || !sendResult.isSuccess()) {
+            String detail = (sendResult == null || sendResult.getErrorMessage() == null) ? "未知原因" : sendResult.getErrorMessage();
+            log.warn("网页发送群消息失败 groupId={}: {}", groupId, detail);
+            auditLogService.log(username, "GROUP_SEND", "group:" + groupId, "FAIL", "发送失败：" + detail);
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                    .body(ApiResponse.error(503, "NapCat 未登录或不可用，发送失败"));
+        }
+
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("sent", true);
+        data.put("groupId", groupId);
+        data.put("napcatMessageId", sendResult.getMessageId());
+        data.put("length", text.length());
+
+        // 审计只记长度与预览，不整条落库（群消息本身已在 messages 表）
+        String preview = text.length() > 30 ? text.substring(0, 30) + "…" : text;
+        auditLogService.log(username, "GROUP_SEND", "group:" + groupId, "SUCCESS",
+                "发送 " + text.length() + " 字：[" + preview + "], napcatMessageId=" + sendResult.getMessageId());
         return ResponseEntity.ok(ApiResponse.success(data));
     }
 
