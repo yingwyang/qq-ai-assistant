@@ -419,6 +419,22 @@ export const astrBotApi = {
     method: 'POST',
     body: JSON.stringify(params),
   }),
+
+  /**
+   * 带图提问：图片字节直接交给后端（落到 uploads/chat-tmp/ 再交 AstrBot 转 attachment）。
+   * 刻意不走 /messages/upload —— 那条链路依赖 MinIO，本机未启动时会 "Failed to connect to /127.0.0.1:9000"。
+   */
+  sendMessageWithImage: (params) => {
+    const formData = new FormData();
+    formData.append('file', params.file);
+    formData.append('message', params.message || '');
+    if (params.conversationId) formData.append('conversationId', params.conversationId);
+    if (params.groupId) formData.append('groupId', params.groupId);
+    if (params.userQq) formData.append('userQq', params.userQq);
+    if (params.userNickname) formData.append('userNickname', params.userNickname);
+    formData.append('model', params.model || 'default');
+    return uploadRequest('/astrbot/send-with-image', formData);
+  },
   analyzeGroup: (groupId, messageCount = 50, type = 'summary') => request('/astrbot/analyze', {
     method: 'POST',
     body: JSON.stringify({ groupId, messageCount, type }),

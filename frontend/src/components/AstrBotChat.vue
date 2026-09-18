@@ -360,6 +360,8 @@
               <span class="message-sender">{{ message.sender }}</span>
               <span class="message-time">{{ formatTime(message.time) }}</span>
             </div>
+            <!-- 带图提问：气泡里回显发出去的图片 -->
+            <img v-if="message.imagePreview" :src="message.imagePreview" class="message-image" alt="已发送图片" />
             <RichTextRenderer
               class="message-text"
               :class="{ 'message-system-text': message.isSystem }"
@@ -483,17 +485,36 @@
         </div>
       </div>
       <div class="input-wrapper">
-        <input
-          ref="inputRef"
-          v-model="inputMessage"
-          type="text"
-          placeholder="输入消息..."
-          @keyup.enter="sendMessage"
-          :disabled="isLoading"
-        />
-        <button class="send-btn" @click="sendMessage" :disabled="!inputMessage.trim() || isLoading">
-          {{ isLoading ? '发送中...' : '发送' }}
-        </button>
+        <!-- 待发送图片预览（选图或粘贴后出现） -->
+        <div v-if="pendingImage" class="pending-image">
+          <img :src="pendingImagePreview" class="pending-image-thumb" alt="待发送图片" />
+          <span class="pending-image-name">{{ pendingImage.name }}</span>
+          <button class="pending-image-remove" title="移除图片" @click="clearPendingImage">✕</button>
+        </div>
+        <div class="input-row">
+          <button class="attach-btn" :disabled="isLoading || imageUploading" title="发送图片（也可直接粘贴图片）" @click="triggerImagePick">
+            <Icon name="image" :size="16" />
+          </button>
+          <input
+            ref="imageInputRef"
+            type="file"
+            accept="image/*"
+            class="image-file-input"
+            @change="onImagePicked"
+          />
+          <input
+            ref="inputRef"
+            v-model="inputMessage"
+            type="text"
+            :placeholder="pendingImage ? '描述这张图片，或直接发送…' : '输入消息...'"
+            @keyup.enter="sendMessage"
+            @paste="onPasteImage"
+            :disabled="isLoading"
+          />
+          <button class="send-btn" @click="sendMessage" :disabled="(!inputMessage.trim() && !pendingImage) || isLoading">
+            {{ isLoading ? '发送中...' : '发送' }}
+          </button>
+        </div>
       </div>
       <div v-if="currentConversationId" class="conversation-info">
         当前对话: {{ currentConversationTitle || '新对话' }}
@@ -507,7 +528,7 @@ import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import Icon from './Icon.vue';
 import RichTextRenderer from './RichTextRenderer.vue';
-import { astrBotApi, userApi, systemApi } from '../services/api';
+import { astrBotApi, userApi, systemApi, messageApi } from '../services/api';
 import { filterToolJson, processAstrBotResponse } from '../utils/messageFilter';
 import { showToast } from './Toast.vue';
 import PersonaManager from './PersonaManager.vue';
@@ -1226,19 +1247,80 @@ export default {
       }
     };
 
+    // ===== 图片输入（选图 / 粘贴 → 带图提问）=====
+    const pendingImage = ref(null);          // 待发送的图片 File
+    const pendingImagePreview = ref('');     // 本地预览地址（objectURL）
+    const imageInputRef = ref(null);
+    const imageUploading = ref(false);
+    const MAX_CHAT_IMAGE_BYTES = 10 * 1024 * 1024;
+
+    const clearPendingImage = () => {
+      if (pendingImagePreview.value) URL.revokeObjectURL(pendingImagePreview.value);
+      pendingImagePreview.value = '';
+      pendingImage.value = null;
+    };
+
+    const setPendingImage = (file) => {
+      if (!file) return;
+      if (!String(file.type || '').startsWith('image/')) {
+        showToast('只能发送图片文件', 'warning');
+        return;
+      }
+      if (file.size > MAX_CHAT_IMAGE_BYTES) {
+        showToast(`图片过大（${(file.size / 1024 / 1024).toFixed(1)}MB），最大 10MB`, 'warning');
+        return;
+      }
+      clearPendingImage();
+      pendingImage.value = file;
+      pendingImagePreview.value = URL.createObjectURL(file);
+    };
+
+    const triggerImagePick = () => {
+      if (isLoading.value || imageUploading.value) return;
+      imageInputRef.value?.click();
+    };
+
+    const onImagePicked = (e) => {
+      const file = e?.target?.files?.[0];
+      if (e?.target) e.target.value = '';   // 允许重复选同一张
+      if (file) setPendingImage(file);
+    };
+
+    /** 直接粘贴图片（Ctrl+V） */
+    const onPasteImage = (e) => {
+      const items = e?.clipboardData?.items;
+      if (!items) return;
+      for (const it of items) {
+        if (it.kind === 'file' && String(it.type || '').startsWith('image/')) {
+          const file = it.getAsFile();
+          if (file) {
+            e.preventDefault();
+            setPendingImage(file);
+            return;
+          }
+        }
+      }
+    };
+
     // 发送消息
     const sendMessage = async () => {
-      if (!inputMessage.value.trim() || isLoading.value) return;
-      const userMessage = inputMessage.value.trim();
+      const text = inputMessage.value.trim();
+      if ((!text && !pendingImage.value) || isLoading.value) return;
+      const userMessage = text || '（图片）';
+      const imageFile = pendingImage.value;
+      const imagePreview = pendingImagePreview.value;
 
       messages.value.push({
         text: userMessage,
         sender: props.userNickname || '我',
         isSelf: true,
-        time: new Date()
+        time: new Date(),
+        imagePreview: imagePreview || null   // 预览地址转交给气泡持有
       });
 
       inputMessage.value = '';
+      pendingImage.value = null;
+      pendingImagePreview.value = '';
       isLoading.value = true;
       nextTick(() => scrollToBottom());
 
@@ -1251,11 +1333,35 @@ export default {
         // 模型选择：本次会话显式选择 -> 使用该模型；否则传 'default' 由后端按用户默认模型处理
         request.model = currentModel.value || 'default';
 
-        const response = await astrBotApi.sendMessage(request);
+        // 带图：图片字节直接交给后端（后端落 uploads/chat-tmp/ 后交 AstrBot 转 attachment）
+        // 不走 /messages/upload —— 那条链路依赖 MinIO，本机未启动会失败
+        let response;
+        if (imageFile) {
+          imageUploading.value = true;
+          try {
+            response = await astrBotApi.sendMessageWithImage({
+              file: imageFile,
+              message: userMessage,
+              conversationId: request.conversationId,
+              groupId: request.groupId,
+              userQq: request.userQq,
+              userNickname: request.userNickname,
+              model: request.model
+            });
+          } finally {
+            imageUploading.value = false;
+          }
+        } else {
+          response = await astrBotApi.sendMessage(request);
+        }
         if (response) {
           if (response.conversationId) {
             currentConversationId.value = response.conversationId;
             localStorage.setItem('astrbot_current_conversation', response.conversationId);
+          }
+          // 后端带图时可能自动切换到支持图片的模型，明确告知用户
+          if (response.modelSwitched) {
+            showToast(`当前模型不支持图片，已自动改用 ${response.modelUsed}`, 'info');
           }
           // 使用独立的过滤模块处理响应
           const replyText = processAstrBotResponse(response);
@@ -1695,6 +1801,15 @@ export default {
       inputMessage,
       messagesContainer,
       inputRef,
+      // 图片输入（选图 / 粘贴）
+      imageInputRef,
+      pendingImage,
+      pendingImagePreview,
+      imageUploading,
+      triggerImagePick,
+      onImagePicked,
+      onPasteImage,
+      clearPendingImage,
       botAvatarInput,
       isLoading,
       isOnline,
@@ -3146,7 +3261,72 @@ export default {
 
 .input-wrapper {
   display: flex;
-  gap: 10px;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* 待发送图片预览 */
+.pending-image {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-color, #dfe4ea);
+  border-radius: 10px;
+  background: var(--bg-tertiary, #f8f9fa);
+  width: fit-content;
+  max-width: 100%;
+}
+.pending-image-thumb { width: 36px; height: 36px; object-fit: cover; border-radius: 6px; flex-shrink: 0; }
+.pending-image-name {
+  font-size: 12px;
+  color: var(--text-secondary, #666);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 180px;
+}
+.pending-image-remove {
+  border: none;
+  background: transparent;
+  color: var(--text-muted, #999);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0 2px;
+}
+.pending-image-remove:hover { color: #e74c3c; }
+
+.input-row { display: flex; align-items: center; gap: 10px; }
+
+.attach-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border: 1px solid var(--border-color, #dfe4ea);
+  border-radius: 50%;
+  background: var(--card-bg, #fff);
+  color: var(--text-secondary, #5b6b7c);
+  cursor: pointer;
+  transition: all 0.18s;
+}
+.attach-btn:hover:not(:disabled) {
+  border-color: var(--accent-color, #3498db);
+  color: var(--accent-color, #3498db);
+  background: rgba(52, 152, 219, 0.08);
+}
+.attach-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.image-file-input { display: none; }
+
+/* 气泡里已发送的图片 */
+.message-image {
+  max-width: 220px;
+  max-height: 220px;
+  border-radius: 8px;
+  margin-bottom: 6px;
+  display: block;
 }
 
 .input-wrapper input {

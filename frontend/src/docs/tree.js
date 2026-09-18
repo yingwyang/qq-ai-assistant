@@ -66,7 +66,8 @@ export const categories = [
       { slug: 'rabbitmq-guide', title: '消息队列指南', filePath: '/docs/development/rabbitmq-guide.md', description: '交换机队列全表、重试与积压排查' },
       { slug: 'deployment', title: '部署与运维', filePath: '/docs/development/deployment.md', description: '环境要求、启动顺序、日志与备份' },
       { slug: 'troubleshooting-playbook', title: '排障手册索引', filePath: '/docs/development/troubleshooting-playbook.md', description: '通用四步定位法与历史问题清单' },
-      { slug: 'ai-summary-design', title: 'AI 摘要实装方案', filePath: '/docs/development/ai-summary-design.md', description: '设计稿：数据模型、接口、交互与落地计划' }
+      { slug: 'ai-summary-design', title: 'AI 摘要实装方案', filePath: '/docs/development/ai-summary-design.md', description: '设计稿：数据模型、接口、交互与落地计划' },
+      { slug: 'rag-knowledge-base-design', title: '知识库（RAG）接入方案', filePath: '/docs/development/rag-knowledge-base-design.md', description: '设计稿：三条选型路线、数据模型、成本估算与分阶段落地' }
     ]
   }
 ];

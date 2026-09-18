@@ -32,6 +32,7 @@ import org.springframework.http.*;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.client.RestTemplate;
 
 import java.io.File;
@@ -928,6 +929,133 @@ public class AstrBotController {
      * 发送消息给 AstrBot 并获取回复（带对话存储）
      * 支持 conversationId 参数来维持对话上下文
      */
+    /**
+     * 从 AstrBot 的 cmd_config.json 读出「支持图片」的模型 id 集合（modalities 含 image）。
+     * 读不到时返回空集合（调用方据此决定是否回退到默认模型）。
+     */
+    private java.util.Set<String> loadVisionModelIds() {
+        java.util.Set<String> ids = new java.util.HashSet<>();
+        try {
+            if (astrBotDataPath == null || astrBotDataPath.isBlank()) return ids;
+            java.io.File configFile = new java.io.File(astrBotDataPath, "cmd_config.json");
+            if (!configFile.exists() || !configFile.canRead()) return ids;
+            JsonNode root = objectMapper.readTree(configFile);
+            JsonNode providers = root.has("provider") ? root.get("provider") : null;
+            if (providers == null || !providers.isArray()) return ids;
+            for (JsonNode p : providers) {
+                JsonNode mods = p.get("modalities");
+                if (mods == null || !mods.isArray()) continue;
+                boolean hasImage = false;
+                for (JsonNode m : mods) {
+                    if ("image".equalsIgnoreCase(m.asText())) { hasImage = true; break; }
+                }
+                if (hasImage && p.has("id")) ids.add(p.get("id").asText());
+            }
+        } catch (Exception e) {
+            log.debug("读取视觉模型清单失败: {}", e.getMessage());
+        }
+        return ids;
+    }
+
+    /**
+     * 带图提问：{@code POST /api/astrbot/send-with-image}（multipart）。
+     *
+     * <p>为什么不让前端先走 {@code /api/messages/upload}：那条链路依赖 MinIO（本机未启动时会
+     * "Failed to connect to /127.0.0.1:9000"）。这里改为把图片落到 {@code uploads/chat-tmp/}，
+     * 再用 {@code /uploads/...} 形式交给既有的多模态逻辑（{@link #buildMultimodalMessage}）上传给 AstrBot。</p>
+     *
+     * <p>处理方法：先把表单参数整理成与 {@code /send} 相同的 Map，然后直接复用 {@link #sendMessage}，
+     * 因此计费、会话、模型选择、多模态等行为与纯文本对话完全一致。临时文件在调用结束后删除。</p>
+     */
+    @PostMapping(value = "/send-with-image", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<?> sendMessageWithImage(
+            @RequestParam("file") MultipartFile file,
+            @RequestParam(value = "message", required = false) String message,
+            @RequestParam(value = "conversationId", required = false) String conversationId,
+            @RequestParam(value = "groupId", required = false) String groupId,
+            @RequestParam(value = "userQq", required = false) String userQq,
+            @RequestParam(value = "userNickname", required = false) String userNickname,
+            @RequestParam(value = "model", required = false, defaultValue = "default") String model) {
+
+        if (file == null || file.isEmpty()) {
+            return ResponseEntity.badRequest().body(Map.of("status", "error", "message", "图片不能为空"));
+        }
+        String contentType = String.valueOf(file.getContentType() == null ? "" : file.getContentType());
+        if (!contentType.startsWith("image/")) {
+            return ResponseEntity.badRequest().body(Map.of("status", "error", "message", "只能发送图片文件"));
+        }
+        if (file.getSize() > 10L * 1024 * 1024) {
+            return ResponseEntity.badRequest().body(Map.of("status", "error", "message", "图片过大，最大 10MB"));
+        }
+
+        File temp = null;
+        try {
+            // 必须用绝对路径：MultipartFile#transferTo 对相对路径会解析到 Tomcat 的 work 目录
+            // （work/Tomcat/localhost/ROOT/...），导致 FileNotFoundException。
+            java.nio.file.Path dir = java.nio.file.Paths.get("uploads", "chat-tmp").toAbsolutePath();
+            java.nio.file.Files.createDirectories(dir);
+            String original = String.valueOf(file.getOriginalFilename() == null ? "" : file.getOriginalFilename());
+            String ext = "";
+            int dot = original.lastIndexOf('.');
+            if (dot >= 0 && original.length() - dot <= 6) ext = original.substring(dot).toLowerCase();
+            java.nio.file.Path target = dir.resolve(java.util.UUID.randomUUID() + ext);
+            try (java.io.InputStream in = file.getInputStream()) {
+                java.nio.file.Files.copy(in, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            }
+            temp = target.toFile();
+
+            Map<String, Object> request = new HashMap<>();
+            request.put("message", message == null ? "" : message);
+            request.put("imageUrls", List.of("/uploads/chat-tmp/" + temp.getName()));
+            if (conversationId != null && !conversationId.isBlank()) request.put("conversationId", conversationId);
+            if (groupId != null && !groupId.isBlank()) request.put("groupId", groupId);
+            if (userQq != null && !userQq.isBlank()) request.put("userQq", userQq);
+            if (userNickname != null && !userNickname.isBlank()) request.put("userNickname", userNickname);
+            request.put("model", model);
+            log.info("带图提问: ext={}, size={}B", ext, file.getSize());
+
+            // 模型兜底：当前会话选的模型若不支持图片（AstrBot 配置的 modalities 无 image），
+            // 自动改用「用户默认模型 → 配置里第一个支持图片的模型」。否则会出现调用 90s+
+            // 后返回无法解析的响应（实测 DeepSeek-V2.5 带图即如此）。
+            String requestedModel = (model == null || model.isBlank() || "default".equalsIgnoreCase(model)) ? null : model;
+            String modelUsed = requestedModel;
+            boolean switched = false;
+            if (requestedModel != null) {
+                java.util.Set<String> visionIds = loadVisionModelIds();
+                if (!visionIds.isEmpty() && !visionIds.contains(requestedModel)) {
+                    String fallback = getCurrentUserLlmModel();
+                    if (fallback == null || fallback.isBlank() || !visionIds.contains(fallback)) {
+                        fallback = visionIds.iterator().next();
+                    }
+                    modelUsed = fallback;
+                    switched = true;
+                    request.put("model", fallback);
+                    log.info("带图提问模型兜底: {} 不支持图片 → 改用 {}", requestedModel, fallback);
+                }
+            }
+
+            ResponseEntity<?> resp = sendMessage(request);
+            // 把「实际使用的模型 / 是否发生过兜底」附回响应，前端可据此提示用户
+            Object bodyObj = resp.getBody();
+            if (bodyObj instanceof Map<?, ?> rawMap) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> body = (Map<String, Object>) rawMap;
+                body.put("modelUsed", modelUsed);
+                body.put("modelSwitched", switched);
+                if (switched) body.put("modelRequested", requestedModel);
+            }
+            return resp;
+        } catch (Exception e) {
+            log.warn("带图提问失败: {}", e.getMessage());
+            return ResponseEntity.status(500).body(Map.of("status", "error", "message", "图片处理失败: " + e.getMessage()));
+        } finally {
+            // AstrBot 在调用过程中已把图片转成自己的 attachment，这里的临时文件可以安全删除
+            if (temp != null && temp.exists() && !temp.delete()) {
+                log.debug("临时图片删除失败: {}", temp.getAbsolutePath());
+            }
+        }
+    }
+
     @PostMapping("/send")
     public ResponseEntity<?> sendMessage(@RequestBody Map<String, Object> request) {
         String message = (String) request.get("message");
@@ -936,11 +1064,24 @@ public class AstrBotController {
         String userNickname = (String) request.get("userNickname");
         String conversationId = (String) request.get("conversationId");
         String model = (String) request.getOrDefault("model", "default");
+        // 多模态：前端可传 imageUrls（本后端的相对路径或完整 URL），后端读本地文件上传 AstrBot 换 attachment_id
+        List<String> requestImageUrls = new ArrayList<>();
+        Object rawImages = request.get("imageUrls");
+        if (rawImages instanceof List<?> list) {
+            for (Object o : list) {
+                if (o != null && !String.valueOf(o).isBlank()) requestImageUrls.add(String.valueOf(o).trim());
+            }
+        }
+        boolean hasImage = !requestImageUrls.isEmpty();
 
-        if (message == null || message.trim().isEmpty()) {
+        if ((message == null || message.trim().isEmpty()) && !hasImage) {
             Map<String, Object> errorResult = new HashMap<>();
             errorResult.put("error", "消息不能为空");
             return ResponseEntity.badRequest().body(errorResult);
+        }
+        // 只发图不带文字时给一个默认提示，避免模型不知道要做什么
+        if ((message == null || message.trim().isEmpty()) && hasImage) {
+            message = "请看这张图片，说明其中的内容。";
         }
 
         String currentConversationId = null;
@@ -994,10 +1135,13 @@ public class AstrBotController {
             // 主聊天/分析链路/异步摘要三条链路的消息文本渲染统一使用 RichMessageRenderer：
             // - 分析链路：见 analyzeSelected()/analyzeGroupMessages() buildRenderedBatch() 调用
             // - 异步摘要链路：见 AiAnalysisConsumer + AstrBotService.doSummarize()
-            // - 主聊天：此处用户输入以纯文本为主（前端暂不支持图片上传），如果未来传入 IM Message 对象，也必须调用 RichMessageRenderer.renderSingle() 渲染
-            body.put("message", message);
+            // - 主聊天：本条消息若带图，走 buildMultimodalMessage()（与两条分析链路同一实现）上传换 attachment_id
+            body.put("message", hasImage ? buildMultimodalMessage(message, requestImageUrls, token) : message);
             body.put("username", userQq != null ? userQq : "web_user");
             body.put("enable_streaming", false);
+            if (hasImage) {
+                log.info("AI 对话带图: imageUrls={}, 模型={}", requestImageUrls.size(), model);
+            }
             // 优先级：前端本次请求显式传入 model > 用户默认模型
             String activeModel = (model != null && !model.isBlank() && !"default".equalsIgnoreCase(model))
                     ? model
@@ -1035,7 +1179,9 @@ public class AstrBotController {
             org.springframework.http.client.SimpleClientHttpRequestFactory factory = 
                 new org.springframework.http.client.SimpleClientHttpRequestFactory();
             factory.setConnectTimeout(30000);
-            factory.setReadTimeout(60000);
+            // 读超时 180s：带图的视觉调用实测 20~100s，原来 60s 会在 99s 时抛
+            // "Error while extracting response"（实为 SocketTimeout），前端只看到“服务暂时不可用”
+            factory.setReadTimeout(180000);
             
             // 配置消息转换器，使用 UTF-8 编码
             java.util.List<org.springframework.http.converter.HttpMessageConverter<?>> converters = 
