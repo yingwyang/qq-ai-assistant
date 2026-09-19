@@ -1,53 +1,62 @@
 <template>
   <div class="astrbot-chat">
     <div class="chat-header">
-      <div class="header-info">
-        <h3>{{ botName }}</h3>
-        <span class="status" :class="{ 'online': isOnline, 'offline': !isOnline }">
-          {{ isOnline ? '在线' : '离线' }}
-        </span>
-        <svg
-          v-if="isLoading"
-          class="header-loading-icon"
-          width="16"
-          height="16"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-        >
-          <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
-          <path d="M3 3v5h5"></path>
-          <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"></path>
-          <path d="M16 21h5v-5"></path>
-        </svg>
+      <!-- 头像 + 在线小圆点：一眼看出「谁在说话」与连接状态 -->
+      <div class="header-avatar" :class="{ 'is-online': isOnline }">
+        <img :src="botAvatar" alt="bot avatar" @error="handleBotAvatarError" />
+        <span class="avatar-status" :class="isOnline ? 'online' : 'offline'"></span>
       </div>
+
+      <div class="header-info">
+        <div class="header-title-row">
+          <h3 class="header-name" :title="botName">{{ botName }}</h3>
+          <span class="status-pill" :class="isOnline ? 'online' : 'offline'">
+            <span class="status-dot"></span>{{ isOnline ? '在线' : '离线' }}
+          </span>
+          <span v-if="isLoading" class="status-pill busy">
+            <svg class="header-loading-icon" width="11" height="11" viewBox="0 0 24 24" fill="none"
+                 stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
+              <path d="M3 3v5h5"></path>
+              <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"></path>
+              <path d="M16 21h5v-5"></path>
+            </svg>
+            生成中
+          </span>
+        </div>
+        <div class="header-subtitle" :title="headerSubtitle">
+          <Icon name="chat" :size="12" />
+          <span class="header-subtitle-text">{{ headerSubtitle }}</span>
+        </div>
+      </div>
+
       <div class="header-actions">
         <!-- TTS 角色选择器 -->
-        <div v-if="ttsCharacters.length > 0" class="tts-character-selector">
+        <div v-if="ttsCharacters.length > 0" class="tts-character-selector" title="语音合成角色">
+          <Icon name="audio" :size="13" />
           <select
             v-model="selectedTtsCharacter"
             @change="onTtsCharacterChange"
             class="tts-character-select"
-            title="语音合成角色"
           >
             <option v-for="c in ttsCharacters" :key="c.name" :value="c.name">
               {{ c.label || c.name }}
             </option>
           </select>
         </div>
-        <button class="action-btn" @click="toggleConversationList" title="对话历史">
-          <Icon name="list" :size="16" />
-        </button>
-        <button class="action-btn" @click="createNewConversation" title="新对话">
-          <Icon name="add" :size="16" />
-        </button>
-        <!-- 设置入口：提供商配置 + 「人格与状态」（双层提示词的人层） -->
-        <button class="action-btn" @click="openSettings" title="AstrBot 设置 / 人格与状态">
-          <Icon name="settings" :size="16" />
-        </button>
+        <div class="action-group">
+          <button class="action-btn" :class="{ active: showConversationList }" @click="toggleConversationList" title="对话历史">
+            <Icon name="list" :size="16" />
+          </button>
+          <span class="action-divider"></span>
+          <button class="action-btn" @click="createNewConversation" title="新对话">
+            <Icon name="add" :size="16" />
+          </button>
+          <!-- 设置入口：提供商配置 + 「人格与状态」（双层提示词的人层） -->
+          <button class="action-btn" @click="openSettings" title="AstrBot 设置 / 人格与状态">
+            <Icon name="settings" :size="16" />
+          </button>
+        </div>
       </div>
     </div>
 
@@ -700,9 +709,7 @@
           </button>
         </div>
       </div>
-      <div v-if="currentConversationId" class="conversation-info">
-        当前对话: {{ currentConversationTitle || '新对话' }}
-      </div>
+      <!-- 「当前对话」已移到顶栏副标题，这里不再重复 -->
     </div>
   </div>
 </template>
@@ -1761,6 +1768,18 @@ export default {
       }
     };
 
+    // ==================== 顶栏 ====================
+    /**
+     * 顶栏副标题：优先当前会话标题（如「群聊速览 - 某某群」），
+     * 没有会话时才退回当前群名 —— 两者不要拼在一起，容易张冠李戴。
+     */
+    const headerSubtitle = computed(() => {
+      const conv = (currentConversationTitle.value || '').trim();
+      if (conv && conv !== '新对话') return conv;
+      const group = (props.groupName || '').trim();
+      return group || '新对话';
+    });
+
     // ==================== 转发到群聊 ====================
     // 把 AI 回复（或自己的提问）直接发到某个 QQ 群：走后端 /groups/{id}/send，
     // 权限、限流（10 次/分钟）、长度（2000 字）都由后端把关。
@@ -2143,6 +2162,7 @@ export default {
       llmModels,
       showAstrbotKey,
       showSettings,
+      headerSubtitle,
       // 双层提示词：人层
       settingsTab,
       personaOptions,
@@ -2228,56 +2248,129 @@ export default {
   position: relative;
 }
 
+/* ==================== 顶栏 ==================== */
 .chat-header {
   display: flex;
   align-items: center;
-  padding: 15px 20px;
-  background-color: var(--card-bg, white);
+  gap: 12px;
+  padding: 10px 14px;
+  background: linear-gradient(180deg, var(--card-bg, #fff) 0%, var(--bg-tertiary, #f8f9fa) 100%);
   border-bottom: 1px solid var(--border-color, #e0e0e0);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 1px 2px var(--card-shadow, rgba(0, 0, 0, 0.06));
+  flex-shrink: 0;
 }
 
+/* 头像 + 右下角在线圆点 */
 .header-avatar {
-  width: 40px;
-  height: 40px;
-  margin-right: 12px;
+  position: relative;
+  width: 38px;
+  height: 38px;
+  flex-shrink: 0;
   border-radius: 50%;
-  overflow: hidden;
+  overflow: visible;
+  box-shadow: 0 0 0 2px var(--card-bg, #fff), 0 0 0 3px rgba(52, 152, 219, 0.35);
 }
 
 .header-avatar img {
   width: 100%;
   height: 100%;
+  border-radius: 50%;
   object-fit: cover;
+  display: block;
 }
 
+.header-avatar .avatar-status {
+  position: absolute;
+  right: -1px;
+  bottom: -1px;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  border: 2px solid var(--card-bg, #fff);
+}
+
+.header-avatar .avatar-status.online { background: var(--success-color, #27ae60); }
+.header-avatar .avatar-status.offline { background: var(--danger-color, #e74c3c); }
+
 .header-info {
-  flex: 1;
+  flex: 1 1 auto;
+  min-width: 96px;   /* 面板被拖窄时优先保住「名字 + 状态」，而不是被右侧控件挤没 */
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.header-title-row {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
 }
 
-.header-info h3 {
+.header-info h3,
+.header-name {
   margin: 0;
-  font-size: 16px;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.2;
   color: var(--text-primary, #2c3e50);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.header-info .status {
+/* 状态胶囊：在线 / 离线 / 生成中 */
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 18px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.status-pill .status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.status-pill.online {
+  color: var(--success-color, #27ae60);
+  background: rgba(39, 174, 96, 0.12);
+}
+
+.status-pill.offline {
+  color: var(--danger-color, #e74c3c);
+  background: rgba(231, 76, 60, 0.12);
+}
+
+.status-pill.busy {
+  color: var(--accent-color, #3498db);
+  background: rgba(52, 152, 219, 0.12);
+}
+
+.header-subtitle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
   font-size: 12px;
+  color: var(--text-secondary, #666);
 }
 
-.header-info .status.online {
-  color: #27ae60;
-}
-
-.header-info .status.offline {
-  color: #e74c3c;
+.header-subtitle-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .header-loading-icon {
-  color: #3498db;
+  color: currentColor;
   animation: astrbot-spin 1s linear infinite;
 }
 
@@ -2290,42 +2383,112 @@ export default {
   display: flex;
   gap: 8px;
   align-items: center;
+  flex-shrink: 0;
+}
+
+/* 图标按钮组：整块圆角底 + 分隔线，视觉上更整齐 */
+.action-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 9px;
+  background: var(--bg-secondary, #fff);
+  border: 1px solid var(--border-color, #e0e0e0);
+}
+
+.action-group .action-divider {
+  width: 1px;
+  height: 16px;
+  background: var(--border-color, #e0e0e0);
+  margin: 0 2px;
 }
 
 .tts-character-selector {
-  margin-right: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 8px 0 9px;
+  height: 32px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color, #e0e0e0);
+  background: var(--bg-secondary, #fff);
+  color: var(--text-secondary, #666);
 }
+
+.tts-character-selector:hover {
+  border-color: rgba(52, 152, 219, 0.5);
+}
+
 .tts-character-select {
-  padding: 4px 8px;
-  border: 1px solid var(--border-color, #ddd);
-  border-radius: 6px;
-  font-size: 12px;
-  background: var(--card-bg, #fff);
+  border: none;
+  background: transparent;
   color: var(--text-primary, #333);
+  font-size: 12px;
   cursor: pointer;
   outline: none;
-  transition: border-color 0.2s;
-  max-width: 140px;
-}
-.tts-character-select:hover {
-  border-color: #4f46e5;
-}
-.tts-character-select:focus {
-  border-color: #4f46e5;
+  max-width: 132px;
+  padding: 0 2px;
 }
 
 .action-btn {
-  background: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
   border: none;
+  border-radius: 7px;
+  background: none;
+  color: var(--text-secondary, #666);
   font-size: 20px;
   cursor: pointer;
-  padding: 5px;
-  border-radius: 4px;
-  transition: background-color 0.2s;
+  transition: background-color 0.18s, color 0.18s;
 }
 
 .action-btn:hover {
-  background-color: var(--border-color, #f0f0f0);
+  background-color: rgba(52, 152, 219, 0.14);
+  color: var(--accent-color, #3498db);
+}
+
+.action-btn.active {
+  background-color: rgba(52, 152, 219, 0.18);
+  color: var(--accent-color, #3498db);
+}
+
+.action-btn:focus-visible {
+  outline: 2px solid var(--accent-color, #3498db);
+  outline-offset: 1px;
+}
+
+/* 面板很窄时逐级让位：副标题 → 头像 → 语音选择器图标（面板宽度由用户拖动决定，
+   所以用容器查询而不是视口媒体查询） */
+.astrbot-chat { container-type: inline-size; }
+
+@container (max-width: 470px) {
+  .header-subtitle { display: none; }
+}
+
+/* 再窄就让语音选择器让位（它比名字次要，需要时把面板拖宽即可） */
+@container (max-width: 430px) {
+  .tts-character-selector { display: none; }
+}
+
+@container (max-width: 380px) {
+  .header-avatar { width: 32px; height: 32px; }
+  .chat-header { padding: 8px 12px; gap: 9px; }
+}
+
+@container (max-width: 320px) {
+  .action-btn { width: 26px; height: 26px; }
+  .status-pill { padding: 1px 6px; }
+  .status-pill .status-dot { display: none; }
+  .action-divider { display: none; }
+}
+
+@media (max-width: 900px) {
+  .header-subtitle { display: none; }
 }
 
 .conversation-panel {
