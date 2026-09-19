@@ -37,6 +37,8 @@ export function useUserManagement({ showSystemMsg } = {}) {
   const userActive = ref('');
   const userSort = ref('createdAt');
   const userOrder = ref('desc');
+  /** 系统里「可用管理员」数量：<=1 时最后一位管理员不可降权/禁用/删除 */
+  const activeAdminCount = ref(0);
 
   // 批量操作：勾选 + 执行中
   const selectedUserIds = ref(new Set());
@@ -85,6 +87,7 @@ export function useUserManagement({ showSystemMsg } = {}) {
       userTotalElements.value = pageData.totalElements || 0;
       userTotalPages.value = pageData.totalPages || 0;
       userCurrentPage.value = pageData.number || 0;
+      activeAdminCount.value = pageData.activeAdminCount ?? activeAdminCount.value;
     } catch (error) {
       logger.error('加载用户列表失败:', error);
       userError.value = error.message || '加载用户列表失败';
@@ -95,6 +98,18 @@ export function useUserManagement({ showSystemMsg } = {}) {
       userLoading.value = false;
     }
   };
+
+  /**
+   * 是否是「最后一位可用管理员」。
+   * 这类账号不能降权 / 禁用 / 删除——否则没人能再进 /admin（后端也会拦，这里提前禁按钮并说明原因）。
+   */
+  const isLastActiveAdmin = (user) => {
+    if (!user || !user.active) return false;
+    if (!user.role || user.role.toUpperCase() !== 'ADMIN') return false;
+    return activeAdminCount.value <= 1;
+  };
+
+  const lastAdminTip = '系统至少要保留一位可登录的管理员：请先给其它账号提权，再操作这个账号';
 
   const onUserSearchInput = () => {
     if (userSearchTimer) clearTimeout(userSearchTimer);
@@ -336,6 +351,7 @@ export function useUserManagement({ showSystemMsg } = {}) {
     userLoading, userError,
     userRole, userActive, userSort, userOrder,
     userRoleOptions, userActiveOptions, userSortOptions, userFilterActive, userExportUrl,
+    activeAdminCount, isLastActiveAdmin, lastAdminTip,
     setUserRole, setUserActive, setUserSort, setUserPageSize, resetUserFilters,
     selectedUserIds, selectedUserCount, isUserSelected, toggleUserSelection,
     toggleSelectAllUsers, clearUserSelection, batchSetUserActive, batchRunning,

@@ -64,6 +64,16 @@
       </div>
     </div>
 
+    <div class="notice-bar" :class="{ 'is-warn': activeAdminCount <= 1 }">
+      <template v-if="activeAdminCount <= 1">
+        当前只有 <strong>1 位可登录的管理员</strong>：为保证后台始终有人能进，这位管理员的「降权 / 禁用 / 删除」已被禁用。
+        需要更换管理员时，请先给其它账号提权，再操作原账号。
+      </template>
+      <template v-else>
+        当前有 <strong>{{ activeAdminCount }}</strong> 位可登录的管理员。
+      </template>
+    </div>
+
     <div class="user-table-wrapper">
       <table class="user-table">
         <thead>
@@ -105,10 +115,27 @@
             <td>{{ formatDate(user.createdAt) }}</td>
             <td>
               <div class="action-btns">
-                <button class="btn-action" :class="user.role === 'ADMIN' ? 'demote' : 'promote'" @click="toggleRole(user)">{{ user.role === 'ADMIN' ? '降权' : '提权' }}</button>
-                <button class="btn-action" :class="user.active ? 'disable' : 'enable'" @click="toggleActive(user)">{{ user.active ? '禁用' : '启用' }}</button>
+                <button
+                  class="btn-action"
+                  :class="user.role === 'ADMIN' ? 'demote' : 'promote'"
+                  :disabled="user.role === 'ADMIN' && isLastActiveAdmin(user)"
+                  :title="user.role === 'ADMIN' && isLastActiveAdmin(user) ? lastAdminTip : ''"
+                  @click="toggleRole(user)"
+                >{{ user.role === 'ADMIN' ? '降权' : '提权' }}</button>
+                <button
+                  class="btn-action"
+                  :class="user.active ? 'disable' : 'enable'"
+                  :disabled="user.active && isLastActiveAdmin(user)"
+                  :title="user.active && isLastActiveAdmin(user) ? lastAdminTip : ''"
+                  @click="toggleActive(user)"
+                >{{ user.active ? '禁用' : '启用' }}</button>
                 <button class="btn-action promote" @click="openResetPasswordModal(user)">重置密码</button>
-                <button class="btn-action delete" @click="deleteUser(user)">删除</button>
+                <button
+                  class="btn-action delete"
+                  :disabled="isLastActiveAdmin(user)"
+                  :title="isLastActiveAdmin(user) ? lastAdminTip : ''"
+                  @click="deleteUser(user)"
+                >删除</button>
               </div>
             </td>
           </tr>
@@ -165,6 +192,9 @@ export default {
       userSortOptions: userMgmt.userSortOptions,
       userFilterActive: userMgmt.userFilterActive,
       userExportUrl: userMgmt.userExportUrl,
+      activeAdminCount: userMgmt.activeAdminCount,
+      isLastActiveAdmin: userMgmt.isLastActiveAdmin,
+      lastAdminTip: userMgmt.lastAdminTip,
       setUserRole: userMgmt.setUserRole,
       setUserActive: userMgmt.setUserActive,
       setUserSort: userMgmt.setUserSort,

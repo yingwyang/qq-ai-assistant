@@ -101,6 +101,32 @@ public class UserService {
         return userRepository.findByUsernameContainingOrNicknameContaining(keyword, keyword, pageable);
     }
 
+    /** 「可用管理员」= role 为 ADMIN 且未被禁用；后台至少要留一位 */
+    public long countActiveAdmins() {
+        return userRepository.countByRoleIgnoreCaseAndActiveTrue("ADMIN");
+    }
+
+    /** 该用户当前是否算「可用管理员」 */
+    public boolean isActiveAdmin(User user) {
+        return user != null
+                && user.getRole() != null && "ADMIN".equalsIgnoreCase(user.getRole())
+                && user.isActive();
+    }
+
+    /**
+     * 判断某次操作会不会让系统失去最后一位可用管理员。
+     *
+     * <p>覆盖三种会让管理员无法登录后台的操作：降权、禁用、删除。
+     * 其它情况（操作对象不是可用管理员、或还有别的可用管理员）一律放行。</p>
+     *
+     * @param target      被操作的用户
+     * @param willLoseAdmin 这次操作是否会让该用户失去「可用管理员」身份
+     */
+    public boolean wouldRemoveLastAdmin(User target, boolean willLoseAdmin) {
+        if (!willLoseAdmin || !isActiveAdmin(target)) return false;
+        return countActiveAdmins() <= 1;
+    }
+
     /**
      * 管理端用户查询：关键字 + 角色 + 启用状态 + 排序。
      *

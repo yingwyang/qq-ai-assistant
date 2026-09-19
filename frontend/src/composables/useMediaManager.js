@@ -297,9 +297,17 @@ export function useMediaManager({ showSystemMsg, loadDiskUsage } = {}) {
   const previewPage = ref(0);
   const previewPageSize = ref(40);
   const previewTotalElements = ref(0);
-  const previewTotalPages = computed(() =>
-    Math.max(1, Math.ceil(previewTotalElements.value / previewPageSize.value))
-  );
+  /**
+   * 预览数据来源：
+   * - 'all'       → 全部媒体（按 previewPageSize 分页，可翻页/跨页连播）
+   * - 'selection' → 只预览已勾选的文件（就是一屏，不翻页）
+   * 改造前没有这个区分：相册永远只有第一页 40 张，翻不到第 2 页。
+   */
+  const previewSource = ref('all');
+  const previewTotalPages = computed(() => {
+    if (previewSource.value === 'selection') return 1;
+    return Math.max(1, Math.ceil(previewTotalElements.value / previewPageSize.value));
+  });
   const previewLoadingPage = ref(false);
 
   const selectedMediaFiles = computed(() =>
@@ -318,9 +326,25 @@ export function useMediaManager({ showSystemMsg, loadDiskUsage } = {}) {
     currentPreviewIndex.value = startIndex >= 0 ? startIndex : 0;
     previewMode.value = 'single';
     showPreviewModal.value = true;
+
+    if (selectedMediaFiles.value.length > 0) {
+      previewSource.value = 'selection';
+      previewTotalElements.value = list.length;
+      previewPage.value = 0;
+    } else {
+      // 从表格某一行进入：算出这一行在「全部媒体」里的全局序号，
+      // 从而知道它属于第几个预览页，单张模式的「上一个/下一个」才能跨页继续。
+      previewSource.value = 'all';
+      previewTotalElements.value = mediaFilesTotal.value || list.length;
+      const globalIndex = mediaFilePage.value * mediaFileSize.value
+        + (startIndex >= 0 ? startIndex : 0);
+      previewPage.value = Math.floor(globalIndex / previewPageSize.value);
+    }
   };
 
   const loadPreviewPage = async (page) => {
+    if (previewSource.value === 'selection') return;   // 勾选预览不翻页
+    if (page < 0 || page >= previewTotalPages.value) return;
     previewLoadingPage.value = true;
     try {
       const res = await messageApi.getMediaFiles({ ...mediaQuery.value, page, size: previewPageSize.value });
@@ -334,6 +358,7 @@ export function useMediaManager({ showSystemMsg, loadDiskUsage } = {}) {
         });
         mediaFileCache.value = newCache;
         previewPage.value = page;
+        currentPreviewIndex.value = 0;
       }
     } catch (error) {
       logger.error('加载预览页失败:', error);
@@ -344,13 +369,31 @@ export function useMediaManager({ showSystemMsg, loadDiskUsage } = {}) {
 
   const previewAllFiles = async () => {
     previewMode.value = 'gallery';
+    previewSource.value = 'all';
     showPreviewModal.value = true;
+    if (previewTotalElements.value !== mediaFilesTotal.value) {
+      previewTotalElements.value = mediaFilesTotal.value;
+    }
     await loadPreviewPage(0);
   };
 
   const previewGoToPage = async (page) => {
     if (page < 0 || page >= previewTotalPages.value || previewLoadingPage.value) return;
     await loadPreviewPage(page);
+  };
+
+  const setPreviewPageSize = async (size) => {
+    const next = Number(size) || 40;
+    if (next === previewPageSize.value) return;
+    // 尽量停在当前这张图附近，而不是粗暴回到第一页
+    const globalIndex = previewPage.value * previewPageSize.value + currentPreviewIndex.value;
+    previewPageSize.value = next;
+    const targetPage = Math.floor(globalIndex / next);
+    await loadPreviewPage(Math.min(targetPage, previewTotalPages.value - 1));
+    currentPreviewIndex.value = globalIndex - targetPage * next;
+    if (currentPreviewIndex.value < 0 || currentPreviewIndex.value >= previewFiles.value.length) {
+      currentPreviewIndex.value = 0;
+    }
   };
 
   const enterSingleView = (index) => {
@@ -400,17 +443,32 @@ export function useMediaManager({ showSystemMsg, loadDiskUsage } = {}) {
     previewFiles.value = [];
     previewPage.value = 0;
     previewTotalElements.value = 0;
+    previewSource.value = 'all';
   };
 
-  const previewNext = () => {
+  /**
+   * 单张模式的上一个/下一个：走到当前页边界时自动载入相邻页，
+   * 否则「下一个」在每页最后一张就停住了（40 张一页时尤其明显）。
+   */
+  const previewNext = async () => {
     if (currentPreviewIndex.value < previewFiles.value.length - 1) {
       currentPreviewIndex.value++;
+      return;
+    }
+    if (previewSource.value === 'all' && previewPage.value < previewTotalPages.value - 1) {
+      await loadPreviewPage(previewPage.value + 1);
     }
   };
 
-  const previewPrev = () => {
+  const previewPrev = async () => {
     if (currentPreviewIndex.value > 0) {
       currentPreviewIndex.value--;
+      return;
+    }
+    if (previewSource.value === 'all' && previewPage.value > 0) {
+      const targetPage = previewPage.value - 1;
+      await loadPreviewPage(targetPage);
+      currentPreviewIndex.value = Math.max(0, previewFiles.value.length - 1);
     }
   };
 
@@ -445,6 +503,7 @@ export function useMediaManager({ showSystemMsg, loadDiskUsage } = {}) {
     // 预览
     showPreviewModal, previewFiles, currentPreviewIndex, currentPreviewFile, previewMode,
     previewPage, previewPageSize, previewTotalPages, previewTotalElements, previewLoadingPage,
+    previewSource, setPreviewPageSize,
     openPreview, previewAllFiles, previewGoToPage, enterSingleView, backToGallery, backToList,
     togglePreviewSelection, isAllPreviewSelected, toggleSelectAllInPreview,
     closePreview, previewNext, previewPrev, onPreviewKeydown,

@@ -31,4 +31,10 @@ public interface UserRepository extends JpaRepository<User, Long>, JpaSpecificat
      * 按用户名或昵称模糊搜索（分页）
      */
     Page<User> findByUsernameContainingOrNicknameContaining(String username, String nickname, Pageable pageable);
+
+    /**
+     * 统计「可用管理员」数量：role=ADMIN 且未被禁用。
+     * 用于保证系统里始终至少有一位能登录后台的管理员。
+     */
+    long countByRoleIgnoreCaseAndActiveTrue(String role);
 }

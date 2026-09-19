@@ -32,6 +32,13 @@ public class AdminController {
     private org.springframework.security.crypto.password.PasswordEncoder passwordEncoder;
 
     /**
+     * 系统必须始终至少保留一位「可用管理员」（ADMIN 且未被禁用），
+     * 否则谁都进不了 /admin —— 降权 / 禁用 / 删除三条路径共用这一条提示。
+     */
+    private static final String LAST_ADMIN_MESSAGE =
+            "系统至少需要保留一位可登录的管理员。请先为其它账号提权（或启用原有管理员），再执行该操作。";
+
+    /**
      * 获取当前登录管理员用户名（用于审计）
      */
     private String currentUsername() {
@@ -70,6 +77,8 @@ public class AdminController {
         pageData.put("size", userPage.getSize());
         pageData.put("first", userPage.isFirst());
         pageData.put("last", userPage.isLast());
+        // 前端据此把最后一位可用管理员的「降权/禁用/删除」按钮禁掉
+        pageData.put("activeAdminCount", userService.countActiveAdmins());
 
         auditLogService.log(currentUsername(), "ADMIN_LIST_USERS", "users", "SUCCESS", "查看用户列表");
         return ResponseEntity.ok(ApiResponse.success(pageData));
@@ -157,6 +166,15 @@ public class AdminController {
         String prevRole = existing.get().getRole();
         String targetUsername = existing.get().getUsername();
 
+        // 不能让系统失去最后一位可用管理员：降权前先确认还有别人能进后台
+        boolean willLoseAdmin = "ADMIN".equalsIgnoreCase(prevRole) && !"ADMIN".equalsIgnoreCase(role);
+        if (userService.wouldRemoveLastAdmin(existing.get(), willLoseAdmin)) {
+            auditLogService.log(currentUsername(), "ROLE_CHANGE", "user:" + targetUsername,
+                    "FAILURE", "拒绝降权：这是最后一位可用管理员");
+            return ResponseEntity.badRequest()
+                    .body(Map.of("error", LAST_ADMIN_MESSAGE));
+        }
+
         Optional<User> userOpt = userService.updateUserRole(id, role);
         if (userOpt.isEmpty()) {
             auditLogService.log(currentUsername(), "ROLE_CHANGE", "user:" + targetUsername,
@@ -184,6 +202,13 @@ public class AdminController {
             return ResponseEntity.notFound().build();
         }
         String targetUsername = existing.get().getUsername();
+
+        // 不能让系统失去最后一位可用管理员：禁用前先确认还有别人能进后台
+        if (userService.wouldRemoveLastAdmin(existing.get(), !active)) {
+            auditLogService.log(currentUsername(), "USER_ACTIVE_CHANGE", "user:" + targetUsername,
+                    "FAILURE", "拒绝禁用：这是最后一位可用管理员");
+            return ResponseEntity.badRequest().body(Map.of("error", LAST_ADMIN_MESSAGE));
+        }
 
         Optional<User> userOpt = userService.updateUserActive(id, active);
         if (userOpt.isEmpty()) {
@@ -237,6 +262,14 @@ public class AdminController {
         }
 
         String targetUsername = userOpt.get().getUsername();
+
+        // 不能让系统失去最后一位可用管理员：删除前先确认还有别人能进后台
+        if (userService.wouldRemoveLastAdmin(userOpt.get(), true)) {
+            auditLogService.log(currentUsername(), "USER_DELETE", "user:" + targetUsername,
+                    "FAILURE", "拒绝删除：这是最后一位可用管理员");
+            return ResponseEntity.badRequest().body(Map.of("error", LAST_ADMIN_MESSAGE));
+        }
+
         try {
             userService.delete(userOpt.get());
             auditLogService.log(currentUsername(), "USER_DELETE", "user:" + targetUsername,

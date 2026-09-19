@@ -358,11 +358,14 @@
         <div v-if="previewMode === 'gallery'" class="preview-gallery">
           <div class="preview-gallery-header">
             <span class="preview-gallery-title">媒体文件预览</span>
-            <small>{{ previewFiles.length }} 个文件 · 已选 {{ selectedMediaFileIds.size }} 个</small>
+            <small>
+              共 {{ previewTotalElements }} 个文件 · 第 {{ previewPage + 1 }} / {{ previewTotalPages }} 页（本页 {{ previewFiles.length }} 个） · 已选 {{ selectedMediaFileIds.size }} 个
+            </small>
           </div>
 
           <div class="preview-gallery-body">
-            <div v-if="previewFiles.length === 0" class="preview-empty">暂无文件</div>
+            <div v-if="previewLoadingPage" class="preview-empty">加载中...</div>
+            <div v-else-if="previewFiles.length === 0" class="preview-empty">暂无文件</div>
             <div v-else class="preview-grid">
               <div
                 v-for="(file, index) in previewFiles"
@@ -426,8 +429,26 @@
 
           <div class="preview-gallery-footer">
             <button class="preview-nav-btn" @click="toggleSelectAllInPreview">
-              {{ isAllPreviewSelected ? '取消全选' : '全选' }}
+              {{ isAllPreviewSelected ? '取消全选' : '全选本页' }}
             </button>
+
+            <!-- 相册分页：一页 40 张，不翻页就永远只能看到第一页 -->
+            <div class="preview-pager">
+              <button class="preview-nav-btn" :disabled="previewPage <= 0 || previewLoadingPage" @click="previewGoToPage(0)">首页</button>
+              <button class="preview-nav-btn" :disabled="previewPage <= 0 || previewLoadingPage" @click="previewGoToPage(previewPage - 1)">上一页</button>
+              <span class="preview-pager-info">第 {{ previewPage + 1 }} / {{ previewTotalPages }} 页</span>
+              <button class="preview-nav-btn" :disabled="previewPage >= previewTotalPages - 1 || previewLoadingPage" @click="previewGoToPage(previewPage + 1)">下一页</button>
+              <button class="preview-nav-btn" :disabled="previewPage >= previewTotalPages - 1 || previewLoadingPage" @click="previewGoToPage(previewTotalPages - 1)">末页</button>
+              <label class="preview-page-size">
+                每页
+                <select :value="String(previewPageSize)" @change="setPreviewPageSize($event.target.value)">
+                  <option value="20">20</option>
+                  <option value="40">40</option>
+                  <option value="80">80</option>
+                </select>
+              </label>
+            </div>
+
             <button class="preview-nav-btn" @click="backToList">关闭预览</button>
           </div>
         </div>
@@ -436,7 +457,15 @@
         <div v-else-if="currentPreviewFile" class="preview-single">
           <div class="preview-title">
             <span>{{ currentPreviewFile.fileName }}</span>
-            <small>{{ formatBytes(currentPreviewFile.fileSize) }} · {{ currentPreviewIndex + 1 }} / {{ previewFiles.length }}</small>
+            <small>
+              {{ formatBytes(currentPreviewFile.fileSize) }} ·
+              <template v-if="previewSource === 'all'">
+                第 {{ previewPage * previewPageSize + currentPreviewIndex + 1 }} / {{ previewTotalElements }} 个（本页 {{ currentPreviewIndex + 1 }} / {{ previewFiles.length }}）
+              </template>
+              <template v-else>
+                {{ currentPreviewIndex + 1 }} / {{ previewFiles.length }}（已勾选）
+              </template>
+            </small>
           </div>
 
           <div class="preview-media" @click.self="backToGallery">
@@ -482,7 +511,7 @@
           <div class="preview-nav">
             <button
               class="preview-nav-btn"
-              :disabled="currentPreviewIndex <= 0"
+              :disabled="previewPrevDisabled"
               @click="previewPrev"
             >
               ← 上一个
@@ -492,7 +521,7 @@
             </button>
             <button
               class="preview-nav-btn"
-              :disabled="currentPreviewIndex >= previewFiles.length - 1"
+              :disabled="previewNextDisabled"
               @click="previewNext"
             >
               下一个 →
@@ -707,6 +736,17 @@ export default {
       if (!url) return;
       imgPreview.open(url, mediaGalleryUrls.value);
     };
+
+    // 预览导航可用性：勾选预览时只在本屏内移动；「全部媒体」模式下可跨页继续
+    const previewPrevDisabled = computed(() => {
+      if (media.currentPreviewIndex.value > 0) return false;
+      return !(media.previewSource.value === 'all' && media.previewPage.value > 0);
+    });
+    const previewNextDisabled = computed(() => {
+      if (media.currentPreviewIndex.value < media.previewFiles.value.length - 1) return false;
+      return !(media.previewSource.value === 'all'
+        && media.previewPage.value < media.previewTotalPages.value - 1);
+    });
 
     // ===== 退款审批弹窗（同意 / 驳回复用） =====
     const refundApproveModal = reactive({
@@ -978,6 +1018,16 @@ export default {
       currentPreviewIndex: media.currentPreviewIndex,
       currentPreviewFile: media.currentPreviewFile,
       previewMode: media.previewMode,
+      previewPage: media.previewPage,
+      previewPageSize: media.previewPageSize,
+      previewTotalPages: media.previewTotalPages,
+      previewTotalElements: media.previewTotalElements,
+      previewLoadingPage: media.previewLoadingPage,
+      previewSource: media.previewSource,
+      previewGoToPage: media.previewGoToPage,
+      setPreviewPageSize: media.setPreviewPageSize,
+      previewPrevDisabled,
+      previewNextDisabled,
       closePreview: media.closePreview,
       previewNext: media.previewNext,
       previewPrev: media.previewPrev,
@@ -1793,7 +1843,41 @@ export default {
   border-top: 1px solid var(--border-color, #f0f0f0);
   background: var(--bg-tertiary, #fafafa);
   display: flex;
-  justify-content: center;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.preview-pager {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.preview-pager-info {
+  font-size: 12.5px;
+  color: var(--text-secondary, #666);
+  padding: 0 4px;
+}
+
+.preview-page-size {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12.5px;
+  color: var(--text-secondary, #666);
+  margin-left: 6px;
+}
+
+.preview-page-size select {
+  padding: 5px 7px;
+  border: 1px solid var(--border-color, #e0e0e0);
+  border-radius: 4px;
+  background: var(--input-bg, #fff);
+  color: var(--text-primary, #333);
+  font-size: 12.5px;
 }
 
 /* ===== 审计日志复用 ===== */
