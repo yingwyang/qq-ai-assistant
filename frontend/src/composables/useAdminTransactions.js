@@ -93,6 +93,7 @@ export function useAdminTransactions({ showSystemMsg } = {}) {
     if (filters.relatedId) p.relatedId = filters.relatedId;
     if (forExport) {
       p.export = 1;
+      p.format = forExport === 'csv' ? 'csv' : 'json';
     } else {
       p.page = txPage.value;
       p.size = txSize.value;
@@ -143,11 +144,13 @@ export function useAdminTransactions({ showSystemMsg } = {}) {
     loadTransactions(page);
   }
 
-  async function exportTransactions() {
+  async function exportTransactions(format = 'csv') {
     txExporting.value = true;
     try {
-      await adminCreditsApi.getTransactions(buildParams(true));
-      if (showSystemMsg) showSystemMsg('流水已导出下载');
+      await adminCreditsApi.getTransactions(buildParams(format === 'csv' ? 'csv' : true));
+      if (showSystemMsg) {
+        showSystemMsg(format === 'csv' ? '流水已导出为 CSV' : '流水已导出下载');
+      }
     } catch (error) {
       if (showSystemMsg) showSystemMsg('导出失败: ' + error.message, 'error');
     } finally {

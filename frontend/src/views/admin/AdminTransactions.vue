@@ -111,9 +111,10 @@
         <input v-model="txFilters.max" type="number" placeholder="最大积分" class="tx-filter-input" />
         <button class="btn-action promote" @click="searchTransactions">搜索</button>
         <button class="btn-action" @click="resetTxFilters">重置</button>
-        <button class="btn-action promote" :disabled="txExporting" @click="exportTransactions">
-          {{ txExporting ? '导出中...' : '导出 JSON' }}
+        <button class="btn-action promote" :disabled="txExporting" @click="exportTransactions('csv')">
+          {{ txExporting ? '导出中...' : '导出 CSV' }}
         </button>
+        <button class="btn-action" :disabled="txExporting" @click="exportTransactions('json')">导出 JSON</button>
       </div>
     </div>
 

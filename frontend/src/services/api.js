@@ -878,10 +878,14 @@ export const adminCreditsApi = {
     if (params.size !== undefined) qs.append('size', params.size);
     if (params.relatedId) qs.append('relatedId', params.relatedId);
     if (params.export) qs.append('export', '1');
+    // format=csv 导出与页面表格同列的 CSV（含模拟现金列与类别），默认 json
+    const format = params.format === 'csv' ? 'csv' : 'json';
+    if (params.export) qs.append('format', format);
     const query = qs.toString();
     const endpoint = `/credits/admin/transactions${query ? '?' + query : ''}`;
     if (params.export) {
-      return downloadWithAuth(endpoint, `credit-transactions-${new Date().toISOString().slice(0, 10)}.json`);
+      const ext = format === 'csv' ? 'csv' : 'json';
+      return downloadWithAuth(endpoint, `credit-transactions-${new Date().toISOString().slice(0, 10)}.${ext}`);
     }
     return request(endpoint);
   },

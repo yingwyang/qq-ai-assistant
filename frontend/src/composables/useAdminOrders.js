@@ -159,6 +159,33 @@ export function useAdminOrders({ showSystemMsg } = {}) {
     loadOrders(0);
   }
 
+  /** 每页条数（20/50/100） */
+  function setOrdersSize(size) {
+    ordersSize.value = Number(size) || 20;
+    ordersPage.value = 0;
+    loadOrders(0);
+  }
+
+  /** 常用时间范围预设：写入 filters.start/end 后立即查询 */
+  function setOrdersRange(preset) {
+    const fmt = (d) => d.toISOString().slice(0, 10);
+    const today = new Date();
+    if (preset === 'today') {
+      filters.start = fmt(today);
+      filters.end = fmt(today);
+    } else if (preset === '7' || preset === '30' || preset === '90') {
+      const days = Number(preset);
+      filters.start = fmt(new Date(today.getTime() - (days - 1) * 86400000));
+      filters.end = fmt(today);
+    } else {
+      // 全部时间
+      filters.start = '';
+      filters.end = '';
+    }
+    ordersPage.value = 0;
+    loadOrders(0);
+  }
+
   function resetOrderFilters() {
     filters.orderNo = '';
     filters.keyword = '';
@@ -428,6 +455,7 @@ export function useAdminOrders({ showSystemMsg } = {}) {
     ordersExporting, filters, statusMultiText,
     manualModal, refundModal, cancelModal, disputeModal, detailDrawer, timelineEvents,
     loadOrders, searchOrders, resetOrderFilters, goToOrdersPage,
+    setOrdersSize, setOrdersRange,
     openManualModal, closeManualModal, submitManualCreate,
     openCancelModal, closeCancelModal, submitCancel,
     openDisputeModal, closeDisputeModal, submitResolveDispute,

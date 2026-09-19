@@ -99,7 +99,28 @@ const dataRows = (csv) => csv.replace(/^\uFEFF/, '').split('\n').filter((l) => l
   check('应用日志关键字过滤生效', kwLines.every((l) => l.includes(kw)), `${kwLines.length} 行全部含 ${kw}`);
 }
 
-// ---- 5. 日志文件缺失/读不到时应返回可读错误而不是空文件 ----
+// ---- 5. 资金流水导出（CSV 与 JSON 两种格式） ----
+{
+  const list = await (await ctx.request.get(`${BASE}/api/credits/admin/transactions?page=0&size=1`, { headers: { Cookie: `qqai_token=${TOKEN}` } })).json();
+  const total = list.data.totalElements;
+
+  const csv = await fetchApi('/api/credits/admin/transactions?export=1&format=csv&userId=3');
+  const rows = csv.body.replace(/^\uFEFF/, '').split('\n').filter((l) => l.trim().length > 0);
+  check('资金流水 CSV 导出返回 200', csv.status === 200, `status=${csv.status}`);
+  check('资金流水 CSV 是 text/csv', (csv.headers['content-type'] || '').includes('text/csv'), csv.headers['content-type']);
+  check('资金流水 CSV 附件名以 .csv 结尾', (csv.headers['content-disposition'] || '').includes('.csv'), csv.headers['content-disposition']);
+  check('资金流水 CSV 表头含现金列与余额', rows[0].includes('现金金额(元)') && rows[0].includes('变动后余额'), rows[0].slice(0, 60));
+  check('资金流水 CSV 遵循 userId 筛选', rows.length > 1 && rows.slice(1).every((l) => l.split(',')[1] === '3'), `${rows.length - 1} 行`);
+
+  const json = await fetchApi('/api/credits/admin/transactions?export=1&format=json&userId=3');
+  check('资金流水 JSON 导出仍可用', json.status === 200 && json.body.trim().startsWith('['), `status=${json.status} 前 20 字=${json.body.trim().slice(0, 20)}`);
+
+  // 不带 format 时默认走 JSON，保证旧的调用方不受影响
+  const legacy = await fetchApi('/api/credits/admin/transactions?export=1&userId=3');
+  check('未指定 format 时保持 JSON 行为', legacy.body.trim().startsWith('['), legacy.body.trim().slice(0, 12));
+}
+
+// ---- 6. 日志文件缺失/读不到时应返回可读错误而不是空文件 ----
 {
   const res = await ctx.request.get(`${BASE}/api/admin/logs/export?level=ALL&from=not-a-date`);
   check('非法日期参数不影响导出', res.status() === 200, `status=${res.status()}`);

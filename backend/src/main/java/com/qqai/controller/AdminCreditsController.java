@@ -401,6 +401,7 @@ public class AdminCreditsController {
             @RequestParam(defaultValue = "20") int size,
             @RequestParam(required = false) String relatedId,
             @RequestParam(required = false) String export,
+            @RequestParam(defaultValue = "json") String format,
             HttpServletResponse response) throws Exception {
         securityHelper.requireAdmin();
 
@@ -421,6 +422,39 @@ public class AdminCreditsController {
                 if (p.isLast() || all.size() >= 50000) break;
                 fetchPage++;
             }
+
+            // format=csv 时导出与页面表格同列的 CSV（含模拟现金列与类别）；
+            // 默认仍是 json，保持既有调用方不受影响。
+            if ("csv".equalsIgnoreCase(format)) {
+                Map<Long, Map<String, Object>> cashIndex = cashLedgerService.enrich(all);
+                StringBuilder sb = new StringBuilder("\uFEFF");
+                sb.append("时间,用户ID,类型,方向,积分变动,变动后余额,现金金额(元),现金类别,关联ID,操作人ID,备注\n");
+                DateTimeFormatter fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+                for (CreditTransaction tx : all) {
+                    Map<String, Object> cash = cashIndex.get(tx.getId());
+                    Object cashAmount = cash == null ? null : cash.get("cashAmount");
+                    Object cashLabel = cash == null ? null : cash.get("cashCategoryLabel");
+                    sb.append(csv(tx.getCreatedAt() == null ? "" : tx.getCreatedAt().format(fmt))).append(',')
+                            .append(tx.getUserId()).append(',')
+                            .append(tx.getType() != null ? tx.getType().name() : "").append(',')
+                            .append(tx.getDirection() != null ? tx.getDirection().name() : "").append(',')
+                            .append(tx.getAmount()).append(',')
+                            .append(tx.getBalanceAfter() == null ? "" : tx.getBalanceAfter()).append(',')
+                            .append(cashAmount == null ? "" : cashAmount.toString()).append(',')
+                            .append(csv(cashLabel == null ? "" : cashLabel.toString())).append(',')
+                            .append(csv(tx.getRelatedId())).append(',')
+                            .append(tx.getAdminUserId() == null ? "" : tx.getAdminUserId()).append(',')
+                            .append(csv(tx.getRemark())).append('\n');
+                }
+                String csvFilename = "credit-transactions-" + LocalDate.now() + ".csv";
+                response.setContentType("text/csv;charset=UTF-8");
+                response.setHeader(HttpHeaders.CONTENT_DISPOSITION,
+                        "attachment; filename*=UTF-8''" + URLEncoder.encode(csvFilename, StandardCharsets.UTF_8));
+                response.setHeader("X-Truncated", String.valueOf(all.size() >= 50000));
+                response.getOutputStream().write(sb.toString().getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+
             String filename = "credit-transactions-" + LocalDate.now() + ".json";
             response.setContentType(MediaType.APPLICATION_JSON_VALUE + ";charset=UTF-8");
             response.setHeader(HttpHeaders.CONTENT_DISPOSITION,
