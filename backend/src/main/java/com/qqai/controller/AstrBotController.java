@@ -1030,6 +1030,7 @@ public class AstrBotController {
             Map<String, Object> data = new HashMap<>();
             data.put("personas", astrBotPersonaService.listPersonas());
             data.put("selection", astrBotPersonaService.selectionStatus(securityHelper.getCurrentUserId()));
+            data.put("contract", astrBotPersonaService.currentContract());
             data.put("note", "人格由 AstrBot 提供（'人'），任务规则与输出格式由本后端提供（'岗位'）");
             return ResponseEntity.ok(Map.of("status", "ok", "data", data));
         } catch (com.qqai.exception.BizException e) {

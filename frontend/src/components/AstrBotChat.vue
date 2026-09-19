@@ -240,7 +240,7 @@
                   <div class="persona-pick-name">
                     {{ p.personaId }}
                     <span v-if="p.isDefault" class="persona-tag">AstrBot 默认</span>
-                    <span v-if="!p.cloneReady" class="persona-tag warn">首次启用需重启</span>
+                    <span v-if="!p.cloneReady" class="persona-tag warn">需同步（会重启）</span>
                   </div>
                   <div class="persona-pick-preview">{{ p.preview || '（无人格提示词）' }}</div>
                 </div>
@@ -293,7 +293,10 @@
                 </div>
               </div>
 
-              <div v-if="personaMessage" class="persona-message">{{ personaMessage }}</div>
+              <div v-if="personaMessage" class="persona-message" :class="personaMessageKind">{{ personaMessage }}</div>
+              <div v-if="personaSelection?.personaId && personaSelection?.cloneReady === false" class="persona-message warn">
+                该人格的规则有更新（或尚未准备）：点一次这一项即可同步，会顺带重启 AstrBot。
+              </div>
               <div v-if="personaBusy" class="persona-busy">
                 <span class="spinner"></span> 处理中，请不要关闭窗口…
               </div>
@@ -303,6 +306,11 @@
                 <p><strong>为什么首次要重启：</strong>AstrBot 的人格列表在启动时载入；首次启用某个人格时需要为它生成一份「无工具副本」（避免模型去调工具、把"请稍等片刻"当成回答），所以这一次会自动重启 AstrBot，之后切换即时生效。</p>
                 <p><strong>原人格不会被改动：</strong>副本只复制话术（system prompt / 预设对话），工具清空。</p>
               </div>
+
+              <details v-if="personaContract" class="persona-contract">
+                <summary>查看叠加在人格之上的「运行契约」（人设与任务的边界规则）</summary>
+                <pre>{{ personaContract }}</pre>
+              </details>
             </div>
 
             <div v-else-if="currentProvider" class="provider-config">
@@ -828,6 +836,8 @@ export default {
     const personaSelection = ref(null);
     const personaBusy = ref(false);
     const personaMessage = ref('');
+    const personaMessageKind = ref('info');   // 'info' | 'warn'
+    const personaContract = ref('');          // 叠加在人格之上的运行契约（后端 prompts.yml）
     const astrbotStatus = ref({ status: 'unknown', message: '' });
 
     const loadPersonaConfig = async () => {
@@ -836,6 +846,7 @@ export default {
         const data = res?.data || res || {};
         personaOptions.value = data.personas || [];
         personaSelection.value = data.selection || null;
+        personaContract.value = data.contract || '';
       } catch (e) {
         personaMessage.value = '读取人格列表失败：' + (e.message || e);
       }
@@ -857,6 +868,7 @@ export default {
       const willRestart = !!personaId && personaOptions.value.some(
         p => p.personaId === personaId && !p.cloneReady
       );
+      personaMessageKind.value = 'info';
       personaMessage.value = willRestart
         ? '首次启用该人格：正在生成无工具副本并重启 AstrBot，约需 10–60 秒…'
         : '正在应用人格…';
@@ -869,6 +881,7 @@ export default {
           ? `已启用「${personaId}」，摘要 / 分析 / 对话都会用这个人的说话方式`
           : '已恢复默认：不再指定人格，使用 AstrBot 默认配置';
       } catch (e) {
+        personaMessageKind.value = 'warn';
         personaMessage.value = '启用失败：' + (e.message || e);
       } finally {
         personaBusy.value = false;
@@ -2042,6 +2055,8 @@ export default {
       personaSelection,
       personaBusy,
       personaMessage,
+      personaMessageKind,
+      personaContract,
       astrbotStatus,
       loadPersonaConfig,
       refreshAstrBotStatus,
@@ -3169,6 +3184,38 @@ export default {
   border-radius: 6px;
   padding: 8px 10px;
   margin-bottom: 10px;
+}
+
+.persona-message.warn {
+  color: #b7950b;
+  background: rgba(241, 196, 15, 0.15);
+}
+
+.persona-contract {
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--text-secondary, #7f8c8d);
+}
+
+.persona-contract summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: #2980b9;
+}
+
+.persona-contract pre {
+  margin-top: 8px;
+  max-height: 260px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 11px;
+  line-height: 1.6;
+  background: var(--hover-bg, rgba(0, 0, 0, 0.03));
+  border: 1px solid var(--border-color, #e5e7eb);
+  border-radius: 6px;
+  padding: 10px;
+  color: var(--text-primary, #2c3e50);
 }
 
 .persona-busy {

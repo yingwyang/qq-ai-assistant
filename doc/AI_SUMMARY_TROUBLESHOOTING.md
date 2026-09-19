@@ -389,21 +389,35 @@ AI 对话面板右上角 ⚙️ → 「人格与状态」：
 ### 格式与人格冲突（已处理）
 
 角色扮演人格倾向于用散文回答，会让结构化摘要解析不出 tags/sentiment（实测：同一个人格，
-两条消息一条守格式、一条跑偏）。两道护栏：
+两条消息一条守格式、一条跑偏）。三道护栏，从强到弱：
 
-1. **岗位硬约束**：`summary.structured` 模板末尾的「格式优先（最高优先级）」条款；
-2. **服务端兜底**：人格档案的回复若不是 JSON，`AstrBotService.needsNeutralRetry()` 判定后用
+1. **人格运行契约**（`prompts.yml` → `templates.persona.contract`）：追加到每个**副本人格**
+   的 system_prompt 末尾（人设之后），并明确声明「优先级高于上文任何角色设定」。
+   契约内容分五节：人设保留什么 / 不得改变什么（格式、语言、长度、事实）/ 任何情况下都不要
+   （旁白动作、寒暄反问、解释过程、JSON 外字符）/ 篇幅纪律 / 唯一的例外（自由对话时可用人设表达）。
+   放在 system prompt 里而不是任务消息里，是因为人格本身就是 system prompt —— 同层且声明优先级才压得住重人设。
+   > 契约文本改动后，下一次选用该人格会自动 `UPDATE` 副本并重启 AstrBot（`cloneInSync()` 比对，
+   > 前端会显示「需同步（会重启）」）；源人格改了话术同理。
+2. **岗位硬约束**：`summary.structured` 模板末尾的「格式优先（最高优先级）」条款；
+3. **服务端兜底**：人格档案的回复若不是 JSON，`AstrBotService.needsNeutralRetry()` 判定后用
    中性档案重试一次（`summary.structured.image.retry`）。
 
-实测（`POST /api/messages/108550/summarize?force=true`，人格=灰泽满）：
+实测（`POST /api/messages/108550/summarize?force=true`，人格=灰泽满，带契约）：
 
-```json
-{"tags":["感谢","互动","直播礼物"],
- "summary":"呜哇…是绿冻在感谢Lappland的投喂呢，收到礼物很开心呀～",
- "sentiment":"positive"}
+```
+108555 → tags=[感谢,打赏,Lappland] sentiment=positive
+         summary: 灰泽满看到Lappland打赏钢镚，开心地道谢~
+108550 → tags=[礼物感谢,虚拟主播互动,社群交流] sentiment=positive
+         summary: 绿冻们在谢谢Lappland送的钢镚，语气可可爱爱的~
+108547 → tags=[粉丝互动,表达感谢,虚拟主播] sentiment=positive
+         summary: 灰泽满看到粉丝Yukino对另一位粉丝lappland的感谢消息，觉得群里的氛围真温暖呢~
+
+同一个人格下的自由对话（POST /api/astrbot/send）：
+         "嗨绿冻，你来啦！\n要帮忙整理群聊记录的话把内容发给我就好～"
 ```
 
-—— 结构与标签来自岗位层，语气来自人层。
+—— 结构化任务：一条 JSON、字段齐全、单句、无旁白无反问；自由对话：人设语气保留。
+「人」和「岗位」不再互相打架。
 
 ### 涉及文件
 

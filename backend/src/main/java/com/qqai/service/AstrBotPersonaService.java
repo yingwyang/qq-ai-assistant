@@ -97,6 +97,10 @@ public class AstrBotPersonaService {
     @Autowired
     private UserSettingsService userSettingsService;
 
+    /** 人格运行契约来自 prompts.yml（persona.contract），测试直接 new 时为 null */
+    @Autowired(required = false)
+    private PromptTemplateService promptTemplateService;
+
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final RestTemplate restTemplate = new RestTemplate();
 
@@ -125,7 +129,7 @@ public class AstrBotPersonaService {
                 item.put("personaId", personaId);
                 item.put("preview", preview(rs.getString("system_prompt")));
                 item.put("isDefault", rs.getInt("is_default") == 1);
-                item.put("cloneReady", cloneExists(conn, clonePersonaId(personaId)));
+                item.put("cloneReady", cloneInSync(personaId));
                 list.add(item);
             }
         } catch (Exception e) {
@@ -146,7 +150,7 @@ public class AstrBotPersonaService {
         view.put("astrbotRunning", processManager.isPortOpen("127.0.0.1", 6185));
         view.put("configName", personaId == null ? null : profileName(personaId, false));
         if (personaId != null) {
-            boolean cloneReady = cloneExists(personaId);
+            boolean cloneReady = cloneInSync(personaId);
             view.put("cloneReady", cloneReady);
             view.put("clonePersonaId", clonePersonaId(personaId));
             view.put("textProfileReady", cloneReady && profileExists(profileName(personaId, false)));
@@ -235,21 +239,22 @@ public class AstrBotPersonaService {
     }
 
     /**
-     * 保证「无工具副本 + 两份档案」都存在。
+     * 保证「无工具副本 + 两份档案」都存在，且副本带最新的人格契约。
      *
-     * @return 是否为此重启了 AstrBot（只有新建副本才需要）
+     * <p>三件事都做了才认为就绪：① 副本人格（话术 + 契约，tools=[]）；② 文本档案；③ 视觉档案。
+     * 副本新建或契约文本有变化时需要重启 AstrBot（人格在启动时载入），档案是热生效的。</p>
+     *
+     * @return 是否为此重启了 AstrBot
      */
     synchronized boolean ensureArtifacts(String personaId, boolean allowRestart) {
         String cloneId = clonePersonaId(personaId);
-        boolean cloneCreated = false;
-        if (!cloneExists(personaId)) {
-            cloneCreated = createClonePersona(personaId, cloneId);
-        }
+        CloneState state = ensureClonePersona(personaId, cloneId, contractText());
+        boolean cloneChanged = state != CloneState.UNCHANGED;
         boolean restarted = false;
-        if (cloneCreated) {
+        if (cloneChanged) {
             if (!allowRestart) {
-                // 只读路径：副本刚建好但 AstrBot 还没加载，本次先回退默认档案
-                throw new BizException(503, "人格副本已创建，需要重启 AstrBot 后才生效");
+                // 只读路径：副本刚建好/刚更新但 AstrBot 还没加载，本次先回退默认档案
+                throw new BizException(503, "人格副本需要更新，重启 AstrBot 后才生效");
             }
             restartAstrBotAndWait();
             restarted = true;
@@ -428,6 +433,39 @@ public class AstrBotPersonaService {
         }
     }
 
+    /**
+     * 副本是否与「源人格话术 + 当前契约 + tools=[]」完全一致。
+     * 不一致就意味着下次选用它要重建/更新并重启 AstrBot（前端据此提示「首次启用需重启」）。
+     */
+    private boolean cloneInSync(String personaId) {
+        String contract = contractText();
+        try (Connection conn = openDb()) {
+            String sourcePrompt;
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT system_prompt FROM personas WHERE persona_id = ?")) {
+                ps.setString(1, personaId);
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (!rs.next()) return false;
+                    sourcePrompt = rs.getString(1) == null ? "" : rs.getString(1);
+                }
+            }
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT system_prompt, tools FROM personas WHERE persona_id = ?")) {
+                ps.setString(1, clonePersonaId(personaId));
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (!rs.next()) return false;
+                    String clonePrompt = rs.getString(1);
+                    String tools = rs.getString(2);
+                    if (tools != null && !tools.isBlank() && !"[]".equals(tools.trim())) return false;
+                    return composeClonePrompt(sourcePrompt, contract).equals(clonePrompt);
+                }
+            }
+        } catch (Exception e) {
+            log.warn("检查人格副本同步状态失败: {}", e.getMessage());
+            return false;
+        }
+    }
+
     private boolean cloneExists(Connection conn, String cloneId) throws Exception {
         try (PreparedStatement ps = conn.prepareStatement("SELECT 1 FROM personas WHERE persona_id = ?")) {
             ps.setString(1, cloneId);
@@ -437,57 +475,84 @@ public class AstrBotPersonaService {
         }
     }
 
+    /** 副本人格相对期望状态的差异 */
+    enum CloneState { CREATED, UPDATED, UNCHANGED }
+
     /**
-     * 克隆人格：话术（system_prompt / begin_dialogs）照搬，工具清空。
+     * 保证副本人格存在且与「源人格话术 + 最新契约」一致：话术照搬，工具清空，末尾追加运行契约。
      *
-     * @return 是否真的新建了（已存在返回 false）
+     * <p>幂等：内容一致时不动数据库、不触发重启；源人格改了话术或契约文本改了才会 UPDATE。</p>
      */
-    private boolean createClonePersona(String personaId, String cloneId) {
+    private CloneState ensureClonePersona(String personaId, String cloneId, String contract) {
         try (Connection conn = openDb()) {
-            if (cloneExists(conn, cloneId)) return false;
-            String prompt = "";
+            String sourcePrompt;
             String dialogs = "[]";
             try (PreparedStatement ps = conn.prepareStatement(
                     "SELECT system_prompt, begin_dialogs FROM personas WHERE persona_id = ?")) {
                 ps.setString(1, personaId);
                 try (ResultSet rs = ps.executeQuery()) {
                     if (!rs.next()) throw new BizException(404, "AstrBot 里没有这个人格：" + personaId);
-                    prompt = rs.getString("system_prompt") == null ? "" : rs.getString("system_prompt");
+                    sourcePrompt = rs.getString("system_prompt") == null ? "" : rs.getString("system_prompt");
                     String d = rs.getString("begin_dialogs");
                     if (d != null && !d.isBlank()) dialogs = d;
                 }
             }
-            int nextId = 1;
-            int nextSort = 1;
-            try (Statement st = conn.createStatement()) {
-                try (ResultSet rs = st.executeQuery("SELECT COALESCE(MAX(id), 0) + 1, COALESCE(MAX(sort_order), 0) + 1 FROM personas")) {
+            String expected = composeClonePrompt(sourcePrompt, contract);
+
+            String existing = null;
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT system_prompt FROM personas WHERE persona_id = ?")) {
+                ps.setString(1, cloneId);
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (rs.next()) existing = rs.getString(1);
+                }
+            }
+            String now = LocalDateTime.now().toString();
+            if (existing == null) {
+                int nextId = 1;
+                int nextSort = 1;
+                try (Statement st = conn.createStatement();
+                     ResultSet rs = st.executeQuery(
+                             "SELECT COALESCE(MAX(id), 0) + 1, COALESCE(MAX(sort_order), 0) + 1 FROM personas")) {
                     if (rs.next()) {
                         nextId = rs.getInt(1);
                         nextSort = rs.getInt(2);
                     }
                 }
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "INSERT INTO personas (created_at, updated_at, id, persona_id, system_prompt, begin_dialogs,"
+                                + " tools, skills, custom_error_message, folder_id, sort_order, is_default)"
+                                + " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)")) {
+                    ps.setString(1, now);
+                    ps.setString(2, now);
+                    ps.setInt(3, nextId);
+                    ps.setString(4, cloneId);
+                    ps.setString(5, expected);
+                    ps.setString(6, dialogs);
+                    ps.setString(7, "[]");     // ★ 无工具：否则模型会去调 send_message_to_user
+                    ps.setString(8, null);
+                    ps.setString(9, null);
+                    ps.setString(10, null);
+                    ps.setInt(11, nextSort);
+                    ps.setInt(12, 0);
+                    ps.executeUpdate();
+                }
+                log.info("已创建无工具人格副本 {}（源人格 {}，含运行契约 {} 字）",
+                        cloneId, personaId, contract == null ? 0 : contract.length());
+                return CloneState.CREATED;
             }
-            String now = LocalDateTime.now().toString();
-            try (PreparedStatement ps = conn.prepareStatement(
-                    "INSERT INTO personas (created_at, updated_at, id, persona_id, system_prompt, begin_dialogs,"
-                            + " tools, skills, custom_error_message, folder_id, sort_order, is_default)"
-                            + " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)")) {
-                ps.setString(1, now);
-                ps.setString(2, now);
-                ps.setInt(3, nextId);
-                ps.setString(4, cloneId);
-                ps.setString(5, prompt);
-                ps.setString(6, dialogs);
-                ps.setString(7, "[]");     // ★ 无工具：否则模型会去调 send_message_to_user
-                ps.setString(8, null);
-                ps.setString(9, null);
-                ps.setString(10, null);
-                ps.setInt(11, nextSort);
-                ps.setInt(12, 0);
-                ps.executeUpdate();
+            if (!expected.equals(existing)) {
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "UPDATE personas SET system_prompt = ?, tools = '[]', updated_at = ? WHERE persona_id = ?")) {
+                    ps.setString(1, expected);
+                    ps.setString(2, now);
+                    ps.setString(3, cloneId);
+                    ps.executeUpdate();
+                }
+                log.info("已更新无工具人格副本 {}（源人格话术或运行契约有变化）", cloneId);
+                return CloneState.UPDATED;
             }
-            log.info("已创建无工具人格副本 {} （源人格 {}）", cloneId, personaId);
-            return true;
+            return CloneState.UNCHANGED;
         } catch (BizException e) {
             throw e;
         } catch (Exception e) {
@@ -495,7 +560,37 @@ public class AstrBotPersonaService {
         }
     }
 
+    /**
+     * 副本人格提示词 = 源人格话术 + 运行契约（契约在后，且声明优先级更高）。
+     *
+     * <p>纯函数，便于单测：源人格为空时只放契约。</p>
+     */
+    static String composeClonePrompt(String sourcePrompt, String contract) {
+        String src = sourcePrompt == null ? "" : sourcePrompt.trim();
+        String c = contract == null ? "" : contract.trim();
+        if (c.isEmpty()) return src;
+        if (src.isEmpty()) return c;
+        return src + "\n\n---\n\n" + c;
+    }
+
+    /** 从 prompts.yml 取人格运行契约（人 × 岗位 的边界条款） */
+    private String contractText() {
+        if (promptTemplateService == null) return "";
+        try {
+            String text = promptTemplateService.render("persona.contract", null, new LinkedHashMap<>());
+            return text == null ? "" : text.trim();
+        } catch (Exception e) {
+            log.warn("读取人格契约模板失败（将只使用原人格话术）: {}", e.getMessage());
+            return "";
+        }
+    }
+
     // ==================== 工具方法 ====================
+
+    /** 对外暴露契约原文（前端在人格面板里展示「人设之上还叠了哪些规则」） */
+    public String currentContract() {
+        return contractText();
+    }
 
     private Connection openDb() throws Exception {
         String dbPath = astrbotDataPath + "/data_v4.db";
@@ -513,7 +608,8 @@ public class AstrBotPersonaService {
         return false;
     }
 
-    private static String preview(String prompt) {        if (prompt == null) return "";
+    private static String preview(String prompt) {
+        if (prompt == null) return "";
         String s = prompt.replaceAll("\\s+", " ").trim();
         return s.length() > 60 ? s.substring(0, 60) + "…" : s;
     }

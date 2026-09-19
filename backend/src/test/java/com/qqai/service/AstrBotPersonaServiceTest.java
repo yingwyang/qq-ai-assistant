@@ -62,4 +62,49 @@ class AstrBotPersonaServiceTest {
         assertFalse(AstrBotService.needsNeutralRetry(
                 "```json\n{\"tags\":[],\"summary\":\"ok\",\"sentiment\":\"neutral\"}\n```", "qqai-p-x-text"));
     }
+
+    // ==================== 人格运行契约（人 × 岗位 的边界） ====================
+
+    @Test
+    @DisplayName("副本提示词 = 原人设 + 契约；契约在后且带分隔线（声明优先级更高）")
+    void composeClonePromptPutsContractLast() {
+        String composed = AstrBotPersonaService.composeClonePrompt("你是灰泽满。", "# 运行契约\n格式优先。");
+
+        assertTrue(composed.startsWith("你是灰泽满。"), "人设必须保留在最前");
+        assertTrue(composed.contains("---"), "要有人设与契约的分隔");
+        assertTrue(composed.indexOf("# 运行契约") > composed.indexOf("你是灰泽满。"),
+                "契约必须在人设之后，才能声明「优先级高于上文」");
+    }
+
+    @Test
+    @DisplayName("没有人设或没有契约时都不炸：单边为空就只放另一边")
+    void composeClonePromptHandlesBlanks() {
+        assertEquals("# 运行契约", AstrBotPersonaService.composeClonePrompt("  ", "# 运行契约"));
+        assertEquals("人设", AstrBotPersonaService.composeClonePrompt("人设", null));
+        assertEquals("", AstrBotPersonaService.composeClonePrompt(null, ""));
+    }
+
+    @Test
+    @DisplayName("prompts.yml 里的契约要能解析出来，且含关键条款（优先级/JSON/禁止旁白）")
+    void contractTemplateIsLoadableAndCoversKeyRules() {
+        PromptTemplateService service = new PromptTemplateService();
+        service.init();
+        String contract = service.render("persona.contract", null, new java.util.HashMap<>());
+
+        assertNotNull(contract);
+        assertTrue(contract.contains("优先级高于上文"), "契约必须声明优先级高于人设");
+        assertTrue(contract.contains("JSON"), "必须写清楚结构化任务的 JSON 要求");
+        assertTrue(contract.contains("旁白") && contract.contains("反问"), "必须禁止旁白与反问");
+        assertTrue(contract.contains("自由对话"), "必须保留「自由对话时可用人设表达」的例外");
+        assertTrue(contract.length() > 300, "条款太短压不住重人设，实际长度=" + contract.length());
+    }
+
+    @Test
+    @DisplayName("契约不得包含会让模板注入变量被替换的花括号占位")
+    void contractHasNoUnresolvedPlaceholders() {
+        PromptTemplateService service = new PromptTemplateService();
+        service.init();
+        String contract = service.render("persona.contract", null, new java.util.HashMap<>());
+        assertFalse(contract.matches("(?s).*\\{[a-zA-Z]+}.*"), "契约里不应残留 {var} 占位符");
+    }
 }
