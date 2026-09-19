@@ -108,6 +108,15 @@ public class AstrBotController {
     @Value("${astrbot.vision-config-name:vision}")
     private String visionConfigName;
 
+    /**
+     * 分析链路（/analyze、/analyze-selected）用的视觉配置文件：同模型，但 AstrBot 人格
+     * {@code tools=[]}。人格不挂工具时 Agent 不会去调 send_message_to_user / future_task，
+     * 也就不会把"请稍等片刻"当成分析结果返回。/send-with-image（AI 对话）仍用 vision，
+     * 保留用户自己的人格设定。
+     */
+    @Value("${astrbot.vision-task-config-name:vision-task}")
+    private String visionTaskConfigName;
+
     @Value("${server.port:8081}")
     private int serverPort;
 
@@ -258,6 +267,44 @@ public class AstrBotController {
             log.warn("构造多模态message失败，回退到纯文本: {}", e.getMessage());
             return prompt;
         }
+    }
+
+    /**
+     * 带图时补充提示词：分析模板里的「富媒体识别规则」要求模型描述图片时保守
+     * （"不编造具体图片内容即可"）。当图片真的作为多模态消息段随附时，这条规则会
+     * 让模型继续输出"内容未知"，把视觉能力浪费掉。这里明确告知可以看图。
+     */
+    private String augmentPromptForImages(String prompt, List<String> imageUrls) {
+        if (imageUrls == null || imageUrls.isEmpty()) return prompt;
+        return prompt + "\n\n【重要】本次请求已随附 " + imageUrls.size() + " 张真实图片"
+                + "（多模态消息段，可以直接看到画面）。凡是占位符 [图片] 对应的消息，"
+                + "请直接描述图片的实际内容（人物/物体/场景/截图文字/表情包含义等），"
+                + "不要再输出「内容未知」「未提供可辨内容」「无法查看图片」这类说法；"
+                + "音视频仍按占位符处理，不要编造。"
+                + "输出格式仍严格遵循上面的要求。";
+    }
+
+    /**
+     * 带图的分析请求切到「无工具视觉配置」。
+     *
+     * <p>Agent 管线里模型来自配置文件（config profile），请求体的 model 对 Agent 不生效：
+     * 默认 profile 指向纯文本模型时，图片段会被丢掉，模型只能答"看不到图"。
+     * 而普通视觉 profile 的人格挂着全部工具，模型会去调 send_message_to_user 而给出
+     * "请稍等片刻"。因此分析链路统一用 vision-task（同模型、无人格工具）。</p>
+     */
+    private void applyVisionConfig(Map<String, Object> body, Map<String, Object> chatFlags, List<String> imageUrls) {
+        if (imageUrls == null || imageUrls.isEmpty()) return;
+        String cfg = (visionTaskConfigName != null && !visionTaskConfigName.isBlank())
+                ? visionTaskConfigName.trim() : visionConfigName;
+        if (cfg != null && !cfg.isBlank()) {
+            body.put("config_name", cfg);
+        }
+        // 新会话 → 不会沿用旧会话记住的人格（挂着全部工具的人格会让模型跑去调工具）
+        body.put("session_id", "vision-task-" + java.util.UUID.randomUUID());
+        if (chatFlags != null) {
+            chatFlags.put("enable_default_system_prompt", false);
+        }
+        log.info("本次请求带图 {} 张，已切换到视觉配置: {}", imageUrls.size(), cfg);
     }
 
     private String getCurrentUserAstrbotApiKey() {
@@ -440,14 +487,12 @@ public class AstrBotController {
                         .header("Content-Type", "application/json; charset=UTF-8")
                         .body(objectMapper.writeValueAsString(emptyResp));
             }
-            // 方案 B：追加图片 URL 文本注入（降级，后续 Task6 可升级为多模态 contexts）
+            // 图片已改为多模态消息段随请求送出（buildMultimodalMessage），
+            // 这里只留一条计数说明：把 http://… 的图片 URL 塞进提示词既占上下文，
+            // 模型也无法访问（旧"方案 B"文本注入的遗留做法）。
             if (rendered.getAllImageUrls() != null && !rendered.getAllImageUrls().isEmpty()) {
-                StringBuilder appendix = new StringBuilder("\n\n附图（供视觉模型参考）：\n");
-                int idx = 1;
-                for (String u : rendered.getAllImageUrls()) {
-                    appendix.append("附图 ").append(idx++).append(": ").append(u).append("\n");
-                }
-                messageContents = messageContents + appendix;
+                messageContents = messageContents + "\n\n（本次聊天记录含 "
+                        + rendered.getAllImageUrls().size() + " 张图片，已作为图片消息段一并送出，可直接查看画面。）\n";
             }
             if (rendered.isWasTruncated()) {
                 messageContents = messageContents + "\n⚠️ 消息内容超长已截断。\n";
@@ -469,6 +514,8 @@ public class AstrBotController {
 
             // 旧模板 analysis.group 可能没有 {messageContents} 变量，手动追加到 prompt 末尾
             prompt = prompt + "\n\n以下是最近群聊消息：\n" + messageContents;
+            // 有图时补充「可以直接看图」的说明（否则模板里的保守规则会让模型答"内容未知"）
+            prompt = augmentPromptForImages(prompt, rendered.getAllImageUrls());
 
             // 4. 直接调用 AstrBot API 获取分析结果
             String url = astrBotApiUrl + "/api/v1/chat";
@@ -491,6 +538,8 @@ public class AstrBotController {
             chatFlags.put("enable_streaming", false);
             chatFlags.put("enable_reasoning", false);
             body.put("flags", chatFlags);
+            // 带图 → 视觉配置文件（否则图片段被纯文本模型丢弃，只会答"内容未知"）
+            applyVisionConfig(body, chatFlags, rendered.getAllImageUrls());
 
             // 模型选择：优先用户默认模型，允许请求体 model 字段覆盖
             String defaultModel = getCurrentUserLlmModel();
@@ -703,14 +752,12 @@ public class AstrBotController {
                         .header("Content-Type", "application/json; charset=UTF-8")
                         .body(objectMapper.writeValueAsString(emptyResp));
             }
-            // 方案 B：追加图片 URL 文本注入（降级，后续 Task6 可升级为多模态 contexts）
+            // 图片已改为多模态消息段随请求送出（buildMultimodalMessage），
+            // 这里只留一条计数说明：把 http://… 的图片 URL 塞进提示词既占上下文，
+            // 模型也无法访问（旧"方案 B"文本注入的遗留做法）。
             if (rendered.getAllImageUrls() != null && !rendered.getAllImageUrls().isEmpty()) {
-                StringBuilder appendix = new StringBuilder("\n\n附图（供视觉模型参考）：\n");
-                int idx = 1;
-                for (String u : rendered.getAllImageUrls()) {
-                    appendix.append("附图 ").append(idx++).append(": ").append(u).append("\n");
-                }
-                messageContents = messageContents + appendix;
+                messageContents = messageContents + "\n\n（本次聊天记录含 "
+                        + rendered.getAllImageUrls().size() + " 张图片，已作为图片消息段一并送出，可直接查看画面。）\n";
             }
             if (rendered.isWasTruncated()) {
                 messageContents = messageContents + "\n⚠️ 消息内容超长已截断。\n";
@@ -735,6 +782,8 @@ public class AstrBotController {
                 templateVars.put("groupTypeLabel", groupInfo.get("groupTypeLabel"));
 
             String prompt = promptTemplateService.render("analysis.selected", groupType, templateVars);
+            // 有图时补充「可以直接看图」的说明（同 /analyze）
+            prompt = augmentPromptForImages(prompt, rendered.getAllImageUrls());
 
             // 5. 调 AstrBot LLM（与 analyzeGroupMessages 相同的 RestTemplate 配置）
             String url = astrBotApiUrl + "/api/v1/chat";
@@ -756,6 +805,8 @@ public class AstrBotController {
             chatFlags.put("enable_streaming", false);
             chatFlags.put("enable_reasoning", false);
             body.put("flags", chatFlags);
+            // 带图 → 视觉配置文件（同 /analyze 链路）
+            applyVisionConfig(body, chatFlags, rendered.getAllImageUrls());
 
             String selectedModel = getCurrentUserLlmModel();
             if (selectedModel != null) {

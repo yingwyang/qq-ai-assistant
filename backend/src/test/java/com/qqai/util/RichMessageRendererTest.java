@@ -219,9 +219,69 @@ class RichMessageRendererTest {
         assertTrue(r.getText().contains("用户1:"));
         assertTrue(r.getText().contains("用户2:"));
         assertTrue(r.getText().contains("用户3:"));
-        assertFalse(r.getText().contains("用户4:"));
-        assertTrue(r.getText().contains("省略 7 条"));
+        // 展示上限从 3 提到 10：分析链路需要更多子消息上下文
+        assertTrue(r.getText().contains("用户4:"));
+        assertTrue(r.getText().contains("用户10:"));
+        assertFalse(r.getText().contains("省略"));
         assertTrue(r.isHasValidContent());
+    }
+
+    @Test
+    void testForwardMoreThan10Submessages() throws Exception {
+        ObjectMapper mapper = new ObjectMapper();
+        List<Map<String, String>> subs = new ArrayList<>();
+        for (int i = 1; i <= 12; i++) {
+            Map<String, String> item = new LinkedHashMap<>();
+            item.put("sender", "用户" + i);
+            item.put("content", "第" + i + "条");
+            subs.add(item);
+        }
+
+        Message m = new Message();
+        m.setUserNickname("转发者");
+        m.setUserQq("777");
+        m.setGroupId("10000");
+        m.setMessageType(Message.MessageType.FORWARD);
+        m.setForwardContent(mapper.writeValueAsString(subs));
+
+        RichMessageRenderer.RenderedMessage r = RichMessageRenderer.renderSingle(m, null, null);
+        assertTrue(r.getText().contains("包含 12 条子消息"));
+        assertTrue(r.getText().contains("用户10:"));
+        assertFalse(r.getText().contains("用户11:"));
+        assertTrue(r.getText().contains("省略 2 条"));
+    }
+
+    @Test
+    void testForwardSubmessageImageIsCollectedForVision() throws Exception {
+        String forwardJson = "[{\"sender\":\"无月\",\"messageType\":\"IMAGE\","
+                + "\"content\":\"[CQ:image,file=x.jpg,url=https://multimedia.nt.qq.com.cn/download?"
+                + "rkey=CAESMG-iGnQ24QRkRoErfofx0210uBGPNsBod0bc4J8]\","
+                + "\"localUrl\":\"/images/images/674405515/2026-09-19/abc.jpg\"}]";
+
+        Message m = new Message();
+        m.setUserNickname("转发者");
+        m.setUserQq("777");
+        m.setGroupId("10000");
+        m.setMessageType(Message.MessageType.FORWARD);
+        m.setForwardContent(forwardJson);
+
+        RichMessageRenderer.RenderedMessage r = RichMessageRenderer.renderSingle(m, null, "http://127.0.0.1:8081");
+        // 关键：子消息里的图片要进 imageUrls，否则视觉链路无图可看
+        assertEquals(1, r.getImageUrls().size());
+        assertTrue(r.getImageUrls().get(0).contains("/images/images/674405515/2026-09-19/abc.jpg"));
+        // CQ 码与其 rkey 签名不应出现在提示词里
+        assertFalse(r.getText().contains("rkey="));
+        assertTrue(r.getText().contains("无月"));
+    }
+
+    @Test
+    void testCleanCqTextStripsSignaturesAndKeepsReadable() {
+        String cleaned = RichMessageRenderer.cleanCqText(
+                "[CQ:reply,id=1][CQ:at,qq=123] [CQ:image,file=a.jpg,url=https://x/y?rkey=SECRET&amp;z=1] 看这个");
+        assertFalse(cleaned.contains("rkey"));
+        assertFalse(cleaned.contains("CQ:"));
+        assertTrue(cleaned.contains("[图片]"));
+        assertTrue(cleaned.contains("看这个"));
     }
 
     @Test

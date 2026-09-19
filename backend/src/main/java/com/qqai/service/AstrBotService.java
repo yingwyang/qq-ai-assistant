@@ -55,6 +55,26 @@ public class AstrBotService {
     @Value("${astrbot.summary-model:}")
     private String summaryModel;
 
+    /**
+     * 带图调用时使用的 AstrBot 配置文件（config profile）名。
+     *
+     * <p>摘要/分析走的是 Agent 管线，模型由配置文件里的 provider 决定（请求体里的 model 对
+     * Agent 不生效）。默认配置文件指向纯文本模型时，图片会被降级成文本，于是模型只能答
+     * "内容未知"。因此带图请求显式切换到视觉配置文件（AstrBot 中名为 vision）。</p>
+     */
+    @Value("${astrbot.vision-config-name:vision}")
+    private String visionConfigName;
+
+    /**
+     * 摘要/分析专用的视觉配置文件（同模型，但 AstrBot 人格不挂工具）。
+     *
+     * <p>Agent 管线会按人格注入工具：{@code persona.tools = null} 时注入<b>全部</b>工具，
+     * 于是模型会去调用 {@code send_message_to_user} / {@code future_task}，回复
+     * 「请稍等片刻」，结构化摘要里就只剩工具调用文本。所以抽取任务走一个 tools=[] 的人格。</p>
+     */
+    @Value("${astrbot.vision-task-config-name:vision-task}")
+    private String visionTaskConfigName;
+
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     private Process astrbotProcess;
@@ -84,6 +104,137 @@ public class AstrBotService {
         return doSummarize(content, apiKey, groupType, "summary.structured");
     }
 
+    /**
+     * 带图摘要：把消息里的图片作为「消息段」一并送出，并使用视觉配置文件。
+     *
+     * <p>之前的实现只把图片当文本（"附图 1: http://…"）发给模型，模型看不到画面，
+     * 于是只能答"内容未知"。这里改为：上传图片到 AstrBot 换 attachment_id → 与提示词拼成
+     * {@code [plain, image…]} → 指定 vision profile 调用。</p>
+     */
+    public String summarizeMessageStructured(String content, String apiKey, String groupType,
+                                             java.util.List<String> imageUrls) throws Exception {
+        if (imageUrls == null || imageUrls.isEmpty()) {
+            return summarizeMessageStructured(content, apiKey, groupType);
+        }
+        if (content == null || content.trim().isEmpty()) {
+            return "";
+        }
+        java.util.Map<String, Object> vars = new java.util.HashMap<>();
+        vars.put("content", content);
+        String prompt = promptTemplateService.render("summary.structured", groupType, vars);
+        java.util.List<String> attachmentIds = uploadImages( imageUrls, apiKey);
+        if (attachmentIds.isEmpty()) {
+            return doSummarize(content, apiKey, groupType, "summary.structured");
+        }
+        String promptWithHint = prompt + imageAttachmentHint(attachmentIds.size());
+        Object parts = buildImageParts(promptWithHint, attachmentIds);
+        return chat(parts, apiKey, "summary.structured.image", true);
+    }
+
+    /**
+     * 带图提示词补充说明。
+     *
+     * <p>摘要模板里没有"图片已随附"的说法，模型面对 {@code [图片] /images/…jpg} 这类文本时
+     * 会保守地回答"内容未知/未提供可辨内容"。这里明确告知图片已作为多模态消息段送出，
+     * 要求直接描述画面，避免视觉能力被"不确定"话术浪费掉。</p>
+     */
+    static String imageAttachmentHint(int count) {
+        return "\n\n【重要】本次请求已随附 " + count + " 张真实图片（多模态消息段，可直接看到画面）。"
+                + "请直接描述图片的实际内容（人物/物体/场景/截图文字/表情包含义等），"
+                + "不要再输出「内容未知」「未提供可辨内容」「无法查看图片」这类占位说法；"
+                + "只有图片确实模糊到无法辨认时，才说明无法辨认。"
+                + "输出格式仍严格遵循上面的要求（该只输出 JSON 的，仍然只输出 JSON，不要加解释）。";
+    }
+
+    /** 取出一条消息里的图片 URL（供带图摘要使用） */
+    public java.util.List<String> renderMessageImageUrls(com.qqai.entity.Message message) {
+        if (message == null) return java.util.List.of();
+        try {
+            java.util.Map<String, com.qqai.entity.FileRecord> cache = new java.util.HashMap<>();
+            if (fileRecordRepository != null && message.getFileId() != null && !message.getFileId().isBlank()) {
+                fileRecordRepository.findByFileId(message.getFileId()).ifPresent(fr -> cache.put(fr.getFileId(), fr));
+            }
+            String base = "http://" + ("0.0.0.0".equals(serverAddress) ? "localhost" : serverAddress) + ":" + serverPort;
+            com.qqai.util.RichMessageRenderer.RenderedMessage rm =
+                    com.qqai.util.RichMessageRenderer.renderSingle(message, cache, base);
+            return rm.getImageUrls() == null ? java.util.List.of() : rm.getImageUrls();
+        } catch (Exception e) {
+            log.debug("提取消息图片 URL 失败: {}", e.getMessage());
+            return java.util.List.of();
+        }
+    }
+
+    /** 把图片按 URL 上传到 AstrBot，返回 attachment_id 列表（最多 5 张、单张 ≤10MB） */
+    private java.util.List<String> uploadImages(java.util.List<String> imageUrls, String apiKey) {
+        java.util.List<String> ids = new java.util.ArrayList<>();
+        if (imageUrls == null || imageUrls.isEmpty()) return ids;
+        String token = (apiKey != null && !apiKey.isEmpty()) ? apiKey : astrBotToken;
+        for (String url : imageUrls) {
+            if (ids.size() >= 5) break;
+            try {
+                java.io.File f = resolveLocalFile(url);
+                if (f == null || !f.exists() || !f.isFile()) {
+                    log.debug("带图摘要跳过不存在的图片: {}", url);
+                    continue;
+                }
+                if (f.length() > 10L * 1024 * 1024) {
+                    log.debug("带图摘要跳过超大图片({}B): {}", f.length(), url);
+                    continue;
+                }
+                org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
+                headers.set("X-API-Key", token);
+                headers.setContentType(org.springframework.http.MediaType.MULTIPART_FORM_DATA);
+                org.springframework.util.MultiValueMap<String, Object> body =
+                        new org.springframework.util.LinkedMultiValueMap<>();
+                body.add("file", new org.springframework.core.io.FileSystemResource(f));
+                org.springframework.http.HttpEntity<org.springframework.util.MultiValueMap<String, Object>> entity =
+                        new org.springframework.http.HttpEntity<>(body, headers);
+                org.springframework.web.client.RestTemplate rt = new org.springframework.web.client.RestTemplate();
+                String respBody = rt.postForObject(astrBotApiUrl + "/api/v1/file", entity, String.class);
+                if (respBody != null) {
+                    JsonNode node = objectMapper.readTree(respBody);
+                    String id = node.path("data").path("attachment_id").asText(null);
+                    if (id != null && !id.isEmpty()) ids.add(id);
+                }
+            } catch (Exception e) {
+                log.debug("图片上传失败 {}: {}", url, e.getMessage());
+            }
+        }
+        return ids;
+    }
+
+    /** URL → 本地文件（与控制器同口径：/images/** → uploads/images/、/uploads/** → uploads/） */
+    private java.io.File resolveLocalFile(String imageUrl) {
+        if (imageUrl == null || imageUrl.isBlank()) return null;
+        String path = imageUrl;
+        if (path.startsWith("http://") || path.startsWith("https://")) {
+            int idx = path.indexOf("://");
+            int start = path.indexOf("/", idx + 3);
+            path = start >= 0 ? path.substring(start) : "";
+        }
+        if (path.startsWith("/images/")) return new java.io.File("uploads" + path);
+        if (path.startsWith("/uploads/")) return new java.io.File("uploads" + path.substring("/uploads".length()));
+        java.io.File direct = new java.io.File(path);
+        return direct.exists() ? direct : null;
+    }
+
+    /** 拼 [plain, image…] 消息段 */
+    private Object buildImageParts(String prompt, java.util.List<String> attachmentIds) {
+        com.fasterxml.jackson.databind.node.ArrayNode arr = objectMapper.createArrayNode();
+        com.fasterxml.jackson.databind.node.ObjectNode text = objectMapper.createObjectNode();
+        text.put("type", "plain");
+        text.put("text", prompt);
+        arr.add(text);
+        for (String id : attachmentIds) {
+            com.fasterxml.jackson.databind.node.ObjectNode img = objectMapper.createObjectNode();
+            img.put("type", "image");
+            img.put("attachment_id", id);
+            arr.add(img);
+        }
+        log.info("摘要请求带图: {} 张", attachmentIds.size());
+        return arr;
+    }
+
     public String renderMessageForSummary(com.qqai.entity.Message message) {
         if (message == null) return "";
         try {
@@ -96,9 +247,9 @@ public class AstrBotService {
                     com.qqai.util.RichMessageRenderer.renderSingle(message, cache, base);
             StringBuilder sb = new StringBuilder(rm.getText() != null ? rm.getText() : "");
             if (rm.getImageUrls() != null && !rm.getImageUrls().isEmpty()) {
-                sb.append("\n附图：");
-                int i = 1;
-                for (String u : rm.getImageUrls()) sb.append("\n附图 ").append(i++).append(": ").append(u);
+                // 图片本体由 summarizeMessageStructured(..., imageUrls) 作为消息段送出；
+                // 纯文本里只留计数，不再塞 http://…（模型访问不到，还白占上下文）。
+                sb.append("\n（含 ").append(rm.getImageUrls().size()).append(" 张图片）");
             }
             String result = sb.toString();
             if (result.trim().isEmpty() && message.getContent() != null) result = message.getContent();
@@ -133,7 +284,25 @@ public class AstrBotService {
      * @return 纯文本回复；调用失败或响应为空返回 null
      */
     public String chat(String message, String apiKey, String tag) throws Exception {
-        if (message == null || message.isBlank()) {
+        return doChat(message, apiKey, tag, false);
+    }
+
+    /**
+     * 带视觉配置的对话入口：message 可以是纯文本，也可以是
+     * {@code [{"type":"plain",…},{"type":"image","attachment_id":…}]} 消息段数组。
+     *
+     * <p>withVision=true 时会额外带上 {@code config_name}，把这次请求切到视觉配置文件，
+     * 否则 Agent 会用默认（纯文本）模型，图片段被丢弃、模型只能答"内容未知"。</p>
+     */
+    public String chat(Object message, String apiKey, String tag, boolean withVision) throws Exception {
+        return doChat(message, apiKey, tag, withVision);
+    }
+
+    private String doChat(Object message, String apiKey, String tag, boolean withVision) throws Exception {
+        if (message == null) {
+            return null;
+        }
+        if (message instanceof String && ((String) message).isBlank()) {
             return null;
         }
         String token = (apiKey != null && !apiKey.isEmpty()) ? apiKey : astrBotToken;
@@ -142,7 +311,11 @@ public class AstrBotService {
         httpPost.setHeader("X-API-Key", token);
 
         ObjectNode requestBody = objectMapper.createObjectNode();
-        requestBody.put("message", message);
+        if (message instanceof String) {
+            requestBody.put("message", (String) message);
+        } else {
+            requestBody.set("message", objectMapper.valueToTree(message));
+        }
         // AstrBot /api/v1/chat 必填字段:缺失会直接返回 {"status":"error","message":"Missing key: username"}
         requestBody.put("username", "summarizer");
         requestBody.put("enable_streaming", false);   // 关流式,响应格式稳定(与控制台链路一致)
@@ -154,6 +327,23 @@ public class AstrBotService {
         requestBody.put("temperature", 0.7);
         if (summaryModel != null && !summaryModel.isBlank()) {
             requestBody.put("model", summaryModel.trim());
+        }
+        if (withVision) {
+            // 视觉请求必须走视觉配置文件：Agent 的模型来自 profile，而不是请求体里的 model。
+            // 用 vision-task（同模型 + 无工具人格），避免模型走 Agent 工具调用而不产出摘要。
+            String cfg = (visionTaskConfigName != null && !visionTaskConfigName.isBlank())
+                    ? visionTaskConfigName.trim()
+                    : visionConfigName;
+            if (cfg != null && !cfg.isBlank()) {
+                requestBody.put("config_name", cfg);
+            }
+            // 每次带图任务用一个全新会话：AstrBot 的会话记录里带 persona_id，
+            // 复用旧会话会沿用旧人格（tools=null 的人格会挂上全部工具），
+            // 模型于是去调 send_message_to_user/future_task，而不是输出摘要。
+            requestBody.put("session_id", "vision-task-" + java.util.UUID.randomUUID());
+            // 带图时不注入默认人格：人格提示词会诱导模型描述"我看到了什么"的元话术，
+            // 与摘要任务的 JSON 输出要求冲突（与控制器 /send-with-image 同一策略）。
+            flags.put("enable_default_system_prompt", false);
         }
 
         httpPost.setEntity(new StringEntity(requestBody.toString(), java.nio.charset.StandardCharsets.UTF_8));
@@ -205,6 +395,18 @@ public class AstrBotService {
         if (idx >= 0) s = s.substring(0, idx);
         // 3) 遗留标签
         s = s.replaceAll("</?(?:think|thinking|tool_call|arg_key|arg_value|tool_result)>", "");
+        // 3.5) 特殊 token：GLM 视觉模型会把答案包成 <|begin_of_box|>…<|end_of_box|>，
+        //      留着会让结构化 JSON 解析失败（tags/sentiment 全空，原始 JSON 当正文存库）
+        s = s.replaceAll("<\\|[^|>]*\\|>", "");
+        // 3.6) Markdown 代码围栏：```json … ``` 去掉围栏只留内容
+        s = s.replaceAll("(?s)^\\s*```[a-zA-Z]*\\s*", "").replaceAll("(?s)\\s*```\\s*$", "");
+        // 3.7) 整段就是 JSON（结构化摘要/日报要求的输出格式）→ 前面已清掉特殊 token，
+        //      直接返回，不要再走「丢 JSON 行 + 按句去重」，那会把合法 JSON 拆坏
+        String jsonCandidate = s.trim();
+        if ((jsonCandidate.startsWith("{") && jsonCandidate.endsWith("}"))
+                || (jsonCandidate.startsWith("[") && jsonCandidate.endsWith("]"))) {
+            return jsonCandidate;
+        }
         // 4) 行内 JSON 残片：]}, "ts": 1789…} / "ts": 1789…
         s = s.replaceAll("\\]\\}\\s*,?\\s*\"ts\"\\s*:\\s*[0-9.]+\\}?", "");
         s = s.replaceAll("\"ts\"\\s*:\\s*[0-9.]+", "");

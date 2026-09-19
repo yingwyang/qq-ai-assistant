@@ -92,7 +92,9 @@ public class AiAnalysisConsumer {
         }
         String summary;
         try {
-            summary = astrBotService.summarizeMessageStructured(renderedForSummary, null, groupType);
+            // 带图消息同样送图 + 切视觉配置文件（与 /messages/{id}/summarize 同一口径）
+            java.util.List<String> imageUrls = astrBotService.renderMessageImageUrls(message);
+            summary = astrBotService.summarizeMessageStructured(renderedForSummary, null, groupType, imageUrls);
         } catch (Exception e) {
             throw new RuntimeException("AI分析失败: " + payload, e);
         }

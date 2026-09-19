@@ -50,6 +50,12 @@ public class AiSummaryParser {
             message.setAiSummarizedAt(LocalDateTime.now());
             return;
         }
+        // 模型（尤其 Agent 管线）常在答案前后夹带工具调用 JSON。取「最后一个完整 JSON 对象」
+        // 再解析，避免整段不是纯 JSON 时退化成把全部垃圾当摘要正文。
+        String candidate = extractLastJsonObject(text);
+        if (!candidate.isEmpty()) {
+            text = candidate;
+        }
         try {
             JsonNode node = MAPPER.readTree(text);
             if (node != null && node.isObject()) {
@@ -147,6 +153,56 @@ public class AiSummaryParser {
             text = text.replaceAll("^```[a-zA-Z]*\\s*", "").replaceAll("\\s*```$", "").trim();
         }
         return text;
+    }
+
+    /**
+     * 取出文本里<b>最后一个</b>完整的顶层 JSON 对象（按括号配平 + 字符串转义识别）。
+     *
+     * <p>用于抗「答案前后夹带工具调用 JSON」：例如
+     * {@code {"id":"…","name":"future_task",…}{"tags":[…],"summary":"…"}}，
+     * 直接 readTree 会失败，而取最后一个对象正好是真正的答案。</p>
+     *
+     * @return 解析成功的 JSON 对象文本；没有则返回空串
+     */
+    static String extractLastJsonObject(String text) {
+        if (text == null || text.isEmpty()) return "";
+        List<String> candidates = new ArrayList<>();
+        int depth = 0;
+        int start = -1;
+        boolean inString = false;
+        boolean escaped = false;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (inString) {
+                if (escaped) escaped = false;
+                else if (c == '\\') escaped = true;
+                else if (c == '"') inString = false;
+                continue;
+            }
+            if (c == '"') {
+                inString = true;
+            } else if (c == '{') {
+                if (depth == 0) start = i;
+                depth++;
+            } else if (c == '}') {
+                if (depth > 0) {
+                    depth--;
+                    if (depth == 0 && start >= 0) {
+                        candidates.add(text.substring(start, i + 1));
+                        start = -1;
+                    }
+                }
+            }
+        }
+        for (int i = candidates.size() - 1; i >= 0; i--) {
+            try {
+                JsonNode node = MAPPER.readTree(candidates.get(i));
+                if (node != null && node.isObject()) return candidates.get(i);
+            } catch (Exception ignored) {
+                // 试上一个候选
+            }
+        }
+        return "";
     }
 
     private static String truncate(String s, int max) {

@@ -125,6 +125,15 @@ cp .env.example backend/.env
 
 常用可选变量：`RABBITMQ_PASSWORD`、`ADMIN_INIT_PASSWORD`（初始管理员密码）、`CORS_ALLOWED_ORIGINS`、`ASTRBOT_SUMMARY_MODEL`、`FILE_DOWNLOAD_MAX_VIDEO_MB`、`JWT_REMEMBER_ME_EXPIRATION`（勾选"记住我"后的登录有效期，默认 2592000000 = 30 天）。
 
+> **图片识别（AI 摘要 / AI 分析要看图）还依赖 AstrBot 侧的两个配置**：一个主模型支持图片的配置档案（默认名 `vision`）和一个"不挂工具"的档案（默认名 `vision-task`，人格 `tools=[]`）。
+> 缺了它们，图片消息的摘要会退化成「内容未知」、分析里只剩 `[图片]`。一键补齐（幂等）：
+>
+> ```bash
+> python backend/scripts/ensure_astrbot_vision_task.py   # 之后重启 AstrBot
+> ```
+>
+> 档案名可用 `ASTRBOT_VISION_CONFIG_NAME` / `ASTRBOT_VISION_TASK_CONFIG_NAME` 覆盖，详见 `doc/AI_SUMMARY_TROUBLESHOOTING.md` §7。
+
 > 其余业务配置（端口、路径、超时等）仍可在 `backend/src/main/resources/application.yml` 中调整。
 
 ### 4. 启动后端

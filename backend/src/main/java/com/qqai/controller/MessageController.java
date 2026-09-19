@@ -133,7 +133,11 @@ public class MessageController {
 
         String summary;
         try {
-            summary = astrBotService.summarizeMessageStructured(rendered, null, resolveGroupType(message.getGroupId()));
+            // 带图消息：把图片作为消息段一起送出并切到视觉配置文件，否则模型看不到画面，
+            // 只能答"内容未知/未提供可辨内容"（图片在文本里只是一条 URL）。
+            List<String> imageUrls = astrBotService.renderMessageImageUrls(message);
+            summary = astrBotService.summarizeMessageStructured(
+                    rendered, null, resolveGroupType(message.getGroupId()), imageUrls);
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
                     .body(ApiResponse.error(503, "AI 服务暂不可用：" + e.getMessage()));

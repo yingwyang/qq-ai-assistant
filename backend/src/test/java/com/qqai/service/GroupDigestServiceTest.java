@@ -51,6 +51,24 @@ class GroupDigestServiceTest {
     }
 
     @Test
+    @DisplayName("图片/视频消息的本地路径替换为可读占位符，不把 /images/… 当正文喂给模型")
+    void shouldReplaceLocalMediaPathsWithPlaceholders() {
+        Message image = textMessage("小明", "10001", "/images/images/674405515/2026-09-19/abc.jpg");
+        image.setMessageType(Message.MessageType.IMAGE);
+        Message video = textMessage("小红", "10002", "/images/video/1.mp4");
+        video.setMessageType(Message.MessageType.VIDEO);
+        Message normalText = textMessage("小刚", "10003", "看图说话 /images/not-a-media-path");
+
+        String input = service.buildDigestInput(List.of(image, video, normalText));
+        String[] lines = input.split("\n");
+
+        assertEquals("小明: [图片]", lines[0]);
+        assertEquals("小红: [视频]", lines[1]);
+        // 非媒体后缀的文本原样保留（避免误伤正常内容）
+        assertEquals("小刚: 看图说话 /images/not-a-media-path", lines[2]);
+    }
+
+    @Test
     @DisplayName("总长超 12000 字符时保留前 6000 + 中间省略 + 保留后 6000")
     void shouldKeepBothEndsWhenInputTooLong() {
         List<Message> messages = new ArrayList<>();

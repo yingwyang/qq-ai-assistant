@@ -122,7 +122,7 @@ public class RichMessageRenderer {
             case FILE -> renderFile(textBuilder, nickname, content, m, cache);
             case AT -> renderAt(textBuilder, nickname, content, m);
             case REPLY -> renderReply(textBuilder, imageUrls, nickname, content, m, cache, baseUrl);
-            case FORWARD -> renderForward(textBuilder, nickname, content, m);
+            case FORWARD -> renderForward(textBuilder, imageUrls, nickname, content, m, baseUrl);
             case APP -> renderApp(textBuilder, nickname, content, m);
             default -> renderDefault(textBuilder, nickname, content, m, cache, type);
         }
@@ -404,7 +404,17 @@ public class RichMessageRenderer {
         sb.append("]");
     }
 
-    private static void renderForward(StringBuilder sb, String nickname, String content, Message m) {
+    /**
+     * 合并转发卡片。
+     *
+     * <p>子消息里有图片时，把它的 localUrl 一并收进 imageUrls —— 否则视觉链路拿不到任何图片，
+     * 模型只能看到 "[CQ:image,file=…]" 这种原始码，于是答"内容未知"。</p>
+     *
+     * <p>同时把 CQ 码转成可读占位（[图片]/[语音]/[视频]…），避免整段 base64/URL 噪声
+     * 占满上下文。</p>
+     */
+    private static void renderForward(StringBuilder sb, List<String> imageUrls, String nickname,
+                                      String content, Message m, String baseUrl) {
         sb.append(nickname).append(": [合并转发消息");
         List<ForwardSub> subs = parseForwardSubmessages(m.getForwardMessages());
         int totalCount = subs != null ? subs.size() : 0;
@@ -417,16 +427,61 @@ public class RichMessageRenderer {
         sb.append(" 包含 ").append(totalCount).append(" 条子消息]");
 
         if (subs != null && !subs.isEmpty()) {
-            int displayCount = Math.min(3, subs.size());
+            int displayCount = Math.min(10, subs.size());
             for (int i = 0; i < displayCount; i++) {
                 ForwardSub sub = subs.get(i);
-                String subText = truncate(sub.text, 80);
+                String subText = truncate(cleanCqText(sub.text), 80);
+                if ((subText == null || subText.isBlank()) && sub.localUrl != null) {
+                    subText = describeSubType(sub.messageType);
+                }
                 sb.append("\n→ ").append(sub.sender).append(": ").append(subText);
+                if (sub.localUrl != null && !sub.localUrl.isBlank() && imageUrls != null) {
+                    String resolved = resolveImageUrl(sub.localUrl, null, baseUrl);
+                    if (resolved != null) {
+                        imageUrls.add(resolved);
+                        sb.append(" [随附图片 ").append(imageUrls.size()).append("]");
+                    }
+                }
             }
-            if (totalCount > 3) {
-                sb.append("\n(省略 ").append(totalCount - 3).append(" 条)");
+            if (totalCount > displayCount) {
+                sb.append("\n(省略 ").append(totalCount - displayCount).append(" 条)");
             }
         }
+    }
+
+    /** 子消息类型 → 可读标签（图片本身随消息段送出，正文只留占位） */
+    private static String describeSubType(String messageType) {
+        if (messageType == null) return "[非文本消息]";
+        return switch (messageType.toUpperCase()) {
+            case "IMAGE" -> "[图片，见随附图片]";
+            case "VOICE", "AUDIO" -> "[语音]";
+            case "VIDEO" -> "[视频]";
+            case "FILE" -> "[文件]";
+            case "FACE" -> "[表情]";
+            case "APP" -> "[小程序]";
+            default -> "[非文本消息]";
+        };
+    }
+
+    /**
+     * 把 OneBot 原始 CQ 码清成可读文本。
+     *
+     * <p>转发子消息的 content 常形如
+     * {@code [CQ:image,file=xxx.jpg,url=https://…&amp;rkey=极长签名]}，直接送进提示词会
+     * 挤掉真正的对话内容，模型也读不出语义。</p>
+     */
+    static String cleanCqText(String raw) {
+        if (raw == null || raw.isEmpty()) return raw;
+        String s = raw.replace("&amp;", "&");
+        s = s.replaceAll("\\[CQ:image,[^\\]]*\\]", "[图片]");
+        s = s.replaceAll("\\[CQ:(record|voice),[^\\]]*\\]", "[语音]");
+        s = s.replaceAll("\\[CQ:video,[^\\]]*\\]", "[视频]");
+        s = s.replaceAll("\\[CQ:file,[^\\]]*\\]", "[文件]");
+        s = s.replaceAll("\\[CQ:face,[^\\]]*\\]", "[表情]");
+        s = s.replaceAll("\\[CQ:reply,[^\\]]*\\]", "");
+        s = s.replaceAll("\\[CQ:at,[^\\]]*\\]", "@某人 ");
+        s = s.replaceAll("\\[CQ:[^\\]]*\\]", "[消息]");
+        return s.trim();
     }
 
     private static void renderApp(StringBuilder sb, String nickname, String content, Message m) {
@@ -525,9 +580,16 @@ public class RichMessageRenderer {
     private static class ForwardSub {
         String sender;
         String text;
+        String messageType;
+        String localUrl;
         ForwardSub(String sender, String text) {
+            this(sender, text, null, null);
+        }
+        ForwardSub(String sender, String text, String messageType, String localUrl) {
             this.sender = sender;
             this.text = text;
+            this.messageType = messageType;
+            this.localUrl = localUrl;
         }
     }
 
@@ -551,13 +613,15 @@ public class RichMessageRenderer {
 
             int count = 0;
             for (JsonNode item : root) {
-                if (count >= 3) break;
-                String sender = extractField(item, "sender", "role", "nickname", "name");
+                if (count >= 10) break;
+                String sender = extractField(item, "sender", "userNickname", "role", "nickname", "name");
                 String text = extractField(item, "text", "content", "raw_content", "message", "msg");
+                String messageType = extractField(item, "messageType", "message_type", "type");
+                String localUrl = extractField(item, "localUrl", "local_url");
                 if (text == null || text.isEmpty()) {
                     text = truncate(item.toString(), 80);
                 }
-                result.add(new ForwardSub(sender != null ? sender : "未知", text));
+                result.add(new ForwardSub(sender != null ? sender : "未知", text, messageType, localUrl));
                 count++;
             }
         } catch (Exception e) {

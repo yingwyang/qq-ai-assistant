@@ -333,7 +333,7 @@ public class GroupDigestService {
             if (m == null || m.getContent() == null) {
                 continue;
             }
-            String content = m.getContent().trim();
+            String content = digestLineContent(m);
             if (content.isEmpty()) {
                 continue;
             }
@@ -346,6 +346,31 @@ public class GroupDigestService {
             sb.append(line);
         }
         return clipMiddle(sb.toString());
+    }
+
+    /**
+     * 单条消息在日报输入里的文本。
+     *
+     * <p>图片/视频消息的 content 存的是本地相对路径（{@code /images/images/…jpg}），
+     * 直接拼进提示词就是一行无意义路径，模型读不出任何信息，还会挤掉真正的对话。
+     * 统一换成可读占位符。</p>
+     */
+    String digestLineContent(Message m) {
+        String content = m.getContent() == null ? "" : m.getContent().trim();
+        if (content.isEmpty()) {
+            return "";
+        }
+        boolean looksLikeLocalMediaPath = (content.startsWith("/images/") || content.startsWith("/uploads/")
+                || content.startsWith("http://") || content.startsWith("https://"))
+                && content.matches("(?i).*\\.(jpg|jpeg|png|gif|webp|bmp|mp4|mov|webm|amr|silk|mp3|wav|ogg)$");
+        if (!looksLikeLocalMediaPath) {
+            return content;
+        }
+        Message.MessageType type = m.getMessageType();
+        if (type == Message.MessageType.VIDEO) return "[视频]";
+        if (type == Message.MessageType.VOICE || type == Message.MessageType.AUDIO) return "[语音]";
+        if (type == Message.MessageType.FILE) return "[文件]";
+        return "[图片]";
     }
 
     /** 超长输入处理：按运行时配置的上限保留两端（默认前 6000 + 中间省略 + 后 6000） */
