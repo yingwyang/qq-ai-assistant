@@ -752,6 +752,8 @@ export const subscriptionsApi = subscriptionApi;
 export const adminCreditsApi = {
   /** GET /api/credits/admin/rule → CreditRule 完整规则 */
   getRule: () => request('/credits/admin/rule'),
+  /** GET /api/credits/admin/rule/defaults → 出厂默认规则（「恢复默认值」用，不落库） */
+  getRuleDefaults: () => request('/credits/admin/rule/defaults'),
   /** PUT /api/credits/admin/rule → 保存规则（立即生效） */
   updateRule: (data) => request('/credits/admin/rule', {
     method: 'PUT',

@@ -183,80 +183,27 @@ public class AdminCreditsController {
         return ResponseEntity.ok(ApiResponse.success(rule));
     }
 
+    /**
+     * 出厂默认规则（后台「恢复默认值」用；只读，不落库）。
+     * 与 {@code CreditRuleService#buildDefaultRule} 同一份定义，前端不再各自维护一套默认值。
+     */
+    @GetMapping("/rule/defaults")
+    public ResponseEntity<ApiResponse<CreditRule>> getDefaultRule() {
+        securityHelper.requireAdmin();
+        return ResponseEntity.ok(ApiResponse.success(creditRuleService.defaultRule()));
+    }
+
+    /**
+     * 保存积分规则。
+     *
+     * <p>校验统一放在 {@code CreditRuleService.validate()}（抛 400 BizException）：
+     * 之前这里是「controller 里一堆 if + BizException(String)」，而 {@code BizException(String)}
+     * 的默认 code 是 500 —— 管理员填错一个折扣会看到「服务器错误」。现在只保留 service 这一层，
+     * 文案与状态码集中在一处，任何调用方都绕不过去。</p>
+     */
     @PutMapping("/rule")
     public ResponseEntity<ApiResponse<CreditRule>> updateRule(@RequestBody CreditRule updates) {
         securityHelper.requireAdmin();
-        if (updates.getNewUserBonus() != null && updates.getNewUserBonus() < 0)
-            throw new BizException("新人奖励不能为负");
-        if (updates.getSignInPoints() != null && updates.getSignInPoints() < 0)
-            throw new BizException("签到积分不能为负");
-        if (updates.getTokenUnit() != null && updates.getTokenUnit() <= 0)
-            throw new BizException("tokenUnit必须大于0");
-        if (updates.getPromptRate() != null && updates.getPromptRate() < 0)
-            throw new BizException("promptRate不能为负");
-        if (updates.getCompletionRate() != null && updates.getCompletionRate() < 0)
-            throw new BizException("completionRate不能为负");
-        if (updates.getMinCost() != null && updates.getMinCost() < 0)
-            throw new BizException("minCost不能为负");
-        if (updates.getDefaultCostPerMsg() != null && updates.getDefaultCostPerMsg() < 0)
-            throw new BizException("defaultCostPerMsg不能为负");
-        if (updates.getPlanLitePrice() != null && updates.getPlanLitePrice().compareTo(BigDecimal.ZERO) < 0)
-            throw new BizException("套餐价格不能为负");
-        if (updates.getPlanProPrice() != null && updates.getPlanProPrice().compareTo(BigDecimal.ZERO) < 0)
-            throw new BizException("套餐价格不能为负");
-        if (updates.getPlanProPlusPrice() != null && updates.getPlanProPlusPrice().compareTo(BigDecimal.ZERO) < 0)
-            throw new BizException("套餐价格不能为负");
-        if (updates.getPlanUltraPrice() != null && updates.getPlanUltraPrice().compareTo(BigDecimal.ZERO) < 0)
-            throw new BizException("套餐价格不能为负");
-        if (updates.getPlanLiteCredit() != null && updates.getPlanLiteCredit() < 0)
-            throw new BizException("套餐积分不能为负");
-        if (updates.getPlanProCredit() != null && updates.getPlanProCredit() < 0)
-            throw new BizException("套餐积分不能为负");
-        if (updates.getPlanProPlusCredit() != null && updates.getPlanProPlusCredit() < 0)
-            throw new BizException("套餐积分不能为负");
-        if (updates.getPlanUltraCredit() != null && updates.getPlanUltraCredit() < 0)
-            throw new BizException("套餐积分不能为负");
-        if (updates.getPlanDurationDays() != null && updates.getPlanDurationDays() <= 0)
-            throw new BizException("套餐时长必须大于0");
-
-        // 精细化计费字段校验
-        if (updates.getImageExtraCost() != null && updates.getImageExtraCost() < 0)
-            throw new BizException("图片额外费用不能为负");
-        if (updates.getAnalyzeBaseCost() != null && updates.getAnalyzeBaseCost() < 0)
-            throw new BizException("分析基础费用不能为负");
-        if (updates.getAnalyzeCostPerMsg() != null && updates.getAnalyzeCostPerMsg() < 0)
-            throw new BizException("分析每条消息费用不能为负");
-        if (updates.getTtsCharsPerCredit() != null && updates.getTtsCharsPerCredit() <= 0)
-            throw new BizException("TTS字符数必须大于0");
-        if (updates.getTtsMinCost() != null && updates.getTtsMinCost() < 0)
-            throw new BizException("TTS最小费用不能为负");
-        if (updates.getMonthlyFreeQuota() != null && updates.getMonthlyFreeQuota() < 0)
-            throw new BizException("月度免费配额不能为负");
-        if (updates.getOvertaxRate() != null && updates.getOvertaxRate() < 1.0)
-            throw new BizException("超配额倍率不能小于1.0");
-        // 月卡折扣校验（0.01~1.0 之间，>1 没有意义）
-        double d = 1.0;
-        if (updates.getSmallMonthCardDiscount() != null) {
-            d = updates.getSmallMonthCardDiscount();
-            if (d < 0.01 || d > 1.0) throw new BizException("小月卡折扣必须在 0.01~1.0 之间");
-        }
-        if (updates.getLargeMonthCardDiscount() != null) {
-            d = updates.getLargeMonthCardDiscount();
-            if (d < 0.01 || d > 1.0) throw new BizException("大月卡折扣必须在 0.01~1.0 之间");
-        }
-        if (updates.getAllTierDiscount() != null) {
-            d = updates.getAllTierDiscount();
-            if (d < 0.01 || d > 1.0) throw new BizException("ALL状态折扣必须在 0.01~1.0 之间");
-        }
-        // 上下文长度校验
-        if (updates.getContextExtraCostPerMsg() != null && updates.getContextExtraCostPerMsg() < 0)
-            throw new BizException("上下文每条费用不能为负");
-        if (updates.getContextFreeMsgCount() != null && updates.getContextFreeMsgCount() < 0)
-            throw new BizException("上下文免费条数不能为负");
-        // 每日封顶校验（0=不限）
-        if (updates.getDailyCapCost() != null && updates.getDailyCapCost() < 0)
-            throw new BizException("每日封顶消耗不能为负");
-
         CreditRule saved = creditRuleService.setRule(updates);
         creditRuleService.evictCache();
 

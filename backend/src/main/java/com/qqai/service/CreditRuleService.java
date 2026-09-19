@@ -1,6 +1,8 @@
 package com.qqai.service;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.qqai.entity.CreditRule;
+import com.qqai.exception.BizException;
 import com.qqai.repository.CreditRuleRepository;
 import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
@@ -64,6 +66,7 @@ public class CreditRuleService {
 
     @Transactional
     public CreditRule setRule(CreditRule updates) {
+        validate(updates);
         CreditRule existing = creditRuleRepository.findById(RULE_ID)
                 .orElseGet(this::buildDefaultRule);
         if (updates.getNewUserBonus() != null) existing.setNewUserBonus(updates.getNewUserBonus());
@@ -107,8 +110,131 @@ public class CreditRuleService {
         return saved;
     }
 
-    public void evictCache() {
-        cachedRule.set(null);
+    /** 出厂默认规则（后台「恢复默认值」用；不落库） */
+    public CreditRule defaultRule() {
+        return buildDefaultRule();
+    }
+
+    /**
+     * 保存前校验：数值范围 + 三个 JSON 字段必须是合法对象且值在范围内。
+     *
+     * <p>校验放在 service 层（而不是只放 controller），任何调用方都绕不过去；
+     * 之前 JSON 字段是纯字符串，管理员写错一个逗号就能把计费打穿。</p>
+     */
+    void validate(CreditRule u) {
+        if (u == null) return;
+        nonNegative(u.getNewUserBonus(), "新人奖励");
+        nonNegative(u.getSignInPoints(), "每日签到积分");
+        positive(u.getTokenUnit(), "tokenUnit");
+        nonNegative(u.getPromptRate(), "输入倍率");
+        nonNegative(u.getCompletionRate(), "输出倍率");
+        nonNegative(u.getMinCost(), "单次最小消耗");
+        nonNegative(u.getDefaultCostPerMsg(), "默认每条消耗");
+        nonNegative(u.getImageExtraCost(), "图片额外费用");
+        nonNegative(u.getAnalyzeBaseCost(), "分析基础费用");
+        nonNegative(u.getAnalyzeCostPerMsg(), "分析每条消息增量");
+        positive(u.getTtsCharsPerCredit(), "TTS 每 N 字符扣 1 积分");
+        nonNegative(u.getTtsMinCost(), "TTS 最小消耗");
+        nonNegative(u.getMonthlyFreeQuota(), "月度免费配额");
+        positive(u.getPlanDurationDays(), "套餐时长");
+        nonNegative(u.getPlanLiteCredit(), "Lite 积分");
+        nonNegative(u.getPlanProCredit(), "Pro 积分");
+        nonNegative(u.getPlanProPlusCredit(), "ProPlus 积分");
+        nonNegative(u.getPlanUltraCredit(), "Ultra 积分");
+        nonNegative(u.getContextExtraCostPerMsg(), "上下文每条增量");
+        nonNegative(u.getContextFreeMsgCount(), "上下文免费条数");
+        nonNegative(u.getDailyCapCost(), "每日封顶消耗");
+
+        nonNegativeDecimal(u.getPlanLitePrice(), "Lite 价格");
+        nonNegativeDecimal(u.getPlanProPrice(), "Pro 价格");
+        nonNegativeDecimal(u.getPlanProPlusPrice(), "ProPlus 价格");
+        nonNegativeDecimal(u.getPlanUltraPrice(), "Ultra 价格");
+
+        if (u.getOvertaxRate() != null && u.getOvertaxRate() < 1.0) {
+            throw new BizException(400, "超配额倍率不能小于 1.0（1.0 = 不涨价）");
+        }
+        discount(u.getSmallMonthCardDiscount(), "小月卡折扣");
+        discount(u.getLargeMonthCardDiscount(), "大月卡折扣");
+        discount(u.getAllTierDiscount(), "ALL 状态折扣");
+
+        validateRateJson(u.getModelRates(), "模型费率映射");
+        validateRateJson(u.getAnalyzeTypeRates(), "分析类型倍率");
+        validateThresholdJson(u.getTieredDiscountThresholds());
+    }
+
+    private static void nonNegative(Integer v, String label) {
+        if (v != null && v < 0) throw new BizException(400, label + " 不能为负");
+    }
+
+    private static void positive(Integer v, String label) {
+        if (v != null && v <= 0) throw new BizException(400, label + " 必须大于 0");
+    }
+
+    private static void nonNegativeDecimal(BigDecimal v, String label) {
+        if (v != null && v.signum() < 0) throw new BizException(400, label + " 不能为负");
+    }
+
+    private static void discount(Double v, String label) {
+        if (v == null) return;
+        if (v < 0.01 || v > 1.0) throw new BizException(400, label + " 必须在 0.01~1.0 之间（1.0 = 不打折）");
+    }
+
+    /** {"模型":倍率} / {"分析类型":倍率} —— 必须是对象，值为 ≥0 的数字 */
+    private static void validateRateJson(String json, String label) {
+        if (json == null || json.isBlank()) return;
+        JsonNode node;
+        try {
+            node = MAPPER.readTree(json);
+        } catch (Exception e) {
+            throw new BizException(400, label + " 不是合法 JSON：" + e.getMessage());
+        }
+        if (!node.isObject()) throw new BizException(400, label + " 必须是 JSON 对象，如 {\"default\":1.0}");
+        var it = node.fields();
+        while (it.hasNext()) {
+            var entry = it.next();
+            if (!entry.getValue().isNumber()) {
+                throw new BizException(400, label + " 中「" + entry.getKey() + "」的倍率必须是数字");
+            }
+            if (entry.getValue().asDouble() < 0) {
+                throw new BizException(400, label + " 中「" + entry.getKey() + "」的倍率不能为负");
+            }
+        }
+    }
+
+    /** {"累计积分":折扣} —— 键是正整数，值是 0.01~1.0 */
+    private static void validateThresholdJson(String json) {
+        if (json == null || json.isBlank()) return;
+        JsonNode node;
+        try {
+            node = MAPPER.readTree(json);
+        } catch (Exception e) {
+            throw new BizException(400, "阶梯累计折扣 不是合法 JSON：" + e.getMessage());
+        }
+        if (!node.isObject()) throw new BizException(400, "阶梯累计折扣 必须是 JSON 对象，如 {\"1000\":0.95}");
+        var it = node.fields();
+        while (it.hasNext()) {
+            var entry = it.next();
+            try {
+                if (Long.parseLong(entry.getKey()) <= 0) {
+                    throw new BizException(400, "阶梯累计折扣的阈值必须是正整数：" + entry.getKey());
+                }
+            } catch (NumberFormatException e) {
+                throw new BizException(400, "阶梯累计折扣的阈值必须是正整数：" + entry.getKey());
+            }
+            if (!entry.getValue().isNumber()) {
+                throw new BizException(400, "阶梯累计折扣的折扣必须是数字：" + entry.getKey());
+            }
+            double d = entry.getValue().asDouble();
+            if (d < 0.01 || d > 1.0) {
+                throw new BizException(400, "阶梯累计折扣「" + entry.getKey() + "」必须在 0.01~1.0 之间");
+            }
+        }
+    }
+
+    private static final com.fasterxml.jackson.databind.ObjectMapper MAPPER =
+            new com.fasterxml.jackson.databind.ObjectMapper();
+
+    public void evictCache() {        cachedRule.set(null);
         log.info("积分规则缓存已失效");
     }
 
