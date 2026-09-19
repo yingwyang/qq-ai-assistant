@@ -146,6 +146,11 @@ public class AstrBotService {
         // AstrBot /api/v1/chat 必填字段:缺失会直接返回 {"status":"error","message":"Missing key: username"}
         requestBody.put("username", "summarizer");
         requestBody.put("enable_streaming", false);   // 关流式,响应格式稳定(与控制台链路一致)
+        // AstrBot 4.28.x 新增 flags.enable_reasoning（默认 true）：开启时响应里会带上「🤔 思考:…」
+        // 推理过程，会被我们当成摘要正文。这里显式关闭，保证拿到的是最终回答。
+        ObjectNode flags = requestBody.putObject("flags");
+        flags.put("enable_streaming", false);
+        flags.put("enable_reasoning", false);
         requestBody.put("temperature", 0.7);
         if (summaryModel != null && !summaryModel.isBlank()) {
             requestBody.put("model", summaryModel.trim());

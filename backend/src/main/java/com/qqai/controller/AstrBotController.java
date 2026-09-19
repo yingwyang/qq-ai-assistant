@@ -475,6 +475,11 @@ public class AstrBotController {
             body.put("message", buildMultimodalMessage(prompt, rendered.getAllImageUrls(), token));
             body.put("username", "analyzer");
             body.put("enable_streaming", false);
+            // 4.28.x：显式关闭推理过程（默认开启会把「🤔 思考:…」混进回复正文）
+            java.util.Map<String, Object> chatFlags = new HashMap<>();
+            chatFlags.put("enable_streaming", false);
+            chatFlags.put("enable_reasoning", false);
+            body.put("flags", chatFlags);
 
             // 模型选择：优先用户默认模型，允许请求体 model 字段覆盖
             String defaultModel = getCurrentUserLlmModel();
@@ -735,6 +740,11 @@ public class AstrBotController {
             body.put("message", buildMultimodalMessage(prompt, rendered.getAllImageUrls(), token));
             body.put("username", "analyzer");
             body.put("enable_streaming", false);
+            // 4.28.x：显式关闭推理过程（默认开启会把「🤔 思考:…」混进回复正文）
+            java.util.Map<String, Object> chatFlags = new HashMap<>();
+            chatFlags.put("enable_streaming", false);
+            chatFlags.put("enable_reasoning", false);
+            body.put("flags", chatFlags);
 
             String selectedModel = getCurrentUserLlmModel();
             if (selectedModel != null) {
@@ -1139,6 +1149,11 @@ public class AstrBotController {
             body.put("message", hasImage ? buildMultimodalMessage(message, requestImageUrls, token) : message);
             body.put("username", userQq != null ? userQq : "web_user");
             body.put("enable_streaming", false);
+            // 4.28.x：显式关闭推理过程（默认开启会把「🤔 思考:…」混进回复正文）
+            java.util.Map<String, Object> chatFlags = new HashMap<>();
+            chatFlags.put("enable_streaming", false);
+            chatFlags.put("enable_reasoning", false);
+            body.put("flags", chatFlags);
             if (hasImage) {
                 log.info("AI 对话带图: imageUrls={}, 模型={}", requestImageUrls.size(), model);
             }
