@@ -177,8 +177,61 @@ public class AstrBotService {
                         rawBody.length() > 300 ? rawBody.substring(0, 300) : rawBody);
                 return null;
             }
-            return reply;
+            return sanitizeReply(reply);
         }
+    }
+
+    /**
+     * 清理 AstrBot 回复里的「Agent 工具调用」文本。
+     *
+     * <p>4.28 的 Agent 管线会把工具调用意图直接写进正文，例如：
+     * {@code <tool_call>send_message_to_user<arg_key>messages</arg_key><arg_value>[{...}]</arg_value></tool_call>}，
+     * 甚至残留 JSON 片段。这些不是给用户看的内容，统一剥离，避免混进摘要与聊天气泡。</p>
+     */
+    public static String sanitizeReply(String text) {
+        if (text == null || text.isBlank()) return text;
+        String s = text;
+        // 0) 推理块：<think>…</think> / <thinking>…</thinking>；以及只残留闭合标签的情况
+        s = s.replaceAll("(?s)<think(?:ing)?>.*?</think(?:ing)?>", "");
+        int lastThinkClose = s.lastIndexOf("</think");
+        if (lastThinkClose >= 0) {
+            int gt = s.indexOf('>', lastThinkClose);
+            s = gt >= 0 ? s.substring(gt + 1) : "";
+        }
+        // 1) 成对的 <tool_call>...</tool_call>
+        s = s.replaceAll("(?s)<tool_call>.*?</tool_call>", "");
+        // 2) 未闭合的 <tool_call> 起始（截到末尾）
+        int idx = s.indexOf("<tool_call>");
+        if (idx >= 0) s = s.substring(0, idx);
+        // 3) 遗留标签
+        s = s.replaceAll("</?(?:think|thinking|tool_call|arg_key|arg_value|tool_result)>", "");
+        // 4) 行内 JSON 残片：]}, "ts": 1789…} / "ts": 1789…
+        s = s.replaceAll("\\]\\}\\s*,?\\s*\"ts\"\\s*:\\s*[0-9.]+\\}?", "");
+        s = s.replaceAll("\"ts\"\\s*:\\s*[0-9.]+", "");
+        // 5) 整行是 JSON 尾巴（且不含中文）→ 丢弃
+        StringBuilder sb = new StringBuilder();
+        for (String line : s.split("\n", -1)) {
+            String t = line.trim();
+            boolean jsonTail = t.matches("^[\\]\\[}{)(,;:].*")
+                    && t.matches(".*[\"\\[\\]{}].*")
+                    && !t.matches(".*[\\u4e00-\\u9fa5].*");
+            if (jsonTail) continue;
+            sb.append(line).append('\n');
+        }
+        // 6) 按句去重：推理模型常把同一句答案重复多遍（先思考一遍、再复述一遍，甚至改写标点）
+        String[] sentences = sb.toString().trim().split("(?<=[。！？!?\\n])");
+        StringBuilder out = new StringBuilder();
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        for (String sentence : sentences) {
+            String key = sentence.trim();
+            if (key.isEmpty()) continue;
+            // 归一化后再比较：忽略空白与常见标点/引号差异，避免"同一句换个引号"被当成新句
+            String norm = key.replaceAll("[\\s\"'“”‘’《》<>()（）\\[\\]【】,，.。!！?？;；:：、-]", "");
+            if (norm.length() > 6 && !seen.add(norm)) continue;   // 短句（如"好的"）允许重复出现
+            out.append(key).append('\n');
+        }
+        String cleaned = out.toString().replaceAll("\\n{3,}", "\n\n").trim();
+        return cleaned.isEmpty() ? text.trim() : cleaned;
     }
 
     /**

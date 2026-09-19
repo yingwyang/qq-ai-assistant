@@ -97,6 +97,17 @@ public class AstrBotController {
     @Value("${astrbot.data-path:}")
     private String astrBotDataPath;
 
+    /**
+     * 带图提问时使用的 AstrBot「配置文件(profile)」名。
+     *
+     * <p>为什么需要它：4.28 的 Agent 以「配置里的主模型」为准，请求体里的 model 不覆盖它；
+     * 而主模型（DeepSeek）在配置里被标了 image 模态，AstrBot 于是认为它能看图、不触发视觉回退，
+     * 最终把图片降级成文本路径（模型回答"看不到图"）。实测：把带图请求指向「主模型为 GLM-4.5V」
+     * 的 profile（本机名为 vision）后，图片可被正确识别。</p>
+     */
+    @Value("${astrbot.vision-config-name:vision}")
+    private String visionConfigName;
+
     @Value("${server.port:8081}")
     private int serverPort;
 
@@ -542,7 +553,7 @@ public class AstrBotController {
                 }
             }
             
-            String analysis = replyText.toString().trim();
+            String analysis = com.qqai.service.AstrBotService.sanitizeReply(replyText.toString().trim());
             if (analysis.isEmpty()) {
                 analysis = "抱歉，无法分析群聊消息。";
             }
@@ -811,7 +822,7 @@ public class AstrBotController {
                 }
             }
 
-            String analysis = replyText.toString().trim();
+            String analysis = com.qqai.service.AstrBotService.sanitizeReply(replyText.toString().trim());
             if (analysis.isEmpty()) analysis = "抱歉，无法分析所选消息。";
 
             // 额外过滤工具调用 JSON
@@ -940,6 +951,22 @@ public class AstrBotController {
      * 支持 conversationId 参数来维持对话上下文
      */
     /**
+     * 判断回复是否是"我看不到图片"这类视觉失败（4.28 的 Agent 偶尔先试工具调用且失败）。
+     * 命中的话调用方会重试一次。
+     */
+    private boolean looksLikeVisionRejected(String reply) {
+        if (reply == null || reply.isBlank()) return false;
+        String[] patterns = {
+                "无法查看图片", "无法直接查看", "看不到这张图", "看不到图", "看不到图片",
+                "没有图像识别", "未启用图片识别", "无法读取图片", "图片识别能力"
+        };
+        for (String p : patterns) {
+            if (reply.contains(p)) return true;
+        }
+        return false;
+    }
+
+    /**
      * 从 AstrBot 的 cmd_config.json 读出「支持图片」的模型 id 集合（modalities 含 image）。
      * 读不到时返回空集合（调用方据此决定是否回退到默认模型）。
      */
@@ -1017,6 +1044,10 @@ public class AstrBotController {
             Map<String, Object> request = new HashMap<>();
             request.put("message", message == null ? "" : message);
             request.put("imageUrls", List.of("/uploads/chat-tmp/" + temp.getName()));
+            // 带图请求默认走「视觉配置文件」（其主模型为视觉模型），可用 astrbot.vision-config-name 覆盖
+            if (visionConfigName != null && !visionConfigName.isBlank()) {
+                request.put("config_name", visionConfigName);
+            }
             if (conversationId != null && !conversationId.isBlank()) request.put("conversationId", conversationId);
             if (groupId != null && !groupId.isBlank()) request.put("groupId", groupId);
             if (userQq != null && !userQq.isBlank()) request.put("userQq", userQq);
@@ -1045,6 +1076,15 @@ public class AstrBotController {
             }
 
             ResponseEntity<?> resp = sendMessage(request);
+
+            // 4.28 的 Agent 偶尔会先尝试调用 send_message_to_user 工具（且失败），
+            // 于是把"看不到图片"当成回答。识别到这种回复就自动重试一次，多数情况下第二次会直接看图作答。
+            Object firstBody = resp.getBody();
+            if (firstBody instanceof Map<?, ?> fm && looksLikeVisionRejected(String.valueOf(fm.get("data")))) {
+                log.info("带图提问疑似视觉失败，自动重试一次");
+                resp = sendMessage(request);
+            }
+
             // 把「实际使用的模型 / 是否发生过兜底」附回响应，前端可据此提示用户
             Object bodyObj = resp.getBody();
             if (bodyObj instanceof Map<?, ?> rawMap) {
@@ -1083,6 +1123,10 @@ public class AstrBotController {
             }
         }
         boolean hasImage = !requestImageUrls.isEmpty();
+        // 配置文件(profile)透传：4.28 用 config_name/config_id 指定该会话用哪套模型配置
+        // （带图时 sendMessageWithImage 会自动填入视觉 profile，这里负责把它带进 AstrBot 请求体）
+        String cfgName = (String) request.get("config_name");
+        String cfgId = (String) request.get("config_id");
 
         if ((message == null || message.trim().isEmpty()) && !hasImage) {
             Map<String, Object> errorResult = new HashMap<>();
@@ -1153,7 +1197,19 @@ public class AstrBotController {
             java.util.Map<String, Object> chatFlags = new HashMap<>();
             chatFlags.put("enable_streaming", false);
             chatFlags.put("enable_reasoning", false);
+            // 带图时关闭「默认系统提示」：否则 AstrBot 会套上默认人格（本项目里是"聊天记录分析器"），
+            // 把"这张图里有什么"也按聊天总结格式回答。纯文本对话保持原样（人格仍生效）。
+            if (hasImage) {
+                chatFlags.put("enable_default_system_prompt", false);
+            }
             body.put("flags", chatFlags);
+            // 带图时指定「配置文件」：4.28 的 Agent 以 profile 里的主模型为准（body 的 model 不覆盖它），
+            // 主模型若是纯文本模型就会把图片降级成文本路径。指向视觉 profile 后图片才能被识别。
+            if (cfgName != null && !cfgName.isBlank()) {
+                body.put("config_name", cfgName);
+                log.info("使用 AstrBot 配置文件: {}", cfgName);
+            }
+            if (cfgId != null && !cfgId.isBlank()) body.put("config_id", cfgId);
             if (hasImage) {
                 log.info("AI 对话带图: imageUrls={}, 模型={}", requestImageUrls.size(), model);
             }
@@ -1260,7 +1316,7 @@ public class AstrBotController {
                 }
             }
 
-            String finalReply = replyText.toString().trim();
+            String finalReply = com.qqai.service.AstrBotService.sanitizeReply(replyText.toString().trim());
             if (finalReply.isEmpty()) {
                 finalReply = "抱歉，我没有理解您的问题。";
             }
