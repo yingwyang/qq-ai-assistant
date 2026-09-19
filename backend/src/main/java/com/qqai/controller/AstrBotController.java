@@ -1007,9 +1007,9 @@ public class AstrBotController {
             result.put("status", "offline");
             result.put("message", e.getMessage());
         }
-        // 「人层」状态：当前用户选的人格、副本与档案是否就绪、是否需要重启
+        // 「人层」状态：顶栏只需要当前人格名，用轻量视图（就绪状态由 /astrbot/personas 提供）
         try {
-            result.put("persona", astrBotPersonaService.selectionStatus(securityHelper.getCurrentUserId()));
+            result.put("persona", astrBotPersonaService.currentSelectionLight(securityHelper.getCurrentUserId()));
         } catch (Exception e) {
             log.debug("读取人格状态失败: {}", e.getMessage());
         }

@@ -143,6 +143,21 @@ public class AstrBotPersonaService {
         return list;
     }
 
+    /**
+     * 轻量视图：只回「当前用户选的人格名」，给前端顶栏显示用。
+     *
+     * <p>刻意不查副本/档案就绪状态：{@link #selectionStatus(Long)} 每次要开 SQLite 并访问两次
+     * AstrBot 接口，而顶栏每 30 秒轮询一次状态，没必要为此做这些。</p>
+     */
+    public Map<String, Object> currentSelectionLight(Long userId) {
+        String personaId = currentPersonaId(userId);
+        Map<String, Object> view = new LinkedHashMap<>();
+        view.put("personaId", personaId);
+        // AstrBot 的人格名本身就是展示名（如「灰泽满」）；没选人格时前端回退到助手名
+        view.put("personaName", personaId);
+        return view;
+    }
+
     /** 当前用户的选择 + 生效状态（给前端「AstrBot 模块」用） */
     public Map<String, Object> selectionStatus(Long userId) {
         Map<String, Object> view = new LinkedHashMap<>();

@@ -9,7 +9,7 @@
 
       <div class="header-info">
         <div class="header-title-row">
-          <h3 class="header-name" :title="botName">{{ botName }}</h3>
+          <h3 class="header-name" :title="personaName ? `当前人格：${personaName}` : botName">{{ personaName || botName }}</h3>
           <span class="status-pill" :class="isOnline ? 'online' : 'offline'">
             <span class="status-dot"></span>{{ isOnline ? '在线' : '离线' }}
           </span>
@@ -528,7 +528,7 @@
           </div>
           <div class="message-content">
             <div class="message-header" v-if="!message.isSystem">
-              <span class="message-sender">{{ message.sender }}</span>
+              <span class="message-sender">{{ displaySender(message) }}</span>
               <span class="message-time">{{ formatTime(message.time) }}</span>
             </div>
             <!-- 带图提问：气泡里回显发出去的图片 -->
@@ -914,6 +914,7 @@ export default {
     const personaMessage = ref('');
     const personaMessageKind = ref('info');   // 'info' | 'warn'
     const personaContract = ref('');          // 叠加在人格之上的运行契约（后端 prompts.yml）
+    const personaName = ref('');              // 当前选中的 AstrBot 人格名（顶栏显示用）
     const personaDetail = ref(null);          // 「看人设全文」弹层数据
     const astrbotStatus = ref({ status: 'unknown', message: '' });
 
@@ -928,6 +929,8 @@ export default {
         personaOptions.value = data.personas || [];
         personaSelection.value = data.selection || null;
         personaContract.value = data.contract || '';
+        // 顶栏跟着显示当前人格名（没选人格时回退到助手名）
+        personaName.value = personaSelection.value?.personaName || '';
       } catch (e) {
         personaMessage.value = '读取人格列表失败：' + (e.message || e);
       }
@@ -937,7 +940,8 @@ export default {
       try {
         const res = await astrBotApi.getStatus();
         astrbotStatus.value = { status: res?.status || 'unknown', message: res?.message || '' };
-        if (res?.persona) personaSelection.value = res.persona;
+        // /status 里的 persona 是轻量视图（只有名字），就绪状态仍由 /personas 提供
+        if (res?.persona) personaName.value = res.persona.personaName || '';
       } catch (e) {
         astrbotStatus.value = { status: 'offline', message: e.message || String(e) };
       }
@@ -1714,11 +1718,12 @@ export default {
       }
     };
 
-    // 检查 AstrBot 状态
+    // 检查 AstrBot 状态（顺带同步当前人格名，顶栏标题用它）
     const checkStatus = async () => {
       try {
         const response = await astrBotApi.getStatus();
         isOnline.value = response && response.status === 'online';
+        if (response?.persona) personaName.value = response.persona.personaName || '';
       } catch (error) {
         isOnline.value = false;
       }
@@ -1779,6 +1784,12 @@ export default {
       const group = (props.groupName || '').trim();
       return group || '新对话';
     });
+
+    /** 气泡上的说话人：AI 一律显示当前人格名（历史消息里存的是 'AstrBot'） */
+    const displaySender = (message) => {
+      if (message?.sender === 'AstrBot' && personaName.value) return personaName.value;
+      return message?.sender || '';
+    };
 
     // ==================== 转发到群聊 ====================
     // 把 AI 回复（或自己的提问）直接发到某个 QQ 群：走后端 /groups/{id}/send，
@@ -2163,6 +2174,8 @@ export default {
       showAstrbotKey,
       showSettings,
       headerSubtitle,
+      personaName,
+      displaySender,
       // 双层提示词：人层
       settingsTab,
       personaOptions,
