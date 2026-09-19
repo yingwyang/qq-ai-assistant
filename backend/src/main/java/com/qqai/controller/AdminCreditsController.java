@@ -64,9 +64,117 @@ public class AdminCreditsController {
     @Autowired(required = false)
     private AuditLogService auditLogService;
 
+    /** 模拟现金账：按规则折算现金收支 + 汇总聚合 */
+    @Autowired
+    private com.qqai.service.CashLedgerService cashLedgerService;
+
+    @Autowired
+    private com.qqai.repository.CreditTransactionRepository creditTransactionRepository;
+
     private final ObjectMapper objectMapper = new ObjectMapper()
             .registerModule(new com.fasterxml.jackson.datatype.jsr310.JavaTimeModule())
             .disable(com.fasterxml.jackson.databind.SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+
+    // ==================== 模拟现金账 ====================
+
+    /**
+     * 现金收支汇总（含按日趋势、按类别构成、按类型明细），给后台图表用。
+     *
+     * @param days 未显式给 start/end 时，默认看最近多少天（1–365）
+     */
+    @GetMapping("/cash/summary")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> cashSummary(
+            @RequestParam(required = false) String start,
+            @RequestParam(required = false) String end,
+            @RequestParam(defaultValue = "30") int days) {
+        securityHelper.requireAdmin();
+        LocalDate to = end != null && !end.isBlank() ? LocalDate.parse(end) : LocalDate.now();
+        LocalDate from = start != null && !start.isBlank()
+                ? LocalDate.parse(start)
+                : to.minusDays(Math.max(0, Math.min(days, 365) - 1));
+
+        List<CreditTransaction> rows = loadCashWindow(from, to);
+        Map<String, Object> summary = cashLedgerService.summarize(rows, from, to);
+        summary.put("truncated", rows.size() >= MAX_CASH_ROWS);
+        return ResponseEntity.ok(ApiResponse.success(summary));
+    }
+
+    /** 汇总窗口内最多取多少条流水（防止一次拉全表） */
+    private static final int MAX_CASH_ROWS = 20000;
+
+    private List<CreditTransaction> loadCashWindow(LocalDate from, LocalDate to) {
+        LocalDateTime startDt = from.atStartOfDay();
+        LocalDateTime endDt = to.atTime(LocalTime.MAX);
+        List<CreditTransaction> rows =
+                creditTransactionRepository.findByCreatedAtBetweenOrderByCreatedAtAsc(startDt, endDt);
+        if (rows.size() > MAX_CASH_ROWS) {
+            log.warn("现金汇总窗口内流水过多({} 条)，只取前 {} 条", rows.size(), MAX_CASH_ROWS);
+            return rows.subList(rows.size() - MAX_CASH_ROWS, rows.size());
+        }
+        return rows;
+    }
+
+    /**
+     * 手工记一笔现金收支（<b>模拟</b>）：写入一条 {@code CASH_INCOME}/{@code CASH_EXPENSE} 流水。
+     *
+     * <p>积分不变（amount=0），只有现金列有值；可选关联到某个用户，便于在用户维度对账。</p>
+     */
+    @PostMapping("/cash")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> createCashEntry(@RequestBody Map<String, Object> body) {
+        securityHelper.requireAdmin();
+        String direction = String.valueOf(body.getOrDefault("direction", "IN")).toUpperCase();
+        if (!"IN".equals(direction) && !"OUT".equals(direction)) {
+            throw new BizException(400, "direction 只能是 IN 或 OUT");
+        }
+        BigDecimal amount = parseCashAmount(body.get("amount"));
+        if (amount.signum() <= 0) throw new BizException(400, "金额必须大于 0");
+        if (amount.compareTo(new BigDecimal("9999999")) > 0) throw new BizException(400, "金额过大");
+
+        String remark = body.get("remark") == null ? "" : String.valueOf(body.get("remark")).trim();
+        String category = body.get("category") == null ? com.qqai.service.CashLedgerService.CATEGORY_MANUAL
+                : String.valueOf(body.get("category")).trim().toUpperCase();
+        Long userId = body.get("userId") == null || String.valueOf(body.get("userId")).isBlank()
+                ? null : Long.valueOf(String.valueOf(body.get("userId")));
+        if (userId != null && userRepository.findById(userId).isEmpty()) {
+            throw new BizException(404, "用户不存在: " + userId);
+        }
+
+        CreditTransaction tx = new CreditTransaction();
+        tx.setUserId(userId == null ? 0L : userId);   // 0 = 全站级记账，不对应具体用户
+        tx.setType("IN".equals(direction)
+                ? CreditTransactionType.CASH_INCOME : CreditTransactionType.CASH_EXPENSE);
+        tx.setDirection("IN".equals(direction) ? CreditDirection.IN : CreditDirection.OUT);
+        tx.setAmount(0);
+        tx.setBalanceAfter(userId == null ? 0
+                : userCreditRepository.findByUserId(userId).map(UserCredit::getBalance).orElse(0));
+        tx.setCashAmount("IN".equals(direction) ? amount : amount.negate());
+        tx.setCashCategory(category);
+        tx.setRemark("【手工记账】" + (remark.isEmpty() ? com.qqai.service.CashLedgerService.categoryLabel(category) : remark));
+        tx.setAdminUserId(securityHelper.getCurrentUserId());
+        CreditTransaction saved = creditTransactionRepository.save(tx);
+        if (auditLogService != null) {
+            auditLogService.log(securityHelper.getCurrentUsername(), "CASH_MANUAL_ENTRY", "credits",
+                    "SUCCESS", "方向=" + direction + " 金额=" + amount + " 备注=" + remark);
+        }
+        log.info("管理员手工记账（模拟）: id={}, {} {} 元, 类别={}, 备注={}",
+                saved.getId(), direction, amount, category, remark);
+        Map<String, Object> data = new HashMap<>();
+        data.put("id", saved.getId());
+        data.put("direction", direction);
+        data.put("amount", amount);
+        data.put("cashAmount", saved.getCashAmount());
+        data.put("category", category);
+        return ResponseEntity.ok(ApiResponse.success(data));
+    }
+
+    private static BigDecimal parseCashAmount(Object raw) {
+        if (raw == null) throw new BizException(400, "金额不能为空");
+        try {
+            return new BigDecimal(String.valueOf(raw)).setScale(2, java.math.RoundingMode.HALF_UP);
+        } catch (Exception e) {
+            throw new BizException(400, "金额格式不正确: " + raw);
+        }
+    }
 
     @GetMapping("/rule")
     public ResponseEntity<ApiResponse<CreditRule>> getRule() {
@@ -301,8 +409,9 @@ public class AdminCreditsController {
                 userId, txType, dir, startDt, endDt, min, max, relatedId, pageable);
 
         List<Map<String, Object>> content = new ArrayList<>();
+        Map<Long, Map<String, Object>> cashIndex = cashLedgerService.enrich(txPage.getContent());
         for (CreditTransaction tx : txPage.getContent()) {
-            content.add(txToMap(tx));
+            content.add(txToMap(tx, cashIndex.get(tx.getId())));
         }
         Map<String, Object> pageData = new HashMap<>();
         pageData.put("content", content);
@@ -320,7 +429,7 @@ public class AdminCreditsController {
         objectMapper.writeValue(response.getOutputStream(), resp);
     }
 
-    private Map<String, Object> txToMap(CreditTransaction tx) {
+    private Map<String, Object> txToMap(CreditTransaction tx, Map<String, Object> cashInfo) {
         Map<String, Object> m = new HashMap<>();
         m.put("id", tx.getId());
         m.put("userId", tx.getUserId());
@@ -332,7 +441,22 @@ public class AdminCreditsController {
         m.put("relatedId", tx.getRelatedId());
         m.put("adminUserId", tx.getAdminUserId());
         m.put("createdAt", tx.getCreatedAt());
+        // 模拟现金：金额（元，带符号）+ 类别（前端表格/图表直接用）
+        if (cashInfo != null) {
+            m.put("cashAmount", cashInfo.get("cashAmount"));
+            m.put("cashCategory", cashInfo.get("cashCategory"));
+            m.put("cashCategoryLabel", cashInfo.get("cashCategoryLabel"));
+        } else {
+            m.put("cashAmount", null);
+            m.put("cashCategory", null);
+            m.put("cashCategoryLabel", null);
+        }
         return m;
+    }
+
+    /** 兼容旧调用（导出等场景只需积分字段） */
+    private Map<String, Object> txToMap(CreditTransaction tx) {
+        return txToMap(tx, null);
     }
 
     private CreditTransactionType parseTxType(String type) {

@@ -799,6 +799,26 @@ export const adminCreditsApi = {
     }
     return request(endpoint);
   },
+  /**
+   * GET /api/credits/admin/cash/summary?start=&end=&days=
+   * 模拟现金账汇总：{ income, expense, net, pointsIn, pointsOut, series[], byCategory[], byType[] }
+   */
+  getCashSummary: (params = {}) => {
+    const qs = new URLSearchParams();
+    if (params.start) qs.append('start', params.start);
+    if (params.end) qs.append('end', params.end);
+    if (params.days) qs.append('days', params.days);
+    const query = qs.toString();
+    return request(`/credits/admin/cash/summary${query ? '?' + query : ''}`);
+  },
+  /**
+   * POST /api/credits/admin/cash —— 手工记一笔现金收支（模拟）。
+   * @param {{direction:'IN'|'OUT', amount:number|string, category?:string, remark?:string, userId?:number|string}} payload
+   */
+  createCashEntry: (payload) => request('/credits/admin/cash', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }),
 };
 
 /** 管理员订单管理 API — 走 /api/credits/admin/orders/* 前缀 */

@@ -12,5 +12,11 @@ public enum CreditTransactionType {
     ADMIN_GRANT,
     ADMIN_DEDUCT,
     EXPIRE,
-    MONTHLY_CARD_DAILY
+    MONTHLY_CARD_DAILY,
+
+    /** 模拟现金记账：管理员手工记一笔现金收入 */
+    CASH_INCOME,
+
+    /** 模拟现金记账：管理员手工记一笔现金支出 */
+    CASH_EXPENSE
 }

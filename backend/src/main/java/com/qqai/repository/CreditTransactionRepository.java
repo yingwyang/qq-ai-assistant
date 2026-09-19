@@ -25,6 +25,12 @@ public interface CreditTransactionRepository extends JpaRepository<CreditTransac
 
     List<CreditTransaction> findByRelatedIdOrderByCreatedAtAsc(String relatedId);
 
+    /** 批量按关联 ID 回查（现金账：退款找原单，避免 N+1） */
+    List<CreditTransaction> findByRelatedIdIn(List<String> relatedIds);
+
+    /** 时间范围内的全部流水（现金汇总与图表用；调用方负责限制范围与条数） */
+    List<CreditTransaction> findByCreatedAtBetweenOrderByCreatedAtAsc(LocalDateTime start, LocalDateTime end);
+
     @Query("SELECT DATE(ct.createdAt) as txDate, " +
            "SUM(CASE WHEN ct.direction = 'IN' THEN ct.amount ELSE 0 END) as earned, " +
            "SUM(CASE WHEN ct.direction = 'OUT' THEN ct.amount ELSE 0 END) as spent " +

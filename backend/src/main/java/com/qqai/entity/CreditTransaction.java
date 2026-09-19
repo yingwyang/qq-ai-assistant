@@ -44,6 +44,20 @@ public class CreditTransaction {
 
     private Long adminUserId;
 
+    /**
+     * 现金变动（元），<b>带符号</b>：正=收入、负=支出、null=这笔没有现金影响。
+     *
+     * <p>本项目没有接真实支付，现金是<b>模拟</b>的：订阅购买按套餐价、退款按退款比例、
+     * AI/TTS 消耗按积分成本折算（见 {@code CashLedgerService}）；管理员也可手工记一笔
+     * （{@code cashCategory=MANUAL}）。除手工记账外都不落库，读取时推算，历史数据无需回填。</p>
+     */
+    @Column(precision = 12, scale = 2)
+    private java.math.BigDecimal cashAmount;
+
+    /** 现金类别：SUBSCRIPTION / REFUND / AI_COST / MANUAL（空=无现金影响） */
+    @Column(length = 30)
+    private String cashCategory;
+
     private LocalDateTime createdAt;
 
     @PrePersist
@@ -77,6 +91,12 @@ public class CreditTransaction {
 
     public Long getAdminUserId() { return adminUserId; }
     public void setAdminUserId(Long adminUserId) { this.adminUserId = adminUserId; }
+
+    public java.math.BigDecimal getCashAmount() { return cashAmount; }
+    public void setCashAmount(java.math.BigDecimal cashAmount) { this.cashAmount = cashAmount; }
+
+    public String getCashCategory() { return cashCategory; }
+    public void setCashCategory(String cashCategory) { this.cashCategory = cashCategory; }
 
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }

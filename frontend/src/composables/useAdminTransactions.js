@@ -12,12 +12,23 @@ export const TX_TYPE_OPTIONS = [
   { value: 'AI_CONSUMPTION', label: 'AI 消费' },
   { value: 'AI_CHAT', label: 'AI 对话' },
   { value: 'AI_ANALYZE', label: 'AI 分析' },
+  { value: 'TTS_SYNTHESIS', label: '语音合成' },
   { value: 'SUBSCRIPTION_PURCHASE', label: '订阅购买' },
   { value: 'MONTHLY_CARD_DAILY', label: '月卡每日奖励' },
   { value: 'REFUND', label: '退款' },
   { value: 'ADMIN_GRANT', label: '管理员发放' },
   { value: 'ADMIN_DEDUCT', label: '管理员扣减' },
   { value: 'EXPIRE', label: '过期' },
+  { value: 'CASH_INCOME', label: '现金收入（模拟）' },
+  { value: 'CASH_EXPENSE', label: '现金支出（模拟）' },
+];
+
+/** 模拟现金账的类别（与后端 CashLedgerService 的常量一致） */
+export const CASH_CATEGORY_OPTIONS = [
+  { value: 'MANUAL', label: '手工记账' },
+  { value: 'SUBSCRIPTION', label: '订阅收入' },
+  { value: 'REFUND', label: '订单退款' },
+  { value: 'AI_COST', label: '模型调用成本' },
 ];
 
 export const TX_DIRECTION_OPTIONS = [
@@ -144,9 +155,79 @@ export function useAdminTransactions({ showSystemMsg } = {}) {
     }
   }
 
+  // ==================== 模拟现金账（与积分流水同一时间窗口） ====================
+  // 现金不是真银行流水：订阅按套餐价、退款按比例、AI 消耗按积分成本折算，管理员也可手工记一笔。
+  const cashDays = ref(30);
+  const cashSummary = ref(null);
+  const cashLoading = ref(false);
+  const cashPreset = ref('30');           // today | 7 | 30 | 90 | custom
+
+  /** 时间窗口（与筛选里的 start/end 共用：自定义时以筛选为准） */
+  function cashWindow() {
+    const to = new Date();
+    const fmt = (d) => d.toISOString().slice(0, 10);
+    if (cashPreset.value === 'today') return { start: fmt(to), end: fmt(to), days: 1 };
+    const days = Number(cashPreset.value) || cashDays.value || 30;
+    const from = new Date(to.getTime() - (days - 1) * 86400000);
+    return { start: fmt(from), end: fmt(to), days };
+  }
+
+  async function loadCashSummary() {
+    cashLoading.value = true;
+    try {
+      const w = cashWindow();
+      cashDays.value = w.days;
+      const data = await adminCreditsApi.getCashSummary(w);
+      cashSummary.value = data || null;
+    } catch (error) {
+      if (showSystemMsg) showSystemMsg('加载现金汇总失败: ' + error.message, 'error');
+      cashSummary.value = null;
+    } finally {
+      cashLoading.value = false;
+    }
+  }
+
+  function setCashPreset(preset) {
+    cashPreset.value = preset;
+    if (preset === 'custom') {
+      // 自定义：直接用筛选里的日期，联动积分流水
+      const params = {};
+      if (filters.start) params.start = filters.start;
+      if (filters.end) params.end = filters.end;
+      if (!params.start && !params.end) return;
+      cashLoading.value = true;
+      adminCreditsApi.getCashSummary(params)
+        .then((data) => { cashSummary.value = data || null; })
+        .catch((error) => { if (showSystemMsg) showSystemMsg('加载现金汇总失败: ' + error.message, 'error'); })
+        .finally(() => { cashLoading.value = false; });
+      return;
+    }
+    loadCashSummary();
+  }
+
+  /** 手工记一笔现金收支（模拟）；成功后刷新汇总 */
+  const cashEntrySaving = ref(false);
+  async function createCashEntry(payload) {
+    cashEntrySaving.value = true;
+    try {
+      const res = await adminCreditsApi.createCashEntry(payload);
+      if (showSystemMsg) showSystemMsg(`已记账：${payload.direction === 'IN' ? '收入' : '支出'} ${payload.amount} 元`);
+      await loadCashSummary();
+      await loadTransactions(0);
+      return res;
+    } catch (error) {
+      if (showSystemMsg) showSystemMsg('记账失败: ' + error.message, 'error');
+      throw error;
+    } finally {
+      cashEntrySaving.value = false;
+    }
+  }
+
   return {
     txList, txLoading, txPage, txSize, txTotalElements, txTotalPages, txExporting,
     txTotalSummary, filters, summary,
     loadTransactions, searchTransactions, resetFilters, goToTxPage, exportTransactions,
+    cashDays, cashSummary, cashLoading, cashPreset, loadCashSummary, setCashPreset,
+    createCashEntry, cashEntrySaving,
   };
 }

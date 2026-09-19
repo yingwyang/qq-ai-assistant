@@ -516,6 +516,7 @@ import { useImagePreview } from '../composables/useImagePreview';
 import {
   useAdminTransactions,
   TX_TYPE_OPTIONS as TX_TYPE_OPTS,
+  CASH_CATEGORY_OPTIONS,
   TX_DIRECTION_OPTIONS as TX_DIR_OPTS,
   txTypeText as txTypeTextLabel,
 } from '../composables/useAdminTransactions';
@@ -810,6 +811,7 @@ export default {
     provide('adminUserCredits', adminUserCredits);
     provide('adminTx', adminTx);
     provide('adminTxTypeOptions', TX_TYPE_OPTS);
+    provide('adminCashCategories', CASH_CATEGORY_OPTIONS);
     provide('adminTxDirectionOptions', TX_DIR_OPTS);
     provide('adminTxTypeTextLabel', txTypeTextLabel);
     provide('adminOrders', adminOrders);
