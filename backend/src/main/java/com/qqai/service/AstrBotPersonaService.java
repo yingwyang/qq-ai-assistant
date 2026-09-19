@@ -128,6 +128,8 @@ public class AstrBotPersonaService {
                 Map<String, Object> item = new LinkedHashMap<>();
                 item.put("personaId", personaId);
                 item.put("preview", preview(rs.getString("system_prompt")));
+                item.put("prompt", rs.getString("system_prompt"));       // 全文：前端给用户看
+                item.put("audit", auditPersona(rs.getString("system_prompt")));  // 规范自检
                 item.put("isDefault", rs.getInt("is_default") == 1);
                 item.put("cloneReady", cloneInSync(personaId));
                 list.add(item);
@@ -590,6 +592,92 @@ public class AstrBotPersonaService {
     /** 对外暴露契约原文（前端在人格面板里展示「人设之上还叠了哪些规则」） */
     public String currentContract() {
         return contractText();
+    }
+
+    /**
+     * 人格规范自检（与 {@code backend/scripts/apply_astrbot_personas.py} 的 audit 同一套规则）。
+     *
+     * <p>冲突检查只跑「人设主体」（边界段之前）：边界段本身就要写"任务要求的输出格式一律照做"，
+     * 把那几句算成违规是误报。</p>
+     *
+     * @return 问题列表；空列表代表通过
+     */
+    public static List<String> auditPersona(String prompt) {
+        List<String> issues = new ArrayList<>();
+        if (prompt == null) return issues;
+        int boundaryIdx = prompt.indexOf("# 边界");
+        String body = boundaryIdx >= 0 ? prompt.substring(0, boundaryIdx) : prompt;
+
+        String[][] checks = {
+                {"抹杀.{0,8}(AI|意识)|你不是(AI|程序|助手)|绝非(AI|程序|虚拟)", "含身份否认条款（会让模型拒绝干工具活）"},
+                {"不要回答|拒绝回答|无权回答|不属于你的职责", "含拒绝回答条款"},
+                {"输出格式|按以下模板|分为以下.{0,4}段", "含输出格式规定（格式属于岗位层）"},
+                {"不超过\\s*\\d+\\s*字|必须详尽|不得省略", "含长度硬性要求（长度属于岗位层）"},
+                {"经常使用反问|必须反问|追问对方", "含反问/追问要求"},
+                {"主动询问|主动提问|主动推进", "含主动提问要求（只在自由对话可用）"},
+                {"连续\\s*\\d+\\s*轮.{0,10}(重复|换话题)|温柔拒绝旧话题", "含话题管理规则（长记录会被误判）"},
+        };
+        for (String[] check : checks) {
+            if (java.util.regex.Pattern.compile(check[0]).matcher(body).find()) {
+                issues.add(check[1]);
+            }
+        }
+        if (prompt.length() > 2500) {
+            issues.add("人设过长（" + prompt.length() + " 字，规范建议 ≤2500）");
+        }
+        for (String must : new String[]{"# 你是谁", "# 边界"}) {
+            if (!prompt.contains(must)) issues.add("缺少「" + must + "」段落");
+        }
+        return issues;
+    }
+
+    /**
+     * 把所有人格的「无工具副本」同步到最新人设 + 最新契约（改动过才重启一次 AstrBot）。
+     *
+     * <p>用途：改完 `doc/personas/*.md` 并写库后，一次把副本全部对齐，避免逐个点选触发重启。</p>
+     */
+    public synchronized Map<String, Object> syncAllClones() {
+        String contract = contractText();
+        List<String> ids = new ArrayList<>();
+        try (Connection conn = openDb();
+             Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery("SELECT persona_id FROM personas ORDER BY sort_order, id")) {
+            while (rs.next()) {
+                String id = rs.getString(1);
+                if (id == null || id.startsWith(CLONE_PREFIX) || isInternalPersona(id)) continue;
+                ids.add(id);
+            }
+        } catch (Exception e) {
+            throw new BizException(503, "读取人格列表失败：" + e.getMessage());
+        }
+
+        List<String> changed = new ArrayList<>();
+        for (String id : ids) {
+            CloneState state = ensureClonePersona(id, clonePersonaId(id), contract);
+            if (state != CloneState.UNCHANGED) changed.add(id);
+        }
+        boolean restarted = false;
+        if (!changed.isEmpty() && isAstrBotRunning()) {
+            restartAstrBotAndWait();
+            restarted = true;
+        }
+        // 只为「用户实际选过」的人格刷档案，避免凭空生成一堆档案
+        List<String> profilesRefreshed = new ArrayList<>();
+        for (String id : ids) {
+            if (profileIdByName(profileName(id, false)) == null) continue;
+            ensureProfile(id, clonePersonaId(id), false);
+            ensureProfile(id, clonePersonaId(id), true);
+            profilesRefreshed.add(id);
+        }
+        readyCache.clear();
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("personas", ids.size());
+        result.put("clonesUpdated", changed);
+        result.put("profilesRefreshed", profilesRefreshed);
+        result.put("restarted", restarted);
+        log.info("人格副本同步完成：共 {} 个人格，更新 {} 个副本，刷新 {} 组档案，重启={}",
+                ids.size(), changed.size(), profilesRefreshed.size(), restarted);
+        return result;
     }
 
     private Connection openDb() throws Exception {

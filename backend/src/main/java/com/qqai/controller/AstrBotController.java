@@ -1016,6 +1016,21 @@ public class AstrBotController {
         return ResponseEntity.ok(result);
     }
 
+    /**
+     * 把所有人格副本同步到最新人设与契约（改完 `doc/personas/*.md` 后用）。
+     *
+     * <p>只对有差异的副本写库，并在需要时重启一次 AstrBot；已选人格的配置档案一并刷新。</p>
+     */
+    @PostMapping("/personas/sync")
+    public ResponseEntity<?> syncPersonas() {
+        try {
+            return ResponseEntity.ok(Map.of("status", "ok", "data", astrBotPersonaService.syncAllClones()));
+        } catch (com.qqai.exception.BizException e) {
+            return ResponseEntity.status(e.getCode())
+                    .body(Map.of("status", "error", "message", e.getMessage()));
+        }
+    }
+
     // ==================== 双层提示词：人层（AstrBot 人格）====================
 
     /**

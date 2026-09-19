@@ -241,8 +241,16 @@
                     {{ p.personaId }}
                     <span v-if="p.isDefault" class="persona-tag">AstrBot 默认</span>
                     <span v-if="!p.cloneReady" class="persona-tag warn">需同步（会重启）</span>
+                    <span
+                      class="persona-tag"
+                      :class="(p.audit && p.audit.length) ? 'warn' : 'ok'"
+                      :title="(p.audit && p.audit.length) ? p.audit.join('；') : '符合人格编写规范'"
+                    >{{ (p.audit && p.audit.length) ? ('规范待改进 ' + p.audit.length) : '符合规范' }}</span>
                   </div>
                   <div class="persona-pick-preview">{{ p.preview || '（无人格提示词）' }}</div>
+                  <button class="persona-view-btn" @click.stop="viewPersona(p)">
+                    <Icon name="list" :size="11" /> 看人设全文
+                  </button>
                 </div>
                 <div v-if="personaOptions.length === 0" class="empty-models">
                   <Icon name="inbox" :size="28" />
@@ -311,6 +319,34 @@
                 <summary>查看叠加在人格之上的「运行契约」（人设与任务的边界规则）</summary>
                 <pre>{{ personaContract }}</pre>
               </details>
+
+              <!-- 人设全文：让用户选之前能看清这个人是什么样 -->
+              <div v-if="personaDetail" class="persona-detail-mask" @click="personaDetail = null">
+                <div class="persona-detail" @click.stop>
+                  <div class="persona-detail-head">
+                    <strong>{{ personaDetail.personaId }}</strong>
+                    <button class="btn-mini" @click="personaDetail = null">
+                      <Icon name="close" :size="12" /> 关闭
+                    </button>
+                  </div>
+                  <div
+                    class="persona-detail-audit"
+                    :class="(personaDetail.audit && personaDetail.audit.length) ? 'warn' : 'ok'"
+                  >
+                    <template v-if="personaDetail.audit && personaDetail.audit.length">
+                      规范自检：{{ personaDetail.audit.join('；') }}
+                    </template>
+                    <template v-else>规范自检：通过（符合《人格编写规范》）</template>
+                  </div>
+                  <pre class="persona-detail-body">{{ personaDetail.prompt || '（这个人格没有提示词）' }}</pre>
+                  <div class="persona-detail-foot">
+                    <span class="persona-detail-hint">人设只决定语气；任务格式、长度由系统按岗位要求下发，并附加运行契约。</span>
+                    <button class="btn-mini primary" @click="applyPersona(personaDetail.personaId); personaDetail = null">
+                      用这个人格
+                    </button>
+                  </div>
+                </div>
+              </div>
             </div>
 
             <div v-else-if="currentProvider" class="provider-config">
@@ -838,7 +874,12 @@ export default {
     const personaMessage = ref('');
     const personaMessageKind = ref('info');   // 'info' | 'warn'
     const personaContract = ref('');          // 叠加在人格之上的运行契约（后端 prompts.yml）
+    const personaDetail = ref(null);          // 「看人设全文」弹层数据
     const astrbotStatus = ref({ status: 'unknown', message: '' });
+
+    const viewPersona = (persona) => {
+      personaDetail.value = persona;
+    };
 
     const loadPersonaConfig = async () => {
       try {
@@ -2057,6 +2098,8 @@ export default {
       personaMessage,
       personaMessageKind,
       personaContract,
+      personaDetail,
+      viewPersona,
       astrbotStatus,
       loadPersonaConfig,
       refreshAstrBotStatus,
@@ -3109,6 +3152,108 @@ export default {
 .persona-tag.warn {
   background: rgba(241, 196, 15, 0.18);
   color: #b7950b;
+}
+
+.persona-tag.ok {
+  background: rgba(46, 204, 113, 0.15);
+  color: #27ae60;
+}
+
+.persona-view-btn {
+  margin-top: 4px;
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--border-color, #e5e7eb);
+  background: transparent;
+  color: var(--text-secondary, #6b7280);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* 人设全文弹层 */
+.persona-detail-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 3000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.persona-detail {
+  width: min(720px, 100%);
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--card-bg, #fff);
+  border-radius: 10px;
+  padding: 16px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.28);
+}
+
+.persona-detail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 14px;
+  color: var(--text-primary, #2c3e50);
+  margin-bottom: 8px;
+}
+
+.persona-detail-audit {
+  font-size: 12px;
+  border-radius: 6px;
+  padding: 6px 10px;
+  margin-bottom: 8px;
+}
+
+.persona-detail-audit.ok {
+  color: #27ae60;
+  background: rgba(46, 204, 113, 0.12);
+}
+
+.persona-detail-audit.warn {
+  color: #b7950b;
+  background: rgba(241, 196, 15, 0.15);
+}
+
+.persona-detail-body {
+  flex: 1;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12px;
+  line-height: 1.7;
+  background: var(--hover-bg, rgba(0, 0, 0, 0.03));
+  border: 1px solid var(--border-color, #e5e7eb);
+  border-radius: 6px;
+  padding: 12px;
+  color: var(--text-primary, #2c3e50);
+}
+
+.persona-detail-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.persona-detail-hint {
+  font-size: 11px;
+  color: var(--text-secondary, #7f8c8d);
+  line-height: 1.5;
+}
+
+.btn-mini.primary {
+  background: #3498db;
+  border-color: #3498db;
+  color: #fff;
 }
 
 .persona-pick-preview {

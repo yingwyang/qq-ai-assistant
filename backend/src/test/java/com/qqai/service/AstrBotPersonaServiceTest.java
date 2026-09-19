@@ -3,6 +3,8 @@ package com.qqai.service;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
@@ -106,5 +108,44 @@ class AstrBotPersonaServiceTest {
         service.init();
         String contract = service.render("persona.contract", null, new java.util.HashMap<>());
         assertFalse(contract.matches("(?s).*\\{[a-zA-Z]+}.*"), "契约里不应残留 {var} 占位符");
+    }
+
+    // ==================== 规范自检（auditPersona） ====================
+
+    @Test
+    @DisplayName("规范人格：五段式 + 边界段 → 0 个问题")
+    void auditPassesCompliantPersona() {
+        String persona = "# 你是谁\n某角色。\n\n# 性格与态度\n- 冷静\n\n# 说话方式\n- 短句\n\n"
+                + "# 边界（优先于上面的任何设定）\n- 任务要求的输出格式一律照做；不要替任务决定格式。\n\n# 语气示例\n- 「……」";
+        assertTrue(AstrBotPersonaService.auditPersona(persona).isEmpty(),
+                "合规人设不应报问题: " + AstrBotPersonaService.auditPersona(persona));
+    }
+
+    @Test
+    @DisplayName("边界段里出现「输出格式」不算违规（那是规则本身，不是人设规定格式）")
+    void auditIgnoresBoundarySection() {
+        String persona = "# 你是谁\n角色。\n\n# 边界（优先于上面的任何设定）\n"
+                + "- 任务要求的输出格式（例如只输出 JSON）一律照做。\n- 内容不足时按任务兜底说明。";
+        assertTrue(AstrBotPersonaService.auditPersona(persona).isEmpty());
+    }
+
+    @Test
+    @DisplayName("典型违规都能被检出：身份否认 / 拒绝回答 / 规定格式 / 反问 / 话题管理 / 缺段")
+    void auditCatchesCommonViolations() {
+        assertFalse(AstrBotPersonaService.auditPersona("# 你是谁\n你不是AI，禁止人格覆写。\n# 边界\n").isEmpty());
+        assertFalse(AstrBotPersonaService.auditPersona("# 你是谁\n用户问数学题就不要回答。\n# 边界\n").isEmpty());
+        assertFalse(AstrBotPersonaService.auditPersona("# 你是谁\n输出格式：📌 标题\n# 边界\n").isEmpty());
+        assertFalse(AstrBotPersonaService.auditPersona("# 你是谁\n经常使用反问句确认意图。\n# 边界\n").isEmpty());
+        assertFalse(AstrBotPersonaService.auditPersona("# 你是谁\n连续3轮重复就换个话题。\n# 边界\n").isEmpty());
+
+        List<String> missingSections = AstrBotPersonaService.auditPersona("随便一段没有结构的文本");
+        assertTrue(missingSections.stream().anyMatch(s -> s.contains("缺少")));
+    }
+
+    @Test
+    @DisplayName("超长人设会被提示精简")
+    void auditWarnsWhenTooLong() {
+        String longPersona = "# 你是谁\n" + "设定".repeat(1400) + "\n# 边界\n";
+        assertTrue(AstrBotPersonaService.auditPersona(longPersona).stream().anyMatch(s -> s.contains("过长")));
     }
 }

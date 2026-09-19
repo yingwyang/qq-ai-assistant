@@ -135,10 +135,13 @@ cp .env.example backend/.env
 > 档案名可用 `ASTRBOT_VISION_CONFIG_NAME` / `ASTRBOT_VISION_TASK_CONFIG_NAME` 覆盖，详见 `doc/AI_SUMMARY_TROUBLESHOOTING.md` §7。
 
 > **双层提示词（人 × 岗位）**：任务规则与输出格式由本后端 `prompts.yml` 提供（**岗位**），说话方式由 AstrBot 人格提供（**人**）。
-> 用户在 AI 对话面板 → ⚙️ → 「人格与状态」里选一个人格即可，摘要 / 分析 / 群日报 / 对话全部生效。
+> 用户在 AI 对话面板 → ⚙️ → 「人格与状态」里选一个人格即可，摘要 / 分析 / 群日报 / 对话全部生效；列表里能展开看人设全文与规范自检结果。
 > 后端会为每个人格生成一份 `tools=[]` 的副本（避免模型去调工具把「请稍等片刻」当回答）与 `qqai-p-<slug>-text|-image` 配置档案；
 > 首次启用某个人格需要重启 AstrBot（约 10–60 秒），之后切换即时生效。底座档案与系统人格名可用
 > `ASTRBOT_PERSONA_TEXT_BASE` / `ASTRBOT_PERSONA_IMAGE_BASE` / `astrbot.internal-persona-ids` 调整，详见 `doc/AI_SUMMARY_TROUBLESHOOTING.md` §8。
+>
+> **人格库与编写规范**：人设文件放在 `doc/personas/*.md`（文件即事实来源），写法见 `doc/PERSONA_AUTHORING_GUIDE.md`；
+> 应用方式 `python backend/scripts/apply_astrbot_personas.py --apply` + 重启 AstrBot，或调 `POST /api/astrbot/personas/sync` 一次同步所有副本。
 
 > 其余业务配置（端口、路径、超时等）仍可在 `backend/src/main/resources/application.yml` 中调整。
 

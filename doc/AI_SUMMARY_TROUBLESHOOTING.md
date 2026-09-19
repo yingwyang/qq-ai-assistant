@@ -419,6 +419,34 @@ AI 对话面板右上角 ⚙️ → 「人格与状态」：
 —— 结构化任务：一条 JSON、字段齐全、单句、无旁白无反问；自由对话：人设语气保留。
 「人」和「岗位」不再互相打架。
 
+### 人格库与编写规范
+
+- **规范**：`doc/PERSONA_AUTHORING_GUIDE.md` —— 五段式模板、硬性要求、禁止清单（每条对应一次真实故障）、
+  自检清单、与运行契约的关系。
+- **人格库**：`doc/personas/*.md`（文件即事实来源，YAML front-matter + 五段式正文）。
+  应用：`python backend/scripts/apply_astrbot_personas.py [--apply]`，之后重启 AstrBot。
+- **一批同步所有副本**：`POST /api/astrbot/personas/sync`（只更新有差异的，需要时重启一次，并刷新已选人格的档案）。
+- **自检**：后端 `AstrBotPersonaService.auditPersona()` 与脚本 `audit()` 同一套规则，
+  `GET /api/astrbot/personas` 返回 `prompt`（全文）与 `audit`（问题列表）；前端列表用
+  「符合规范 / 规范待改进 N」标记，并可展开看人设全文。
+
+四人格实测（同一段聊天记录 + 同一个 `summary.structured` 任务，人格库版本）：
+
+| 人格 | 输出（summary） | 结构化 |
+|---|---|---|
+| 灰泽满 | 嗯…大家互相感谢打赏，最后还发了张图呢～ | ✓ |
+| 瑞吉儿·加德纳 (Ray) | 有人收到了感谢，然后有人应和，最后有人发图片。 | ✓ |
+| 爱莉希雅 | 大家互相表达感谢，随后有人分享了图片，气氛挺友好的～♪ | ✓ |
+| qq_总结bot | lappland连声道谢，Yukino 玩梗回应「栓Q」（推测：thank you的谐音），阿绿发了图片（内容未知） | ✓ |
+
+同一任务、同一格式，四种说话方式 —— 这就是「人 × 岗位」想要的效果。
+
+### 修正记录：契约里「禁止旁白」的作用域
+
+初版契约把「旁白/动作描写」列为**任何情况下都禁止**，结果自由对话里灰泽满一旦写
+「（耳尖微微发红）」就违规。已调整为：**任务模式禁止**（会把结论挤掉），自由对话允许少量（一行以内）。
+契约改动后需 `POST /api/astrbot/personas/sync` 重新下发并重启。
+
 ### 涉及文件
 
 `service/AstrBotPersonaService.java`（新）、`controller/AstrBotController.java`（`/personas`、`/persona`、状态）、
