@@ -2851,15 +2851,29 @@ export default {
   padding: 12px;
   border-bottom: 1px solid var(--border-color, #e0e0e0);
   display: flex;
+  align-items: center;
   gap: 6px;
 }
 
+/*
+ * 提供商列只有 250px 左右宽：如果不锁住按钮宽度，flex 会把「确定/取消」压到 36px，
+ * 中文两字被拆成两行，行高随之被撑到 46px、连输入框一起被拉高（实测过）。
+ * 输入框加 min-width: 0 才能在窄容器里正常收缩。
+ */
 .provider-add-form input {
-  flex: 1;
+  flex: 1 1 auto;
+  min-width: 0;
   padding: 6px 10px;
   border: 1px solid var(--border-color, #ddd);
   border-radius: 4px;
   font-size: 13px;
+}
+
+.btn-provider-confirm,
+.btn-provider-cancel {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  min-height: 30px;
 }
 
 .btn-provider-confirm {
