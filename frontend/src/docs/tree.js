@@ -35,7 +35,7 @@ export const categories = [
       { slug: 'credits', title: '积分体系', filePath: '/docs/guide/credits.md', description: '积分怎么得、怎么花，签到与月卡加成' },
       { slug: 'subscription', title: '订阅与订单', filePath: '/docs/guide/subscription.md', description: '直购档位、月卡权益、退款与纠纷流程' },
       { slug: 'account', title: '账号与安全', filePath: '/docs/guide/account.md', description: '资料修改、改密码、忘记密码与记住我' },
-      { slug: 'admin', title: '管理后台导览', filePath: '/docs/guide/admin.md', description: '13 个管理页面各自能做什么' }
+      { slug: 'admin', title: '管理后台导览', filePath: '/docs/guide/admin.md', description: '14 个管理页面各自能做什么，含 ?tab= 深链接' }
     ]
   },
   {
