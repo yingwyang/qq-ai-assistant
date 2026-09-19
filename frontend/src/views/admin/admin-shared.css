@@ -137,6 +137,14 @@
   color: #c62828;
 }
 
+.btn-action.danger {
+  color: #e74c3c;
+  border-color: rgba(231, 76, 60, 0.55);
+  background: transparent;
+}
+
+.theme-dark .btn-action.danger { color: #ef9a9a; border-color: rgba(239, 154, 154, 0.5); }
+
 .btn-action:hover {
   opacity: 0.8;
 }
@@ -411,6 +419,12 @@ button:disabled {
   cursor: not-allowed;
 }
 
+/* 暗色下 #ddd 底 + 灰字只有 2.5:1，改成半透明白底 */
+.theme-dark button:disabled {
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--text-muted, #8c8c8c);
+}
+
 .tier-badge {
   display: inline-block;
   padding: 2px 8px;
@@ -445,3 +459,316 @@ button:disabled {
 .theme-dark .status-tag.status-REFUNDED { background: rgba(123, 31, 162, 0.22); color: #ce93d8; }
 .theme-dark .status-tag.status-CANCELLED { background: rgba(96, 125, 139, 0.2); color: #b0bec5; }
 .theme-dark .status-tag.status-EXPIRED { background: rgba(198, 40, 40, 0.22); color: #ef9a9a; }
+
+/* ===================== 暗色主题：角色/状态徽章与彩色按钮 ===================== */
+/* 与上面的 tier/dir/status 同一思路：浅底深字的语义色小色块在暗色下改成深底亮字，
+   否则整页会出现一堆刺眼的亮色方块。 */
+.theme-dark .role-badge.admin { background: rgba(245, 124, 0, 0.2); color: #ffb74d; }
+.theme-dark .role-badge.user { background: rgba(25, 118, 210, 0.2); color: #64b5f6; }
+.theme-dark .status-badge.active { background: rgba(46, 125, 50, 0.22); color: #a5d6a7; }
+.theme-dark .status-badge.inactive { background: rgba(198, 40, 40, 0.22); color: #ef9a9a; }
+.theme-dark .btn-action.promote { background: rgba(25, 118, 210, 0.24); color: #64b5f6; }
+.theme-dark .btn-action.demote { background: rgba(245, 124, 0, 0.2); color: #ffb74d; }
+.theme-dark .btn-action.enable { background: rgba(46, 125, 50, 0.22); color: #a5d6a7; }
+.theme-dark .btn-action.disable,
+.theme-dark .btn-action.delete { background: rgba(198, 40, 40, 0.22); color: #ef9a9a; }
+.theme-dark .btn-action.primary { background: var(--accent-color, #3498db); color: #fff; }
+
+/* ===================== 统一页头 ===================== */
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+
+.page-header-text {
+  min-width: 0;
+}
+
+.page-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text-primary, #333);
+}
+
+.page-subtitle {
+  margin: 6px 0 0 0;
+  font-size: 12.5px;
+  color: var(--text-muted, #888);
+}
+
+.page-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.page-header-meta {
+  font-size: 12px;
+  color: var(--text-muted, #888);
+}
+
+/* ===================== 筛选栏 / 工具条 ===================== */
+.filter-bar {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 14px 16px;
+  margin-bottom: 16px;
+  background: var(--card-bg, #fff);
+  border: 1px solid var(--border-color, #e8e8e8);
+  border-radius: 8px;
+}
+
+.filter-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.filter-field > label {
+  font-size: 12px;
+  color: var(--text-muted, #888);
+}
+
+.filter-field input,
+.filter-field select {
+  padding: 7px 10px;
+  border: 1px solid var(--border-color, #d8dee9);
+  border-radius: 6px;
+  background: var(--input-bg, #fff);
+  color: var(--text-primary, #333);
+  font-size: 13px;
+  outline: none;
+  min-width: 120px;
+}
+
+.filter-field input:focus,
+.filter-field select:focus {
+  border-color: var(--accent-color, #3498db);
+}
+
+.filter-field.is-grow {
+  flex: 1;
+  min-width: 200px;
+}
+
+.filter-field.is-grow input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.filter-spacer {
+  flex: 1;
+}
+
+.data-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.data-toolbar-info {
+  font-size: 12.5px;
+  color: var(--text-muted, #888);
+}
+
+.data-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* ===================== KPI 卡片 ===================== */
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.kpi-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px 18px;
+  background: var(--card-bg, #fff);
+  border: 1px solid var(--border-color, #e8e8e8);
+  border-radius: 10px;
+  min-width: 0;
+}
+
+.kpi-card.is-clickable {
+  cursor: pointer;
+  transition: border-color 0.2s, transform 0.15s;
+}
+
+.kpi-card.is-clickable:hover {
+  border-color: var(--accent-color, #3498db);
+  transform: translateY(-1px);
+}
+
+.kpi-label {
+  font-size: 12.5px;
+  color: var(--text-muted, #888);
+}
+
+.kpi-value {
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--text-primary, #333);
+  line-height: 1.2;
+}
+
+.kpi-value.is-in { color: var(--success-color, #27ae60); }
+.kpi-value.is-out { color: var(--danger-color, #e74c3c); }
+
+.kpi-hint {
+  font-size: 11.5px;
+  color: var(--text-muted, #999);
+}
+
+/* ===================== 空 / 加载 / 错误态 ===================== */
+.state-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 44px 20px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-muted, #888);
+}
+
+.state-box .state-title {
+  font-size: 14px;
+  color: var(--text-secondary, #666);
+}
+
+.state-box.is-error {
+  color: var(--danger-color, #e74c3c);
+}
+
+.state-box.is-error .state-title {
+  color: var(--danger-color, #e74c3c);
+}
+
+.state-box .state-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+/* ===================== 表格容器 / 分页 ===================== */
+.table-wrap {
+  background: var(--card-bg, #fff);
+  border: 1px solid var(--border-color, #e8e8e8);
+  border-radius: 8px;
+  overflow-x: auto;
+}
+
+.table-wrap .user-table th,
+.table-wrap .user-table td {
+  white-space: nowrap;
+}
+
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 14px;
+}
+
+.pager .pager-info {
+  font-size: 12.5px;
+  color: var(--text-muted, #888);
+  margin-right: auto;
+}
+
+.pager .pager-size {
+  padding: 5px 8px;
+  border: 1px solid var(--border-color, #e0e0e0);
+  border-radius: 4px;
+  background: var(--input-bg, #fff);
+  color: var(--text-primary, #333);
+  font-size: 12px;
+  margin-left: 8px;
+}
+
+/* ===================== 标记徽章 ===================== */
+.dirty-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  background: rgba(255, 143, 0, 0.16);
+  color: #ef6c00;
+}
+
+.restart-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  background: rgba(52, 152, 219, 0.14);
+  color: #2980b9;
+}
+
+.theme-dark .dirty-badge { background: rgba(255, 143, 0, 0.2); color: #ffb74d; }
+.theme-dark .restart-badge { background: rgba(52, 152, 219, 0.22); color: #64b5f6; }
+
+/* ===================== 提示条 ===================== */
+.notice-bar {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  margin-bottom: 14px;
+  background: rgba(52, 152, 219, 0.1);
+  color: var(--text-secondary, #666);
+  border: 1px solid rgba(52, 152, 219, 0.25);
+}
+
+.notice-bar.is-warn {
+  background: rgba(255, 143, 0, 0.12);
+  border-color: rgba(255, 143, 0, 0.3);
+  color: #b26a00;
+}
+
+.theme-dark .notice-bar.is-warn { color: #ffb74d; }
+
+/* ===================== 通用按钮补充 ===================== */
+.btn-action.primary {
+  background: var(--accent-color, #3498db);
+  color: #fff;
+  border-color: var(--accent-color, #3498db);
+}
+
+.btn-action.primary:hover { opacity: 0.9; }
+
+.btn-action.danger-soft {
+  color: var(--danger-color, #e74c3c);
+  border-color: rgba(231, 76, 60, 0.5);
+  background: transparent;
+}
+
+.theme-dark .kpi-card { border-color: var(--border-color, #333344); }
+

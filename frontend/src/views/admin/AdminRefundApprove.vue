@@ -1,10 +1,8 @@
 <template>
   <div class="tab-panel admin-refund-approve">
-    <div class="panel-title">
-      <Icon name="file" :size="20" />
-      <h2>退款审批</h2>
-      <button class="btn-action promote" style="margin-left:auto" @click="loadOrders(ordersPage)">刷新</button>
-    </div>
+    <AdminPageHeader title="退款审批" subtitle="待审批的退款申请（同意 / 驳回）">
+      <button class="btn-action promote" @click="loadOrders(ordersPage)">刷新</button>
+    </AdminPageHeader>
 
     <div class="user-table-wrapper">
       <table class="user-table">
@@ -53,10 +51,11 @@
 <script>
 import { inject } from 'vue';
 import Icon from '../../components/Icon.vue';
+import AdminPageHeader from '../../components/admin/AdminPageHeader.vue';
 
 export default {
   name: 'AdminRefundApprove',
-  components: { Icon },
+  components: { Icon, AdminPageHeader },
   setup() {
     const adminOrders = inject('adminOrders');
     const planTierText = inject('adminPlanTierText');

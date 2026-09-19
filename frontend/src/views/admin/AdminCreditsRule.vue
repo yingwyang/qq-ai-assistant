@@ -1,29 +1,28 @@
 <template>
   <div class="tab-panel admin-credits-rule">
     <!-- 顶部工具条：改没改、能不能存、一键恢复，都在这一行看清楚 -->
-    <div class="rule-toolbar">
-      <div class="rule-toolbar-left">
-        <Icon name="settings" :size="20" />
-        <h2>积分规则配置</h2>
+    <AdminPageHeader
+      title="积分规则配置"
+      subtitle="计费参数、直购积分与会员月卡定价；保存后立即生效"
+    >
+      <template #meta>
         <span v-if="isDirty" class="dirty-badge"><span class="dot"></span>有未保存的修改</span>
         <span v-else-if="loaded" class="clean-badge">已同步</span>
-      </div>
-      <div class="rule-toolbar-right">
         <span v-if="errorList.length" class="error-badge" :title="errorList.join('；')">
           {{ errorList.length }} 项待修正
         </span>
-        <button class="btn-action" :disabled="ruleSaving" @click="loadRule">
-          <Icon name="refresh" :size="14" /> 重新加载
-        </button>
-        <button class="btn-action" :disabled="defaultsLoading" @click="loadDefaults">
-          {{ defaultsLoading ? '读取中…' : '填入默认值' }}
-        </button>
-        <button class="btn-action" :disabled="!isDirty" @click="discardChanges">放弃修改</button>
-        <button class="btn-action promote" :disabled="ruleSaving || !isValid" @click="saveRule">
-          {{ ruleSaving ? '保存中…' : '保存并立即生效' }}
-        </button>
-      </div>
-    </div>
+      </template>
+      <button class="btn-action" :disabled="ruleSaving" @click="loadRule">
+        <Icon name="refresh" :size="14" /> 重新加载
+      </button>
+      <button class="btn-action" :disabled="defaultsLoading" @click="loadDefaults">
+        {{ defaultsLoading ? '读取中…' : '填入默认值' }}
+      </button>
+      <button class="btn-action" :disabled="!isDirty" @click="discardChanges">放弃修改</button>
+      <button class="btn-action promote" :disabled="ruleSaving || !isValid" @click="saveRule">
+        {{ ruleSaving ? '保存中…' : '保存并立即生效' }}
+      </button>
+    </AdminPageHeader>
 
     <div v-if="ruleLoading" class="loading-box">加载规则中...</div>
 
@@ -373,6 +372,7 @@
 <script>
 import { inject, ref, onMounted, onUnmounted, computed } from 'vue';
 import Icon from '../../components/Icon.vue';
+import AdminPageHeader from '../../components/admin/AdminPageHeader.vue';
 import { FIELD_META, ANALYZE_TYPE_META } from '../../composables/useAdminCreditsRule';
 
 const SECTIONS = [
@@ -413,7 +413,7 @@ const CASH_PER_CREDIT = 0.01;
 
 export default {
   name: 'AdminCreditsRule',
-  components: { Icon },
+  components: { Icon, AdminPageHeader },
   setup() {
     const adminRule = inject('adminCreditsRule');
     const activeSection = ref('sec-base');

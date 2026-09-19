@@ -1,6 +1,26 @@
-import { ref } from 'vue';
+import { reactive, ref } from 'vue';
 import { adminApi } from '../services/api';
 import logger from '../utils/logger';
+import { showConfirm } from '../components/ConfirmDialog.vue';
+
+/** 与后端一致：8-64 位，同时包含大写字母、小写字母与数字 */
+const PASSWORD_PATTERN = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)[A-Za-z\d@$!%*?&]{8,64}$/;
+
+/** 生成满足规则的随机密码（去掉容易混淆的 0/O/1/l/I） */
+function generatePassword(length = 12) {
+  const upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+  const lower = 'abcdefghijkmnopqrstuvwxyz';
+  const digits = '23456789';
+  const all = upper + lower + digits;
+  const pick = (set) => set[Math.floor(Math.random() * set.length)];
+  const chars = [pick(upper), pick(lower), pick(digits)];
+  for (let i = chars.length; i < length; i++) chars.push(pick(all));
+  for (let i = chars.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [chars[i], chars[j]] = [chars[j], chars[i]];
+  }
+  return chars.join('');
+}
 
 export function useUserManagement({ showSystemMsg } = {}) {
   const users = ref([]);
@@ -66,7 +86,13 @@ export function useUserManagement({ showSystemMsg } = {}) {
   };
 
   const deleteUser = async (user) => {
-    if (!confirm(`确定要删除用户 ${user.username} 吗？此操作不可恢复！`)) return;
+    const ok = await showConfirm({
+      title: '删除用户',
+      message: `确定要删除用户 ${user.username} 吗？该用户的积分、订单等关联数据会一并清理，且不可恢复。`,
+      type: 'error',
+      confirmText: '删除用户',
+    });
+    if (!ok) return;
     try {
       await adminApi.deleteUser(user.id);
       if (showSystemMsg) showSystemMsg(`用户 ${user.username} 已删除`);
@@ -81,20 +107,63 @@ export function useUserManagement({ showSystemMsg } = {}) {
    * 密码规则与后端一致：8-64 位，同时包含大写字母、小写字母与数字。
    * 重置后该用户已签发的登录态会立即失效。
    */
-  const resetPassword = async (user) => {
-    const pwd = window.prompt(
-      `重置用户 ${user.username} 的密码\n\n规则：8-64 位，且同时包含大写字母、小写字母与数字\n重置后该用户需用新密码重新登录：`
-    );
-    if (pwd === null) return;
-    if (!/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)[A-Za-z\d@$!%*?&]{8,64}$/.test(pwd)) {
+  const resetPasswordModal = reactive({
+    visible: false,
+    userId: null,
+    username: '',
+    password: '',
+    valid: false,
+    submitting: false,
+  });
+
+  const validatePassword = () => {
+    resetPasswordModal.valid = PASSWORD_PATTERN.test(resetPasswordModal.password || '');
+    return resetPasswordModal.valid;
+  };
+
+  const openResetPasswordModal = (user) => {
+    resetPasswordModal.visible = true;
+    resetPasswordModal.userId = user.id;
+    resetPasswordModal.username = user.username;
+    resetPasswordModal.password = generatePassword();
+    resetPasswordModal.submitting = false;
+    validatePassword();
+  };
+
+  const closeResetPasswordModal = () => {
+    resetPasswordModal.visible = false;
+  };
+
+  const generateResetPassword = () => {
+    resetPasswordModal.password = generatePassword();
+    validatePassword();
+  };
+
+  const copyResetPassword = async () => {
+    const pwd = resetPasswordModal.password || '';
+    if (!pwd) return;
+    try {
+      await navigator.clipboard.writeText(pwd);
+      if (showSystemMsg) showSystemMsg('新密码已复制到剪贴板');
+    } catch (e) {
+      if (showSystemMsg) showSystemMsg('复制失败，请手动选中复制', 'error');
+    }
+  };
+
+  const submitResetPassword = async () => {
+    if (!validatePassword()) {
       if (showSystemMsg) showSystemMsg('密码不符合规则：需 8-64 位且含大小写字母与数字', 'error');
       return;
     }
+    resetPasswordModal.submitting = true;
     try {
-      await adminApi.resetUserPassword(user.id, pwd);
-      if (showSystemMsg) showSystemMsg(`用户 ${user.username} 的密码已重置`);
+      await adminApi.resetUserPassword(resetPasswordModal.userId, resetPasswordModal.password);
+      if (showSystemMsg) showSystemMsg(`用户 ${resetPasswordModal.username} 的密码已重置`);
+      closeResetPasswordModal();
     } catch (error) {
       if (showSystemMsg) showSystemMsg('重置密码失败: ' + error.message, 'error');
+    } finally {
+      resetPasswordModal.submitting = false;
     }
   };
 
@@ -105,6 +174,8 @@ export function useUserManagement({ showSystemMsg } = {}) {
   return {
     users, userSearch, userCurrentPage, userPageSize, userTotalElements, userTotalPages,
     loadUsers, onUserSearchInput, goToUserPage,
-    toggleRole, toggleActive, deleteUser, resetPassword, cleanup,
+    toggleRole, toggleActive, deleteUser, cleanup,
+    resetPasswordModal, openResetPasswordModal, closeResetPasswordModal,
+    generateResetPassword, copyResetPassword, submitResetPassword, validatePassword,
   };
 }

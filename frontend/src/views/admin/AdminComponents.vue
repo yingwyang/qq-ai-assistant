@@ -1,9 +1,6 @@
 <template>
   <div class="tab-panel admin-components">
-    <div class="panel-title">
-      <Icon name="settings" :size="20" />
-      <h2>组件状态与控制</h2>
-    </div>
+    <AdminPageHeader title="组件控制" subtitle="AstrBot / NapCat / GPT-SoVITS 的启停与状态" />
     <div class="component-grid">
       <div class="component-card">
         <div class="component-header">
@@ -63,10 +60,11 @@
 <script>
 import { inject } from 'vue';
 import Icon from '../../components/Icon.vue';
+import AdminPageHeader from '../../components/admin/AdminPageHeader.vue';
 
 export default {
   name: 'AdminComponents',
-  components: { Icon },
+  components: { Icon, AdminPageHeader },
   setup() {
     const ctrl = inject('adminComponentCtrl');
     return {
@@ -109,8 +107,9 @@ export default {
 .btn-stop:not(:disabled) { background: #e74c3c; color: #fff; }
 .btn-stop:not(:disabled):hover { background: #c0392b; }
 button:disabled { background: #ddd; color: var(--text-muted, #999); cursor: not-allowed; }
-.webui-link { display: flex; align-items: center; justify-content: center; gap: 6px; padding: 8px; background: var(--bg-tertiary, #f0f7ff); border-radius: 4px; color: #1976d2; text-decoration: none; font-size: 12px; transition: background 0.2s; }
-.webui-link:hover { background: #d6e9ff; }
+.theme-dark button:disabled { background: rgba(255, 255, 255, 0.12); color: var(--text-muted, #8c8c8c); }
+.webui-link { display: flex; align-items: center; justify-content: center; gap: 6px; padding: 8px; background: var(--bg-tertiary, #f0f7ff); border-radius: 4px; color: var(--accent-color, #1976d2); text-decoration: none; font-size: 12px; transition: background 0.2s; }
+.webui-link:hover { background: rgba(52, 152, 219, 0.18); }
 .login-area { display: flex; justify-content: center; }
 .qrcode-box { text-align: center; }
 .qrcode-box img { width: 180px; height: 180px; border: 1px solid var(--border-color, #e0e0e0); border-radius: 6px; }

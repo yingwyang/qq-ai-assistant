@@ -1,9 +1,6 @@
 <template>
   <div class="tab-panel admin-dashboard">
-    <div class="panel-title">
-      <Icon name="dashboard" :size="20" />
-      <h2>数据概览</h2>
-    </div>
+    <AdminPageHeader title="数据概览" subtitle="系统运行状态、消息趋势与收支概况" />
 
     <!-- 统计卡片 -->
     <div class="stats-cards">
@@ -121,11 +118,12 @@
 <script>
 import { inject, computed } from 'vue';
 import Icon from '../../components/Icon.vue';
+import AdminPageHeader from '../../components/admin/AdminPageHeader.vue';
 import { VChart } from '../../config/echarts';
 
 export default {
   name: 'AdminDashboard',
-  components: { Icon, VChart },
+  components: { Icon, AdminPageHeader, VChart },
   setup() {
     const dashboard = inject('adminDashboard');
     return {

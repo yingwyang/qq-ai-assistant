@@ -1,9 +1,6 @@
 <template>
   <div class="tab-panel admin-media">
-    <div class="panel-title">
-      <Icon name="image" :size="20" />
-      <h2>媒体文件管理</h2>
-    </div>
+    <AdminPageHeader title="媒体管理" subtitle="上传目录中的图片 / 视频 / 音频 / 文件" />
     <div class="section-card">
       <div class="section-card-header">
         <h4>媒体文件列表</h4>
@@ -84,10 +81,12 @@
 <script>
 import { inject, computed } from 'vue';
 import Icon from '../../components/Icon.vue';
+import AdminPageHeader from '../../components/admin/AdminPageHeader.vue';
+import { showConfirm } from '../../components/ConfirmDialog.vue';
 
 export default {
   name: 'AdminMedia',
-  components: { Icon },
+  components: { Icon, AdminPageHeader },
   setup() {
     const media = inject('adminMedia');
     const formatDate = inject('adminFormatDate');
@@ -102,14 +101,27 @@ export default {
       Math.ceil(media.mediaFilesTotal.value / media.mediaFileSize.value) || 1
     );
 
-    const confirmDeleteSelected = () => {
-      if (!window.confirm(`确定删除选中的 ${media.selectedMediaFileIds.value.size} 个文件吗？`)) return;
+    const confirmDeleteSelected = async () => {
+      const count = media.selectedMediaFileIds.value.size;
+      const ok = await showConfirm({
+        title: '删除媒体文件',
+        message: `确定删除选中的 ${count} 个文件吗？删除后关联消息会被软删除，文件不可恢复。`,
+        type: 'warning',
+        confirmText: '删除',
+      });
+      if (!ok) return;
       media.deleteSelectedMediaFiles();
     };
-    const confirmPurgeByFilter = () => {
+    const confirmPurgeByFilter = async () => {
       const filter = media.mediaFileFilter.value;
       const labels = { ALL: '全部', IMAGE: '图片', VIDEO: '视频', AUDIO: '音频' };
-      if (!window.confirm(`确定清理${labels[filter] || ''}媒体文件吗？清理后不可恢复。`)) return;
+      const ok = await showConfirm({
+        title: '清理媒体文件',
+        message: `确定清理${labels[filter] || ''}媒体文件吗？清理后不可恢复。`,
+        type: 'warning',
+        confirmText: '立即清理',
+      });
+      if (!ok) return;
       media.purgeTypes.value = {
         IMAGE: filter === 'ALL' || filter === 'IMAGE',
         VIDEO: filter === 'ALL' || filter === 'VIDEO',
@@ -187,6 +199,10 @@ export default {
 .btn-delete:disabled { background-color: var(--border-color, #e0e0e0); color: var(--text-muted, #999); cursor: not-allowed; }
 .btn-purge:not(:disabled) { background-color: #f39c12; color: #fff; }
 .btn-purge:not(:disabled):hover { background-color: #e67e22; }
+/* 暗色下橙底白字只有 2.2:1，改为橙底深字 */
+.theme-dark .btn-purge:not(:disabled) { background-color: #f0a33a; color: #1a1a2e; }
+.theme-dark .btn-purge:not(:disabled):hover { background-color: #ffb74d; }
+.theme-dark .btn-delete:disabled { color: var(--text-muted, #8c8c8c); }
 .btn-purge:disabled { background-color: var(--border-color, #e0e0e0); color: var(--text-muted, #999); cursor: not-allowed; }
 .file-name-cell { cursor: pointer; color: #3498db; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .file-name-cell:hover { text-decoration: underline; }

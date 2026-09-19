@@ -1,9 +1,6 @@
 <template>
   <div class="tab-panel admin-orders">
-    <div class="panel-title">
-      <Icon name="file" :size="20" />
-      <h2>订单管理</h2>
-    </div>
+    <AdminPageHeader title="订单管理" subtitle="订阅订单查询、补单、退款与作废" />
 
     <!-- 筛选区 -->
     <div class="tx-filters">
@@ -85,10 +82,12 @@
 <script>
 import { inject } from 'vue';
 import Icon from '../../components/Icon.vue';
+import AdminPageHeader from '../../components/admin/AdminPageHeader.vue';
+import { showConfirm } from '../../components/ConfirmDialog.vue';
 
 export default {
   name: 'AdminOrders',
-  components: { Icon },
+  components: { Icon, AdminPageHeader },
   setup() {
     const adminOrders = inject('adminOrders');
     const orderStatusOptions = inject('adminOrderStatusOptions');
@@ -99,8 +98,14 @@ export default {
     const submitApprovePayment = inject('adminSubmitApprovePayment');
 
     // 确认收款：二次确认后调用
-    const handleApprovePayment = (orderNo) => {
-      if (!window.confirm(`确认该订单（${orderNo}）已到账？确认后将更新为"已支付"状态并发放积分。`)) return;
+    const handleApprovePayment = async (orderNo) => {
+      const ok = await showConfirm({
+        title: '确认收款',
+        message: `确认该订单（${orderNo}）已到账？确认后将更新为"已支付"状态并发放积分。`,
+        type: 'warning',
+        confirmText: '确认到账',
+      });
+      if (!ok) return;
       submitApprovePayment(orderNo);
     };
 

@@ -1,9 +1,6 @@
 <template>
   <div class="tab-panel admin-config">
-    <div class="panel-title">
-      <Icon name="settings" :size="20" />
-      <h2>配置管理</h2>
-    </div>
+    <AdminPageHeader title="配置管理" subtitle="运行时配置项（保存后按标记决定是否需重启）" />
 
     <div v-if="configLoading" class="loading-box">加载配置中...</div>
 
@@ -48,10 +45,11 @@
 <script>
 import { inject } from 'vue';
 import Icon from '../../components/Icon.vue';
+import AdminPageHeader from '../../components/admin/AdminPageHeader.vue';
 
 export default {
   name: 'AdminConfig',
-  components: { Icon },
+  components: { Icon, AdminPageHeader },
   setup() {
     const config = inject('adminConfig');
     return {
@@ -78,6 +76,7 @@ export default {
 .config-item { display: flex; flex-direction: column; gap: 4px; }
 .config-item-label { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-muted, #888); }
 .restart-badge { display: inline-block; padding: 1px 6px; background: #fff3e0; color: #f57c00; border-radius: 3px; font-size: 10px; font-weight: 500; }
+.theme-dark .restart-badge { background: rgba(245, 124, 0, 0.2); color: #ffb74d; }
 .config-item-value { display: flex; align-items: center; gap: 6px; }
 .config-value { flex: 1; font-size: 13px; color: var(--text-primary, #333); padding: 6px 0; min-height: 30px; display: flex; align-items: center; }
 .config-value.secret-masked { cursor: pointer; color: var(--text-muted, #aaa); letter-spacing: 2px; }

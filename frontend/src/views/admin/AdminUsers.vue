@@ -1,9 +1,6 @@
 <template>
   <div class="tab-panel admin-users">
-    <div class="panel-title">
-      <Icon name="group" :size="20" />
-      <h2>用户管理</h2>
-    </div>
+    <AdminPageHeader title="用户管理" subtitle="账号、角色、启用状态与最后登录信息" />
 
     <div class="user-search-bar">
       <input v-model="userSearch" type="text" placeholder="搜索用户名或昵称..." class="user-search-input" @input="onUserSearchInput" />
@@ -36,7 +33,7 @@
               <div class="action-btns">
                 <button class="btn-action" :class="user.role === 'ADMIN' ? 'demote' : 'promote'" @click="toggleRole(user)">{{ user.role === 'ADMIN' ? '降权' : '提权' }}</button>
                 <button class="btn-action" :class="user.active ? 'disable' : 'enable'" @click="toggleActive(user)">{{ user.active ? '禁用' : '启用' }}</button>
-                <button class="btn-action promote" @click="resetPassword(user)">重置密码</button>
+                <button class="btn-action promote" @click="openResetPasswordModal(user)">重置密码</button>
                 <button class="btn-action delete" @click="deleteUser(user)">删除</button>
               </div>
             </td>
@@ -58,16 +55,27 @@
         <button class="btn-page" :disabled="userCurrentPage >= userTotalPages - 1" @click="goToUserPage(userTotalPages - 1)">末页</button>
       </div>
     </div>
+
+    <AdminResetPasswordModal
+      :state="resetPasswordModal"
+      @close="closeResetPasswordModal"
+      @submit="submitResetPassword"
+      @generate="generateResetPassword"
+      @copy="copyResetPassword"
+      @validate="validatePassword"
+    />
   </div>
 </template>
 
 <script>
 import { inject } from 'vue';
 import Icon from '../../components/Icon.vue';
+import AdminPageHeader from '../../components/admin/AdminPageHeader.vue';
+import AdminResetPasswordModal from '../../components/admin/AdminResetPasswordModal.vue';
 
 export default {
   name: 'AdminUsers',
-  components: { Icon },
+  components: { Icon, AdminPageHeader, AdminResetPasswordModal },
   setup() {
     const userMgmt = inject('adminUserMgmt');
     const formatDate = inject('adminFormatDate');
@@ -82,7 +90,13 @@ export default {
       toggleRole: userMgmt.toggleRole,
       toggleActive: userMgmt.toggleActive,
       deleteUser: userMgmt.deleteUser,
-      resetPassword: userMgmt.resetPassword,
+      resetPasswordModal: userMgmt.resetPasswordModal,
+      openResetPasswordModal: userMgmt.openResetPasswordModal,
+      closeResetPasswordModal: userMgmt.closeResetPasswordModal,
+      generateResetPassword: userMgmt.generateResetPassword,
+      copyResetPassword: userMgmt.copyResetPassword,
+      submitResetPassword: userMgmt.submitResetPassword,
+      validatePassword: userMgmt.validatePassword,
       formatDate,
     };
   },

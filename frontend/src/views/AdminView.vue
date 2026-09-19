@@ -10,6 +10,19 @@
         <h1>系统管理中心</h1>
       </div>
       <div class="header-actions">
+        <button
+          class="health-pill"
+          :class="'health-' + healthLevel"
+          :title="`AstrBot ${health.astrbot ? '在线' : '离线'} · NapCat ${health.napcat ? '在线' : '离线'} · GPT-SoVITS ${health.gptsovits ? '在线' : '离线'}`"
+          @click="setActiveTab('components')"
+        >
+          <span class="health-dot"></span>
+          <span>{{ healthText }}</span>
+        </button>
+        <button class="btn-home" @click="toggleTheme">
+          <Icon :name="currentTheme === 'dark' ? 'sun' : 'moon'" :size="16" />
+          {{ currentTheme === 'dark' ? '浅色' : '暗色' }}
+        </button>
         <button class="btn-home" @click="goHome">
           <Icon name="home" :size="16" /> 返回首页
         </button>
@@ -493,16 +506,21 @@
     <div v-if="systemMessage" class="system-message" :class="systemMessageType">
       {{ systemMessage }}
     </div>
+
+    <!-- 全局确认框：admin 域内所有 showConfirm() 调用都靠它渲染（原先只在 HomeView 挂载） -->
+    <ConfirmDialog />
   </div>
 </template>
 
 <script>
 import './admin/admin-shared.css';
-import { ref, reactive, computed, onMounted, onUnmounted, provide, defineAsyncComponent, shallowRef } from 'vue';
-import { useRouter } from 'vue-router';
+import { ref, reactive, computed, onMounted, onUnmounted, provide, defineAsyncComponent, shallowRef, watch } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import Icon from '../components/Icon.vue';
-import { formatFileSize, logout as apiLogout, adminOrdersApi } from '../services/api';
+import ConfirmDialog, { showConfirm } from '../components/ConfirmDialog.vue';
+import { formatFileSize, logout as apiLogout, adminOrdersApi, systemApi } from '../services/api';
 import { useTheme } from '../composables/useTheme';
+import { useAdminNav, adminTabMeta, isAdminTabKey } from '../composables/useAdminNav';
 import { useDashboardData } from '../composables/useDashboardData';
 import { useComponentControl } from '../composables/useComponentControl';
 import { useUserManagement } from '../composables/useUserManagement';
@@ -529,30 +547,13 @@ import {
 } from '../composables/useAdminOrders';
 import logger from '../utils/logger';
 
-// 子组件映射（懒加载）
-const tabComponentMap = {
-  dashboard: () => import('./admin/AdminDashboard.vue'),
-  users: () => import('./admin/AdminUsers.vue'),
-  components: () => import('./admin/AdminComponents.vue'),
-  media: () => import('./admin/AdminMedia.vue'),
-  config: () => import('./admin/AdminConfig.vue'),
-  maintenance: () => import('./admin/AdminBackup.vue'),
-  log: () => import('./admin/AdminLogs.vue'),
-  'credit-rule': () => import('./admin/AdminCreditsRule.vue'),
-  'credit-users': () => import('./admin/AdminCreditsUsers.vue'),
-  'credit-transactions': () => import('./admin/AdminTransactions.vue'),
-  'credit-orders': () => import('./admin/AdminOrders.vue'),
-  'credit-refund-approve': () => import('./admin/AdminRefundApprove.vue'),
-  'credit-dispute': () => import('./admin/AdminDispute.vue'),
-};
-
 export default {
   name: 'AdminView',
-  components: { Icon },
+  components: { Icon, ConfirmDialog },
   setup() {
     const router = useRouter();
-    const { theme: currentTheme } = useTheme();
-    const activeTab = ref('dashboard');
+    const route = useRoute();
+    const { theme: currentTheme, toggleTheme } = useTheme();
     const sidebarOpen = ref(false);
     const currentComponent = shallowRef(null);
 
@@ -579,17 +580,6 @@ export default {
     const adminTx = useAdminTransactions({ showSystemMsg });
     const adminOrders = useAdminOrders({ showSystemMsg });
 
-    // 媒体管理：当前页所有图片URL（供 ← → 切换）
-    const mediaGalleryUrls = computed(() =>
-      (media.previewFiles.value || [])
-        .filter(f => f && f.fileType === 'IMAGE' && f.url)
-        .map(f => f.url)
-    );
-    const openMediaImagePreview = (url) => {
-      if (!url) return;
-      imgPreview.open(url, mediaGalleryUrls.value);
-    };
-
     // ===== 退款审批 / 纠纷处理：待处理数量徽章 =====
     const pendingRefundCount = ref(0);
     const pendingDisputeCount = ref(0);
@@ -603,6 +593,115 @@ export default {
       } catch (e) {
         // 静默失败，不影响主流程
       }
+    };
+
+    // ===== 导航（tab 持久化 / URL 深链接 / 按需加载） =====
+    const badgeCounts = computed(() => ({
+      pendingRefund: pendingRefundCount.value,
+      pendingDispute: pendingDisputeCount.value,
+    }));
+
+    const { activeTab, setActiveTab, onTabChange, navItems, currentTabMeta } = useAdminNav({
+      route,
+      router,
+      badgeCounts,
+    });
+
+    // 已创建过的异步子组件缓存：切回同一 tab 不重新构造组件
+    const componentCache = new Map();
+    const componentFor = (key) => {
+      if (!componentCache.has(key)) {
+        componentCache.set(key, defineAsyncComponent(adminTabMeta(key).loader));
+      }
+      return componentCache.get(key);
+    };
+
+    // 订单管理 / 退款审批 / 纠纷处理共用同一份 adminOrders.filters：
+    // 后两者进入时会把 statusSelected 改成 PENDING_REFUND / DISPUTED，若切回订单管理时不还原，
+    // 就会带着这两个状态过滤去查订单 → 显示"暂无订单数据"（旧 bug）。
+    // 这里按 tab 分别存快照，三者互不污染。
+    const ORDER_TABS = ['credit-orders', 'credit-refund-approve', 'credit-dispute'];
+    const tabFilterSnapshots = {};
+    const snapshotOrderFilters = (key) => {
+      tabFilterSnapshots[key] = {
+        ...adminOrders.filters,
+        statusSelected: [...adminOrders.filters.statusSelected],
+      };
+    };
+    const restoreOrderFilters = (key) => {
+      const snap = tabFilterSnapshots[key];
+      if (!snap) return;
+      Object.assign(adminOrders.filters, snap);
+      adminOrders.filters.statusSelected = [...(snap.statusSelected || [])];
+    };
+
+    // 首次进入某 tab 时才请求它需要的数据（不再 onMounted 一把梭）
+    const loadedTabs = new Set();
+    const loadTabData = (key, { force = false } = {}) => {
+      if (loadedTabs.has(key) && !force) return;
+      loadedTabs.add(key);
+      if (key === 'dashboard') {
+        dashboard.loadAll();
+      } else if (key === 'users') {
+        userMgmt.loadUsers();
+      } else if (key === 'media') {
+        media.loadMediaFiles();
+      } else if (key === 'config') {
+        configMgmt.loadConfig();
+      } else if (key === 'maintenance') {
+        maintenance.loadBackupList();
+      } else if (key === 'credit-rule') {
+        adminRule.loadRule();
+      } else if (key === 'credit-users') {
+        adminUserCredits.loadUserCredits(0);
+      } else if (key === 'credit-transactions') {
+        adminTx.loadTransactions(0);
+      } else if (key === 'credit-orders') {
+        restoreOrderFilters(key);
+        adminOrders.loadOrders(0);
+      } else if (key === 'credit-refund-approve') {
+        adminOrders.filters.orderNo = '';
+        adminOrders.filters.keyword = '';
+        adminOrders.filters.statusSelected = ['PENDING_REFUND'];
+        adminOrders.loadOrders(0);
+        loadPendingCount();
+      } else if (key === 'credit-dispute') {
+        adminOrders.filters.orderNo = '';
+        adminOrders.filters.keyword = '';
+        adminOrders.filters.statusSelected = ['DISPUTED'];
+        adminOrders.loadOrders(0);
+        loadPendingCount();
+      }
+    };
+
+    // tab 变化时：换组件 + 按需加载 + 轮询开关
+    const applyTab = (key, prevKey) => {
+      if (ORDER_TABS.includes(prevKey) && prevKey !== key) {
+        snapshotOrderFilters(prevKey);
+      }
+      currentComponent.value = componentFor(key);
+      if (key === 'components') {
+        componentCtrl.startPolling();
+        componentCtrl.loadNapCatWebUiUrl();
+        componentCtrl.refreshQrCode();
+        if (componentCtrl.autoLogin.value) componentCtrl.checkNapCatLogin();
+      } else if (prevKey === 'components') {
+        componentCtrl.stopPolling();
+      }
+      // 审批队列每次进入都要拿最新数据，其余页面只加载一次
+      loadTabData(key, { force: ORDER_TABS.includes(key) });
+    };
+    onTabChange(applyTab);
+
+    // 媒体管理：当前页所有图片URL（供 ← → 切换）
+    const mediaGalleryUrls = computed(() =>
+      (media.previewFiles.value || [])
+        .filter(f => f && f.fileType === 'IMAGE' && f.url)
+        .map(f => f.url)
+    );
+    const openMediaImagePreview = (url) => {
+      if (!url) return;
+      imgPreview.open(url, mediaGalleryUrls.value);
     };
 
     // ===== 退款审批弹窗（同意 / 驳回复用） =====
@@ -670,88 +769,33 @@ export default {
       return orderStatusLabel(s);
     };
 
-    const navItems = computed(() => [
-      { key: 'dashboard', icon: 'dashboard', label: '数据概览' },
-      { key: 'users', icon: 'group', label: '用户管理' },
-      { key: 'components', icon: 'settings', label: '组件控制' },
-      { key: 'media', icon: 'image', label: '媒体管理' },
-      { key: 'log', icon: 'file', label: '系统日志' },
-      { key: 'config', icon: 'config', label: '配置管理' },
-      { key: 'maintenance', icon: 'backup', label: '数据维护' },
-      { key: 'group-credits', label: '积分管理', isGroup: true },
-      { key: 'credit-rule', icon: 'speed', label: '规则配置' },
-      { key: 'credit-users', icon: 'user', label: '用户积分' },
-      { key: 'credit-transactions', icon: 'list', label: '积分流水' },
-      { key: 'credit-orders', icon: 'file-text', label: '订单管理' },
-      { key: 'credit-refund-approve', icon: 'coin', label: pendingRefundCount.value > 0 ? `退款审批 (${pendingRefundCount.value})` : '退款审批' },
-      { key: 'credit-dispute', icon: 'warning', label: pendingDisputeCount.value > 0 ? `纠纷处理 (${pendingDisputeCount.value})` : '纠纷处理' },
-    ]);
-
-    // 订单管理页自己的筛选条件快照。
-    // 「退款审批」「纠纷处理」与「订单管理」共用同一份 adminOrders.filters，
-    // 前两者进入时会把 statusSelected 改成 PENDING_REFUND / DISPUTED，
-    // 若切回订单管理时不还原，就会带着这两个状态过滤去查订单 → 显示"暂无订单数据"（旧 bug）。
-    let ordersTabFilters = null;
-
-    // 切换 Tab 时懒加载对应组件 + 数据
-    const setActiveTab = (key) => {
-      const prevKey = activeTab.value;
-      // 离开订单管理前，把它自己的筛选条件存下来
-      if (prevKey === 'credit-orders' && key !== 'credit-orders') {
-        ordersTabFilters = { ...adminOrders.filters, statusSelected: [...adminOrders.filters.statusSelected] };
-      }
-      activeTab.value = key;
-      // 懒加载子组件
-      const loader = tabComponentMap[key];
-      if (loader) {
-        currentComponent.value = defineAsyncComponent(loader);
-      }
-      // 按需预加载数据
-      if (key === 'credit-rule') {
-        adminRule.loadRule();
-      } else if (key === 'credit-users') {
-        adminUserCredits.loadUserCredits(0);
-      } else if (key === 'credit-transactions') {
-        adminTx.loadTransactions(0);
-      } else if (key === 'credit-orders') {
-        // 回到订单管理：还原它自己的筛选条件（而不是沿用退款审批/纠纷处理留下的状态过滤）
-        if (ordersTabFilters) {
-          Object.assign(adminOrders.filters, ordersTabFilters);
-          adminOrders.filters.statusSelected = [...(ordersTabFilters.statusSelected || [])];
-        }
-        adminOrders.loadOrders(0);
-      } else if (key === 'credit-refund-approve') {
-        adminOrders.filters.orderNo = '';
-        adminOrders.filters.keyword = '';
-        adminOrders.filters.statusSelected = ['PENDING_REFUND'];
-        adminOrders.loadOrders(0);
-        loadPendingCount();
-      } else if (key === 'credit-dispute') {
-        adminOrders.filters.orderNo = '';
-        adminOrders.filters.keyword = '';
-        adminOrders.filters.statusSelected = ['DISPUTED'];
-        adminOrders.loadOrders(0);
-        loadPendingCount();
-      }
-    };
-
-    // 初始化默认组件
-    currentComponent.value = defineAsyncComponent(tabComponentMap['dashboard']);
-
     const currentFilesTotalSize = computed(() =>
       media.mediaFiles.value.reduce((sum, f) => sum + (f.fileSize || 0), 0)
     );
     const totalMediaPages = computed(() =>
       Math.ceil(media.mediaFilesTotal.value / media.mediaFileSize.value) || 1
     );
-    const confirmDeleteSelected = () => {
-      if (!window.confirm(`确定删除选中的 ${media.selectedMediaFileIds.value.size} 个文件吗？`)) return;
+    const confirmDeleteSelected = async () => {
+      const count = media.selectedMediaFileIds.value.size;
+      const ok = await showConfirm({
+        title: '删除媒体文件',
+        message: `确定删除选中的 ${count} 个文件吗？删除后关联消息会被软删除，文件不可恢复。`,
+        type: 'warning',
+        confirmText: '删除',
+      });
+      if (!ok) return;
       media.deleteSelectedMediaFiles();
     };
-    const confirmPurgeByFilter = () => {
+    const confirmPurgeByFilter = async () => {
       const filter = media.mediaFileFilter.value;
       const labels = { ALL: '全部', IMAGE: '图片', VIDEO: '视频', AUDIO: '音频' };
-      if (!window.confirm(`确定清理${labels[filter] || ''}媒体文件吗？清理后不可恢复。`)) return;
+      const ok = await showConfirm({
+        title: '清理媒体文件',
+        message: `确定清理${labels[filter] || ''}媒体文件吗？清理后不可恢复。`,
+        type: 'warning',
+        confirmText: '立即清理',
+      });
+      if (!ok) return;
       media.purgeTypes.value = {
         IMAGE: filter === 'ALL' || filter === 'IMAGE',
         VIDEO: filter === 'ALL' || filter === 'VIDEO',
@@ -777,25 +821,75 @@ export default {
       router.push('/login');
     };
 
+    // ===== 顶部健康指示 + 待办角标轮询 =====
+    const health = reactive({ astrbot: false, napcat: false, gptsovits: false, known: false });
+    const healthText = computed(() => {
+      if (!health.known) return '状态未知';
+      const running = [health.astrbot, health.napcat, health.gptsovits].filter(Boolean).length;
+      return `组件 ${running}/3 在线`;
+    });
+    const healthLevel = computed(() => {
+      if (!health.known) return 'unknown';
+      const running = [health.astrbot, health.napcat, health.gptsovits].filter(Boolean).length;
+      if (running === 3) return 'ok';
+      return running === 0 ? 'down' : 'partial';
+    });
+    const loadHealth = async () => {
+      try {
+        const res = await systemApi.getComponentStatus();
+        health.astrbot = !!res?.astrbot?.running;
+        health.napcat = !!res?.napcat?.running;
+        health.gptsovits = !!res?.gptsovits?.running;
+        health.known = true;
+      } catch (e) {
+        health.known = false;
+      }
+    };
+
+    let healthTimer = null;
+    let pendingTimer = null;
+    const startShellPolling = () => {
+      stopShellPolling();
+      loadHealth();
+      pendingTimer = setInterval(() => {
+        if (document.hidden) return;
+        loadPendingCount();
+      }, 60000);
+      healthTimer = setInterval(() => {
+        if (document.hidden) return;
+        loadHealth();
+      }, 60000);
+    };
+    const stopShellPolling = () => {
+      if (healthTimer) { clearInterval(healthTimer); healthTimer = null; }
+      if (pendingTimer) { clearInterval(pendingTimer); pendingTimer = null; }
+    };
+
     onMounted(() => {
-      dashboard.loadAll();
-      userMgmt.loadUsers();
-      componentCtrl.startPolling();
-      componentCtrl.loadNapCatWebUiUrl();
-      componentCtrl.refreshQrCode();
-      if (componentCtrl.autoLogin.value) componentCtrl.checkNapCatLogin();
-      media.loadMediaFiles();
-      configMgmt.loadConfig();
-      maintenance.loadBackupList();
+      // 只加载当前 tab 需要的数据（其余页面首次打开时再请求）
+      const initialTab = isAdminTabKey(activeTab.value) ? activeTab.value : 'dashboard';
+      applyTab(initialTab, null);
       loadPendingCount();
+      startShellPolling();
       window.addEventListener('keydown', media.onPreviewKeydown);
     });
     onUnmounted(() => {
       componentCtrl.stopPolling();
+      stopShellPolling();
       userMgmt.cleanup();
       adminUserCredits.cleanup();
       window.removeEventListener('keydown', media.onPreviewKeydown);
+      document.title = 'QQ AI 助手';
     });
+
+    // 浏览器标题跟随当前页面
+    watch(
+      () => currentTabMeta.value,
+      (meta) => {
+        if (meta) document.title = `${meta.title} · 系统管理中心`;
+      },
+      { immediate: true }
+    );
 
     // ===== provide 给所有子组件 =====
     provide('adminShowMsg', showSystemMsg);
@@ -840,6 +934,7 @@ export default {
     return {
       currentTheme, activeTab, sidebarOpen, currentComponent, navItems, systemMessage, systemMessageType,
       formatDate, formatFileSize, goHome, logout, setActiveTab,
+      toggleTheme, health, healthText, healthLevel, loadHealth,
       // Shared dialogs (exposed to template)
       adjustModal: adminUserCredits.adjustModal,
       closeAdjustModal: adminUserCredits.closeAdjustModal,
@@ -949,6 +1044,34 @@ export default {
 .header-actions button:hover {
   background: rgba(255,255,255,0.2);
 }
+
+/* 顶部健康指示：绿=全部在线，橙=部分在线，红=全部离线，灰=未知 */
+.health-pill {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 12px;
+  border: none;
+  border-radius: 14px;
+  cursor: pointer;
+  font-size: 12.5px;
+  color: #fff;
+  background: rgba(255,255,255,0.1);
+  transition: background 0.2s;
+}
+
+.health-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #95a5a6;
+  box-shadow: 0 0 0 3px rgba(149, 165, 166, 0.25);
+}
+
+.health-ok .health-dot { background: #2ecc71; box-shadow: 0 0 0 3px rgba(46, 204, 113, 0.25); }
+.health-partial .health-dot { background: #f39c12; box-shadow: 0 0 0 3px rgba(243, 156, 18, 0.25); }
+.health-down .health-dot { background: #e74c3c; box-shadow: 0 0 0 3px rgba(231, 76, 60, 0.25); }
+.health-unknown .health-dot { background: #7f8c8d; box-shadow: 0 0 0 3px rgba(127, 140, 141, 0.25); }
 
 .admin-layout {
   display: flex;

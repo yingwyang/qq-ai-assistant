@@ -1,9 +1,6 @@
 <template>
   <div class="tab-panel admin-credits-users">
-    <div class="panel-title">
-      <Icon name="user" :size="20" />
-      <h2>用户积分</h2>
-    </div>
+    <AdminPageHeader title="用户积分" subtitle="余额、累计消耗与人工调账" />
 
     <div class="user-search-bar">
       <input v-model="ucKeyword" type="text" placeholder="搜索用户名或昵称..." class="user-search-input" @input="onUcSearchInput" />
@@ -65,10 +62,11 @@
 <script>
 import { inject } from 'vue';
 import Icon from '../../components/Icon.vue';
+import AdminPageHeader from '../../components/admin/AdminPageHeader.vue';
 
 export default {
   name: 'AdminCreditsUsers',
-  components: { Icon },
+  components: { Icon, AdminPageHeader },
   setup() {
     const adminUserCredits = inject('adminUserCredits');
     const formatDate = inject('adminFormatDate');

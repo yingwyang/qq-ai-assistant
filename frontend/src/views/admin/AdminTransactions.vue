@@ -1,12 +1,9 @@
 <template>
   <div class="tab-panel admin-transactions">
-    <div class="panel-title">
-      <Icon name="file" :size="20" />
-      <h2>资金流水</h2>
-      <span class="panel-subtitle">
-        积分账 + <b>模拟现金账</b>（订阅按套餐价、退款按比例、AI 消耗按积分成本折算，可手工记账）
-      </span>
-    </div>
+    <AdminPageHeader
+      title="资金流水"
+      subtitle="积分账 + 模拟现金账（订阅按套餐价、退款按比例、AI 消耗按积分成本折算，可手工记账）"
+    />
 
     <!-- 时间范围：图表与 KPI 共用 -->
     <div class="cash-toolbar">
@@ -221,6 +218,7 @@
 <script>
 import { inject, ref, computed, onMounted } from 'vue';
 import Icon from '../../components/Icon.vue';
+import AdminPageHeader from '../../components/admin/AdminPageHeader.vue';
 import VChart from 'vue-echarts';
 import { use } from 'echarts/core';
 import { CanvasRenderer } from 'echarts/renderers';
@@ -241,7 +239,7 @@ const PALETTE = ['#4caf50', '#f44336', '#2196f3', '#ff9800', '#9c27b0', '#00bcd4
 
 export default {
   name: 'AdminTransactions',
-  components: { Icon, VChart },
+  components: { Icon, AdminPageHeader, VChart },
   setup() {
     const adminTx = inject('adminTx');
     const txTypeOptions = inject('adminTxTypeOptions');

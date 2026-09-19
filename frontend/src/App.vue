@@ -103,7 +103,9 @@ html, body {
   --bg-tertiary: #0f3460;
   --text-primary: #e0e0e0;
   --text-secondary: #b0b0b0;
-  --text-muted: #707070;
+  /* 暗色下 --text-muted 若沿用 #707070，在 --bg-tertiary(#0f3460) 上只有 2.5:1，
+     达不到可读下限；提到 #8c8c8c 后约 3.6:1（scripts/check-admin-dark-theme.mjs 会校验）。 */
+  --text-muted: #8c8c8c;
   --border-color: #333344;
   --accent-color: #3498db;
   --accent-hover: #5dade2;

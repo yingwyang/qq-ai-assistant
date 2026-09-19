@@ -1,10 +1,8 @@
 <template>
   <div class="tab-panel admin-dispute">
-    <div class="panel-title">
-      <Icon name="file" :size="20" />
-      <h2>纠纷处理</h2>
-      <button class="btn-action promote" style="margin-left:auto" @click="loadOrders(ordersPage)">刷新</button>
-    </div>
+    <AdminPageHeader title="纠纷处理" subtitle="用户发起的订单纠纷申请">
+      <button class="btn-action promote" @click="loadOrders(ordersPage)">刷新</button>
+    </AdminPageHeader>
 
     <div class="user-table-wrapper">
       <table class="user-table">
@@ -53,10 +51,11 @@
 <script>
 import { inject } from 'vue';
 import Icon from '../../components/Icon.vue';
+import AdminPageHeader from '../../components/admin/AdminPageHeader.vue';
 
 export default {
   name: 'AdminDispute',
-  components: { Icon },
+  components: { Icon, AdminPageHeader },
   setup() {
     const adminOrders = inject('adminOrders');
     const planTierText = inject('adminPlanTierText');

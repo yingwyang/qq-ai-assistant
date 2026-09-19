@@ -1,9 +1,6 @@
 <template>
   <div class="tab-panel admin-logs">
-    <div class="panel-title">
-      <Icon name="file" :size="20" />
-      <h2>系统日志</h2>
-    </div>
+    <AdminPageHeader title="系统日志" subtitle="应用运行日志与管理员操作审计" />
 
     <!-- 子标签切换 -->
     <div class="log-sub-tabs">
@@ -91,10 +88,11 @@
 <script>
 import { inject } from 'vue';
 import Icon from '../../components/Icon.vue';
+import AdminPageHeader from '../../components/admin/AdminPageHeader.vue';
 
 export default {
   name: 'AdminLogs',
-  components: { Icon },
+  components: { Icon, AdminPageHeader },
   setup() {
     const systemLog = inject('adminSystemLog');
     return {
