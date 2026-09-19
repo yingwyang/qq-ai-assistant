@@ -143,6 +143,11 @@ cp .env.example backend/.env
 > **人格库与编写规范**：人设文件放在 `doc/personas/*.md`（文件即事实来源），写法见 `doc/PERSONA_AUTHORING_GUIDE.md`；
 > 应用方式 `python backend/scripts/apply_astrbot_personas.py --apply` + 重启 AstrBot，或调 `POST /api/astrbot/personas/sync` 一次同步所有副本。
 
+> **转发到群聊**：AI 对话面板里每条消息（AI 回复与自己的发言）都能一键 **「转发到群」** ——
+> 弹窗选群（可搜群名/群号，也可手填群号）、按需改内容、默认清理 Markdown 标记（QQ 不渲染 Markdown），
+> 以机器人账号发出，走与群聊面板发送框相同的权限与限流（10 次/分钟、单条 2000 字，超长自动按行分段）。
+> 端到端回归脚本：`node frontend/scripts/e2e-forward-to-group.mjs <JWT>`（用 mock 拦住真实发送，不会往群里发测试消息）。
+
 > 其余业务配置（端口、路径、超时等）仍可在 `backend/src/main/resources/application.yml` 中调整。
 
 ### 4. 启动后端

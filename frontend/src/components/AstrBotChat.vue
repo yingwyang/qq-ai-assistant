@@ -154,6 +154,16 @@
       </div>
     </div>
 
+    <!-- 转发到群聊：把 AI 回复/自己的文字直接发到 QQ 群 -->
+    <ForwardToGroupDialog
+      :show="showForwardDialog"
+      :text="forwardText"
+      :default-group-id="groupId || ''"
+      :default-group-name="groupName || ''"
+      @close="showForwardDialog = false"
+      @sent="onForwarded"
+    />
+
     <!-- 设置弹窗 -->
     <div v-if="showSettings" class="settings-dialog-overlay" @click="closeSettings">
       <div class="settings-dialog" @click.stop>
@@ -555,6 +565,28 @@
                 </svg>
                 <span>{{ message.voiceGenerating ? '生成中...' : (message.audioUrl ? '播放语音' : '语音生成') }}</span>
               </button>
+              <button
+                class="msg-action-btn forward-btn"
+                title="把这段文字转发到 QQ 群"
+                @click="openForward(message.text)"
+              >
+                <Icon name="share" :size="14" />
+                <span>转发到群</span>
+              </button>
+            </div>
+            <!-- 自己发的消息：也可以复制 / 转发到群 -->
+            <div v-else-if="message.isSelf && !message.isSystem" class="message-actions self-actions">
+              <button class="msg-action-btn copy-btn" title="复制内容" @click="copyMessageText(message.text)">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                </svg>
+                <span>复制</span>
+              </button>
+              <button class="msg-action-btn forward-btn" title="把这段文字转发到 QQ 群" @click="openForward(message.text)">
+                <Icon name="share" :size="14" />
+                <span>转发到群</span>
+              </button>
             </div>
             <!-- 语音播放器 -->
             <div v-if="message.audioUrl && message.showAudioPlayer" class="voice-player">
@@ -684,11 +716,12 @@ import { astrBotApi, userApi, systemApi, messageApi } from '../services/api';
 import { filterToolJson, processAstrBotResponse } from '../utils/messageFilter';
 import { showToast } from './Toast.vue';
 import PersonaManager from './PersonaManager.vue';
+import ForwardToGroupDialog from './ForwardToGroupDialog.vue';
 import { formatMessageTime } from '../utils/formatTime';
 import logger from '../utils/logger';
 export default {
   name: 'AstrBotChat',
-  components: { Icon, RichTextRenderer, PersonaManager },
+  components: { Icon, RichTextRenderer, PersonaManager, ForwardToGroupDialog },
   props: {
     groupId: { type: String, default: null },
     groupName: { type: String, default: null },
@@ -1728,6 +1761,26 @@ export default {
       }
     };
 
+    // ==================== 转发到群聊 ====================
+    // 把 AI 回复（或自己的提问）直接发到某个 QQ 群：走后端 /groups/{id}/send，
+    // 权限、限流（10 次/分钟）、长度（2000 字）都由后端把关。
+    const showForwardDialog = ref(false);
+    const forwardText = ref('');
+
+    const openForward = (text) => {
+      // 气泡里的内容是富文本，先转成纯文本再交给转发弹窗
+      forwardText.value = htmlToPlainText(text || '');
+      if (!forwardText.value.trim()) {
+        showToast('这条消息没有可转发的文字', 'warning');
+        return;
+      }
+      showForwardDialog.value = true;
+    };
+
+    const onForwarded = ({ groupName, parts }) => {
+      showToast(`已转发到「${groupName}」${parts > 1 ? `（${parts} 条）` : ''}`, 'success');
+    };
+
     // 将 HTML/Markdown 内容转换为纯文本（用于语音合成）
     const contentToPlainText = (html) => {
       if (!html) return '';
@@ -2138,6 +2191,10 @@ export default {
       handleBotAvatarError,
       handleBotAvatarUpload,
       copyMessageText,
+      showForwardDialog,
+      forwardText,
+      openForward,
+      onForwarded,
       handleVoiceAction,
       ttsCharacters,
       selectedTtsCharacter,
@@ -3646,6 +3703,19 @@ export default {
   margin-top: 6px;
   padding-top: 6px;
   border-top: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+/* 自己发的消息：操作条右对齐 */
+.message-actions.self-actions {
+  justify-content: flex-end;
+}
+
+.msg-action-btn.forward-btn {
+  color: #2980b9;
+}
+
+.msg-action-btn.forward-btn:hover {
+  background: rgba(52, 152, 219, 0.12);
 }
 
 .msg-action-btn {
