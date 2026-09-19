@@ -40,6 +40,16 @@ public class UserSettings {
     @Column(columnDefinition = "TEXT")
     private String providers;  // 提供商列表JSON格式: [{"name":"siliconflow","apiKey":"xxx","baseUrl":"xxx"}]
 
+    /**
+     * 用户选定的 AstrBot 人格（persona_id），"双层提示词"里的人层。
+     *
+     * <p>岗位（任务规则、输出格式）由后端 prompts.yml 提供，人（人格、语气）由 AstrBot 提供。
+     * 因为 /api/v1/chat 没有 persona 字段，实际落地是：按人格生成配置档案
+     * （{@code qqai-p-<slug>-text} / {@code -image}），请求时用 config_name 指定。</p>
+     */
+    @Column(length = 200)
+    private String astrbotPersonaId;
+
     private LocalDateTime updatedAt;
     
     @PrePersist
@@ -75,6 +85,9 @@ public class UserSettings {
 
     public String getProviders() { return providers; }
     public void setProviders(String providers) { this.providers = providers; }
+
+    public String getAstrbotPersonaId() { return astrbotPersonaId; }
+    public void setAstrbotPersonaId(String astrbotPersonaId) { this.astrbotPersonaId = astrbotPersonaId; }
 
     public LocalDateTime getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(LocalDateTime updatedAt) { this.updatedAt = updatedAt; }

@@ -59,7 +59,8 @@ public class GroupDigestConsumer {
 
         log.info("消费群日报任务 groupId={}, date={}, force={}", groupId, date, force);
         try {
-            GroupDigest digest = groupDigestService.generateDailyDigest(groupId, date, force);
+            GroupDigest digest = groupDigestService.generateDailyDigest(
+                    groupId, date, force, payload.getRequestedBy());
             log.info("群日报任务完成 groupId={}, date={}, messages={}, model={}",
                     groupId, date, digest.getMessageCount(), digest.getModel());
         } catch (BizException e) {

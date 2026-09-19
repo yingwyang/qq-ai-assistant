@@ -24,13 +24,21 @@ public class GroupDigestPayload implements Serializable {
     /** 是否强制重算（true = 当天已有日报也重新调用大模型） */
     private Boolean force;
 
+    /** 触发者用户 id（「人层」用他选定的 AstrBot 人格）；定时任务为 null = 用默认 */
+    private Long requestedBy;
+
     public GroupDigestPayload() {
     }
 
     public GroupDigestPayload(String groupId, String date, Boolean force) {
+        this(groupId, date, force, null);
+    }
+
+    public GroupDigestPayload(String groupId, String date, Boolean force, Long requestedBy) {
         this.groupId = groupId;
         this.date = date;
         this.force = force;
+        this.requestedBy = requestedBy;
     }
 
     public String getGroupId() {
@@ -57,8 +65,17 @@ public class GroupDigestPayload implements Serializable {
         this.force = force;
     }
 
+    public Long getRequestedBy() {
+        return requestedBy;
+    }
+
+    public void setRequestedBy(Long requestedBy) {
+        this.requestedBy = requestedBy;
+    }
+
     @Override
     public String toString() {
-        return "GroupDigestPayload{groupId=" + groupId + ", date=" + date + ", force=" + force + '}';
+        return "GroupDigestPayload{groupId=" + groupId + ", date=" + date + ", force=" + force
+                + ", requestedBy=" + requestedBy + '}';
     }
 }

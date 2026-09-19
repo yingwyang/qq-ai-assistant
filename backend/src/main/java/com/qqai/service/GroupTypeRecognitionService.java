@@ -29,6 +29,13 @@ public class GroupTypeRecognitionService {
     @Autowired
     private AstrBotService astrBotService;
 
+    /** 人层（用户选定的人格）；测试直接 new 时为 null */
+    @Autowired(required = false)
+    private AstrBotPersonaService astrBotPersonaService;
+
+    @Autowired(required = false)
+    private com.qqai.common.SecurityHelper securityHelper;
+
     @Autowired
     private MessageService messageService;
 
@@ -147,7 +154,16 @@ public class GroupTypeRecognitionService {
         // 此处原本自己拼了一套请求：缺 username，AstrBot 恒返回
         // {"status":"error","message":"Missing key: username"}，又按整段 JSON 取 response 字段，
         // 于是永远拿到 null，前端显示"其他群 / 置信度 0% / LLM 返回为空"。
-        return astrBotService.chat(message, null, "type.recognition");
+        // 人层：群类型识别同样属于「岗位」，说话方式沿用触发者选定的人格（没选则默认）。
+        String personaConfig = null;
+        try {
+            if (astrBotPersonaService != null && securityHelper != null) {
+                personaConfig = astrBotPersonaService.resolveConfigName(securityHelper.getCurrentUserId(), false);
+            }
+        } catch (Exception e) {
+            log.debug("解析人格档案失败，使用默认档案: {}", e.getMessage());
+        }
+        return astrBotService.chat(message, null, "type.recognition", personaConfig);
     }
 
     private RecognitionResult parseRecognitionResult(String llmResponse) {

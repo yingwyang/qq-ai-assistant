@@ -62,6 +62,12 @@ astrbot:
   # tools=[](不挂任何工具)。否则 Agent 管线会注入 send_message_to_user / future_task 等工具,
   # 模型跑去调用工具、回复"请稍等片刻",摘要正文变成工具调用文本。
   vision-task-config-name: ${ASTRBOT_VISION_TASK_CONFIG_NAME:vision-task}
+  # 「双层提示词」的人层:用户在前端选 AstrBot 人格,后端按人格生成配置档案
+  # (qqai-p-<slug>-text / -image)并绑定该人格的无工具副本。
+  # 下面两项是生成档案时复制的「底座」档案:文本底座提供默认语言模型,
+  # 视觉底座提供多模态模型(GL-4.5V 等)。改名后需与 AstrBot 里的档案名一致。
+  persona-text-base-profile: ${ASTRBOT_PERSONA_TEXT_BASE:ray}
+  persona-image-base-profile: ${ASTRBOT_PERSONA_IMAGE_BASE:vision}
 
 # NapCat配置
 napcat:

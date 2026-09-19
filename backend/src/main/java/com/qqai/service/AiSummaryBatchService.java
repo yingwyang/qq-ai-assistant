@@ -154,8 +154,10 @@ public class AiSummaryBatchService {
             selected.add(m);
         }
 
+        // 触发者的身份带进队列：「人层」要用他选定的 AstrBot 人格（消费者没有请求上下文）
+        Long requestedBy = securityHelper.getCurrentUserId();
         for (Message m : selected) {
-            messageQueueService.sendAiAnalysis(new AiAnalysisPayload(m.getId(), m.getContent()));
+            messageQueueService.sendAiAnalysis(new AiAnalysisPayload(m.getId(), m.getContent(), requestedBy));
         }
         doneAtStart.set(doneToday());   // 记录本批基数
         batchSize.set(selected.size());

@@ -64,8 +64,10 @@ templates:
     single:
       DEFAULT: "请总结以下内容：{content}"
     # 结构化摘要（输出 JSON，便于前端渲染标签+情感）
+    # 注意末尾的「格式优先」条款：这是岗位层对人格层的硬约束——用户可以选任意 AstrBot 人格，
+    # 重人设（角色扮演）会倾向于用散文回答，导致 tags/sentiment 解析失败。
     structured:
-      DEFAULT: "请分析以下群聊消息，输出 JSON 格式的结构化摘要。\n\n消息内容：{content}\n\n请输出以下 JSON 格式（只输出 JSON，不要其他内容）：\n{\"tags\": [\"标签1\", \"标签2\"], \"summary\": \"一句话总结\", \"sentiment\": \"positive/neutral/negative\"}\n\n说明：\n- tags：2-3 个主题标签\n- summary：一句话概括消息内容\n- sentiment：情感倾向（positive积极/neutral中性/negative消极）"
+      DEFAULT: "请分析以下群聊消息，输出 JSON 格式的结构化摘要。\n\n消息内容：{content}\n\n请输出以下 JSON 格式（只输出 JSON，不要其他内容）：\n{\"tags\": [\"标签1\", \"标签2\"], \"summary\": \"一句话总结\", \"sentiment\": \"positive/neutral/negative\"}\n\n说明：\n- tags：2-3 个主题标签\n- summary：一句话概括消息内容\n- sentiment：情感倾向（positive积极/neutral中性/negative消极）\n\n【格式优先（最高优先级）】你的人格与角色设定只影响措辞，不得改变输出格式：\n- 只输出上面那一个 JSON 对象，前后不要有任何别的字符（不要寒暄、不要提问、不要解释、不要动作描写、不要 Markdown 代码块）；\n- 可以在 summary 字段里保留你的语气，但字段名与取值必须严格按上面的格式。"
 
   # ============ 群类型识别 ============
   type:

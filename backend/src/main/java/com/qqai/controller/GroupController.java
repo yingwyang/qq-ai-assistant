@@ -229,7 +229,14 @@ public class GroupController {
         }
 
         LocalDate targetDate = (date == null) ? LocalDate.now() : date;
-        GroupDigest digest = groupDigestService.generateDailyDigest(groupId, targetDate, force);
+        // 人层：日报也用触发者选定的人格
+        Long personaUserId = null;
+        try {
+            personaUserId = securityHelper.getCurrentUserId();
+        } catch (Exception ignored) {
+            // 取不到就当系统调用（用默认人格）
+        }
+        GroupDigest digest = groupDigestService.generateDailyDigest(groupId, targetDate, force, personaUserId);
         return ResponseEntity.ok(ApiResponse.success(groupDigestService.toView(digest)));
     }
 
@@ -262,7 +269,13 @@ public class GroupController {
         // 开关 / 群白名单：不满足直接 403（BizException 由 GlobalExceptionHandler 统一转 ApiResponse）
         groupDigestService.assertDigestAllowed(groupId);
 
-        messageQueueService.sendGroupDigest(new GroupDigestPayload(groupId, targetDate.toString(), force));
+        Long requester = null;
+        try {
+            requester = securityHelper.getCurrentUserId();
+        } catch (Exception ignored) {
+            // 系统调用，无用户上下文
+        }
+        messageQueueService.sendGroupDigest(new GroupDigestPayload(groupId, targetDate.toString(), force, requester));
         log.info("群日报任务已投递到 group.digest.queue groupId={}, date={}, force={}", groupId, targetDate, force);
 
         Map<String, Object> data = new LinkedHashMap<>();

@@ -445,6 +445,18 @@ export const astrBotApi = {
     body: JSON.stringify(params),
   }),
   getStatus: () => request('/astrbot/status'),
+
+  /**
+   * 双层提示词「人层」：可选人格列表 + 当前用户的选择。
+   * 返回 { data: { personas: [{personaId, preview, isDefault, cloneReady}], selection: {...} } }
+   */
+  getPersonas: () => request('/astrbot/personas'),
+
+  /** 选择人格（personaId 传空 = 恢复默认，不指定人格）。首次选中会返回 restarted:true */
+  selectPersona: (personaId) => request('/astrbot/persona', {
+    method: 'POST',
+    body: JSON.stringify({ personaId }),
+  }),
   getConversations: (params = {}) => {
     const queryParams = new URLSearchParams();
     if (params.groupId) queryParams.append('groupId', params.groupId);

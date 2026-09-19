@@ -94,14 +94,27 @@ public class AstrBotService {
      * @param groupType 群类型（可选，用于按群类型定制摘要策略）
      */
     public String summarizeMessage(String content, String apiKey, String groupType) throws Exception {
-        return doSummarize(content, apiKey, groupType, "summary.single");
+        return doSummarize(content, apiKey, groupType, "summary.single", null);
     }
 
     /**
      * 结构化单条消息摘要（输出 JSON：tags + summary + sentiment，便于前端渲染）
+     *
+     * @param personaConfigName 「人层」配置档案名（由 {@code AstrBotPersonaService} 按用户所选人格给出），
+     *                          传 null 表示使用默认档案
      */
+    public String summarizeMessageStructured(String content, String apiKey, String groupType,
+                                             String personaConfigName) throws Exception {
+        String reply = doSummarize(content, apiKey, groupType, "summary.structured", personaConfigName);
+        if (needsNeutralRetry(reply, personaConfigName)) {
+            log.info("人格档案输出不是结构化 JSON，用中性档案重试一次（岗位格式优先于人格）");
+            reply = doSummarize(content, apiKey, groupType, "summary.structured", null);
+        }
+        return reply;
+    }
+
     public String summarizeMessageStructured(String content, String apiKey, String groupType) throws Exception {
-        return doSummarize(content, apiKey, groupType, "summary.structured");
+        return doSummarize(content, apiKey, groupType, "summary.structured", null);
     }
 
     /**
@@ -110,11 +123,14 @@ public class AstrBotService {
      * <p>之前的实现只把图片当文本（"附图 1: http://…"）发给模型，模型看不到画面，
      * 于是只能答"内容未知"。这里改为：上传图片到 AstrBot 换 attachment_id → 与提示词拼成
      * {@code [plain, image…]} → 指定 vision profile 调用。</p>
+     *
+     * @param personaConfigName 「人层」配置档案名（视觉版），null 表示用内置的 vision-task
      */
     public String summarizeMessageStructured(String content, String apiKey, String groupType,
-                                             java.util.List<String> imageUrls) throws Exception {
+                                             java.util.List<String> imageUrls,
+                                             String personaConfigName) throws Exception {
         if (imageUrls == null || imageUrls.isEmpty()) {
-            return summarizeMessageStructured(content, apiKey, groupType);
+            return summarizeMessageStructured(content, apiKey, groupType, personaConfigName);
         }
         if (content == null || content.trim().isEmpty()) {
             return "";
@@ -124,11 +140,36 @@ public class AstrBotService {
         String prompt = promptTemplateService.render("summary.structured", groupType, vars);
         java.util.List<String> attachmentIds = uploadImages( imageUrls, apiKey);
         if (attachmentIds.isEmpty()) {
-            return doSummarize(content, apiKey, groupType, "summary.structured");
+            return doSummarize(content, apiKey, groupType, "summary.structured", personaConfigName);
         }
         String promptWithHint = prompt + imageAttachmentHint(attachmentIds.size());
         Object parts = buildImageParts(promptWithHint, attachmentIds);
-        return chat(parts, apiKey, "summary.structured.image", true);
+        String reply = chat(parts, apiKey, "summary.structured.image", true, personaConfigName);
+        if (needsNeutralRetry(reply, personaConfigName)) {
+            log.info("人格档案输出不是结构化 JSON，用中性档案重试一次（岗位格式优先于人格）");
+            reply = chat(parts, apiKey, "summary.structured.image.retry", true, null);
+        }
+        return reply;
+    }
+
+    /**
+     * 重人设（角色扮演）会倾向于用散文回答，导致结构化摘要解析不出 tags/sentiment。
+     * 岗位层的格式要求优先：命中这里就换中性档案重试一次。
+     */
+    static boolean needsNeutralRetry(String reply, String personaConfigName) {
+        if (personaConfigName == null || personaConfigName.isBlank()) return false;
+        if (reply == null || reply.isBlank()) return true;
+        String t = reply.trim();
+        // 正常链路 sanitizeReply 已经去过围栏，这里再兜一层，保证判定用的是 JSON 本体
+        t = t.replaceAll("^```[a-zA-Z]*\\s*", "").replaceAll("\\s*```$", "").trim();
+        // 允许 JSON 后面跟少量尾巴（例如模型多打了一句话）时也能解析，交给解析器取最后一个对象
+        return !(t.startsWith("{") && t.endsWith("}"))
+                && !(t.startsWith("{") && t.contains("}"));
+    }
+
+    public String summarizeMessageStructured(String content, String apiKey, String groupType,
+                                             java.util.List<String> imageUrls) throws Exception {
+        return summarizeMessageStructured(content, apiKey, groupType, imageUrls, null);
     }
 
     /**
@@ -259,15 +300,16 @@ public class AstrBotService {
         }
     }
 
-    private String doSummarize(String content, String apiKey, String groupType, String templateKey) throws Exception {
+    private String doSummarize(String content, String apiKey, String groupType, String templateKey,
+                              String personaConfigName) throws Exception {
         if (content == null || content.trim().isEmpty()) {
             return "";
         }
-        // 从 prompts.yml 渲染摘要模板
+        // 从 prompts.yml 渲染摘要模板（= 岗位层）
         java.util.Map<String, Object> vars = new java.util.HashMap<>();
         vars.put("content", content);
         String message = promptTemplateService.render(templateKey, groupType, vars);
-        return chat(message, apiKey, templateKey);
+        return chat(message, apiKey, templateKey, personaConfigName);
     }
 
     /**
@@ -284,7 +326,16 @@ public class AstrBotService {
      * @return 纯文本回复；调用失败或响应为空返回 null
      */
     public String chat(String message, String apiKey, String tag) throws Exception {
-        return doChat(message, apiKey, tag, false);
+        return doChat(message, apiKey, tag, false, null);
+    }
+
+    /**
+     * 指定「人层」档案的对话入口（人格由 AstrBot 提供，规则由调用方提示词提供）。
+     *
+     * @param personaConfigName {@code qqai-p-<slug>-text} 之类的档案名；null = 用默认档案
+     */
+    public String chat(String message, String apiKey, String tag, String personaConfigName) throws Exception {
+        return doChat(message, apiKey, tag, false, personaConfigName);
     }
 
     /**
@@ -295,10 +346,17 @@ public class AstrBotService {
      * 否则 Agent 会用默认（纯文本）模型，图片段被丢弃、模型只能答"内容未知"。</p>
      */
     public String chat(Object message, String apiKey, String tag, boolean withVision) throws Exception {
-        return doChat(message, apiKey, tag, withVision);
+        return doChat(message, apiKey, tag, withVision, null);
     }
 
-    private String doChat(Object message, String apiKey, String tag, boolean withVision) throws Exception {
+    /** 视觉 + 指定人格档案：图片用视觉模型，说话方式用用户选的人格 */
+    public String chat(Object message, String apiKey, String tag, boolean withVision,
+                       String personaConfigName) throws Exception {
+        return doChat(message, apiKey, tag, withVision, personaConfigName);
+    }
+
+    private String doChat(Object message, String apiKey, String tag, boolean withVision,
+                          String personaConfigName) throws Exception {
         if (message == null) {
             return null;
         }
@@ -328,19 +386,27 @@ public class AstrBotService {
         if (summaryModel != null && !summaryModel.isBlank()) {
             requestBody.put("model", summaryModel.trim());
         }
-        if (withVision) {
-            // 视觉请求必须走视觉配置文件：Agent 的模型来自 profile，而不是请求体里的 model。
+        // 「人层」档案优先级：调用方按用户所选人格给的档案 > 带图时内置的 vision-task。
+        // 人格在 AstrBot 里是绑在配置档案上的（/api/v1/chat 没有 persona 字段），
+        // 所以「人」的落地方式就是指定档案；档案由 AstrBotPersonaService 预先生成。
+        String personaCfg = (personaConfigName != null && !personaConfigName.isBlank())
+                ? personaConfigName.trim() : null;
+        String cfg = personaCfg;
+        if (cfg == null && withVision) {
+            // 视觉请求必须走视觉档案：Agent 的模型来自 profile，而不是请求体里的 model。
             // 用 vision-task（同模型 + 无工具人格），避免模型走 Agent 工具调用而不产出摘要。
-            String cfg = (visionTaskConfigName != null && !visionTaskConfigName.isBlank())
+            cfg = (visionTaskConfigName != null && !visionTaskConfigName.isBlank())
                     ? visionTaskConfigName.trim()
                     : visionConfigName;
-            if (cfg != null && !cfg.isBlank()) {
-                requestBody.put("config_name", cfg);
-            }
-            // 每次带图任务用一个全新会话：AstrBot 的会话记录里带 persona_id，
+        }
+        if (cfg != null && !cfg.isBlank()) {
+            requestBody.put("config_name", cfg);
+            // 每次请求用一个全新会话：AstrBot 的会话记录里带 persona_id 且优先级高于档案，
             // 复用旧会话会沿用旧人格（tools=null 的人格会挂上全部工具），
             // 模型于是去调 send_message_to_user/future_task，而不是输出摘要。
-            requestBody.put("session_id", "vision-task-" + java.util.UUID.randomUUID());
+            requestBody.put("session_id", "qqai-" + java.util.UUID.randomUUID());
+        }
+        if (withVision) {
             // 带图时不注入默认人格：人格提示词会诱导模型描述"我看到了什么"的元话术，
             // 与摘要任务的 JSON 输出要求冲突（与控制器 /send-with-image 同一策略）。
             flags.put("enable_default_system_prompt", false);

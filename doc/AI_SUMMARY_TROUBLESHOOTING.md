@@ -328,4 +328,91 @@ POST /api/astrbot/analyze-selected  {"groupId":"674405515","messageIds":[107535,
 
 ---
 
-*最后更新：2026-09-19（新增 §7 图片识别链路：视觉档案 + 无工具人格 + 多模态消息段；§6 群类型识别同源故障；§2 为 2026-09-15 AI 摘要故障）*
+## 8. 双层提示词：人（AstrBot 人格）× 岗位（后端规则）（2026-09-19）
+
+### 结构
+
+```
+最终提示词 = 岗位层（本后端 prompts.yml + 各服务硬约束）
+           + 人层（AstrBot persona.system_prompt）
+```
+
+| 层 | 归属 | 内容 | 落地方式 |
+|---|---|---|---|
+| 岗位 | 本仓库 | `summary.structured` / `analysis.*` / `type.recognition` / `chat.system` 模板 + 格式约束 | 作为请求的 `message`（或上下文 system 消息）送出 |
+| 人 | AstrBot 的 `personas` 表 | 人格、语气、口癖、角色设定 | 按人格生成配置档案，请求带 `config_name` |
+
+### 为什么不能直接传 persona
+
+`/api/v1/chat` **没有 persona 字段**。人格只能通过两条路生效，且优先级是
+`会话强制 > 会话记录 persona > 配置档案 persona`：
+
+1. **配置档案**（本方案采用）：为每个人格生成
+   `qqai-p-<slug>-text`（文本）与 `qqai-p-<slug>-image`（视觉）两个档案，请求时 `config_name` 指定；
+2. 会话记录：会话会记住 persona，**复用旧 session 会让新人格不生效** —— 所以每个请求都带新的
+   `session_id`（`qqai-<uuid>`；AI 对话按「群号@人格标识」区分，人格一变即换会话）。
+
+档案的新建/修改是**内存热生效**的（实测：新建后立刻可用、无需重启）；真正需要重启的只有
+**新增人格**（`personas_v3` 在启动时载入）。
+
+### 「无工具副本」是必须的
+
+AstrBot 按 persona 注入工具，`persona.tools = null` 表示**全部工具**：模型会去调
+`send_message_to_user` / `future_task`，把「请稍等片刻」当成回答（§7 的坑）。
+所以每个人格都克隆一份 `qqai_p_<slug>`：**system_prompt / begin_dialogs 照搬，`tools = []`**，
+原人格一个字都不改。
+
+### 用户怎么用
+
+AI 对话面板右上角 ⚙️ → 「人格与状态」：
+
+- 「我的人格」列表（读 `personas` 表，不需要 `persona` scope 的 API Key）；
+- 状态卡：AstrBot 运行状态、当前人格、文本/视觉档案与副本是否就绪、**重启 AstrBot** 按钮；
+- 首次启用某人格会自动重启 AstrBot（约 10–60s），之后切换秒切。
+
+相关接口：
+
+| 接口 | 说明 |
+|---|---|
+| `GET /api/astrbot/personas` | 可选人格列表 + 当前用户的选择与就绪状态 |
+| `POST /api/astrbot/persona` | `{"personaId":"灰泽满"}`；空串 = 恢复默认。返回 `restarted` 标记 |
+| `GET /api/astrbot/status` | 状态 + `persona` 子对象 |
+
+配置项（`application.yml` → `astrbot.*`）：
+
+| 配置 | 默认 | 说明 |
+|---|---|---|
+| `persona-text-base-profile` | `ray` | 文本档案的「底座」：复制它的模型等设置 |
+| `persona-image-base-profile` | `vision` | 视觉档案的底座（多模态模型） |
+| `internal-persona-ids` | `vision_task_quiet` | 不暴露给用户选择的系统人格 |
+
+### 格式与人格冲突（已处理）
+
+角色扮演人格倾向于用散文回答，会让结构化摘要解析不出 tags/sentiment（实测：同一个人格，
+两条消息一条守格式、一条跑偏）。两道护栏：
+
+1. **岗位硬约束**：`summary.structured` 模板末尾的「格式优先（最高优先级）」条款；
+2. **服务端兜底**：人格档案的回复若不是 JSON，`AstrBotService.needsNeutralRetry()` 判定后用
+   中性档案重试一次（`summary.structured.image.retry`）。
+
+实测（`POST /api/messages/108550/summarize?force=true`，人格=灰泽满）：
+
+```json
+{"tags":["感谢","互动","直播礼物"],
+ "summary":"呜哇…是绿冻在感谢Lappland的投喂呢，收到礼物很开心呀～",
+ "sentiment":"positive"}
+```
+
+—— 结构与标签来自岗位层，语气来自人层。
+
+### 涉及文件
+
+`service/AstrBotPersonaService.java`（新）、`controller/AstrBotController.java`（`/personas`、`/persona`、状态）、
+`service/AstrBotService.java`（`chat(..., personaConfigName)` 重载 + 兜底重试）、
+`MessageController` / `AiAnalysisConsumer` / `GroupDigestService` / `GroupTypeRecognitionService`（各自接入人层）、
+`entity/UserSettings.java`（`astrbotPersonaId`）、`dto/webhook/AiAnalysisPayload` + `GroupDigestPayload`（带上触发者身份）、
+前端 `AstrBotChat.vue`「人格与状态」面板、`PersonaManager.vue`（管理员维护人格）。
+
+---
+
+*最后更新：2026-09-19（新增 §8 双层提示词：人格选择 + 无工具副本 + 格式兜底；§7 图片识别链路；§6 群类型识别同源故障；§2 为 2026-09-15 AI 摘要故障）*

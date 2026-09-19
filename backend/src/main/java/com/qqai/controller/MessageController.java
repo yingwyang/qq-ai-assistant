@@ -39,6 +39,9 @@ public class MessageController {
             java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss");
 
     @Autowired
+    private com.qqai.service.AstrBotPersonaService astrBotPersonaService;
+
+    @Autowired
     private com.qqai.service.FilePurgeService filePurgeService;
 
     @Autowired
@@ -136,8 +139,10 @@ public class MessageController {
             // 带图消息：把图片作为消息段一起送出并切到视觉配置文件，否则模型看不到画面，
             // 只能答"内容未知/未提供可辨内容"（图片在文本里只是一条 URL）。
             List<String> imageUrls = astrBotService.renderMessageImageUrls(message);
+            // 「人层」：用户选定的 AstrBot 人格（没选则 null，用内置默认/vision-task 档案）
+            String personaConfig = astrBotPersonaService.resolveConfigName(userId, !imageUrls.isEmpty());
             summary = astrBotService.summarizeMessageStructured(
-                    rendered, null, resolveGroupType(message.getGroupId()), imageUrls);
+                    rendered, null, resolveGroupType(message.getGroupId()), imageUrls, personaConfig);
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
                     .body(ApiResponse.error(503, "AI 服务暂不可用：" + e.getMessage()));

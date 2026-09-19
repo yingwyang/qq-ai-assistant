@@ -42,6 +42,10 @@ public class AiAnalysisConsumer {
     @Autowired
     private AstrBotService astrBotService;
 
+    /** 「人层」：按触发者选定的人格挑配置档案 */
+    @Autowired
+    private com.qqai.service.AstrBotPersonaService astrBotPersonaService;
+
     @Autowired
     private MessageRepository messageRepository;
 
@@ -94,7 +98,11 @@ public class AiAnalysisConsumer {
         try {
             // 带图消息同样送图 + 切视觉配置文件（与 /messages/{id}/summarize 同一口径）
             java.util.List<String> imageUrls = astrBotService.renderMessageImageUrls(message);
-            summary = astrBotService.summarizeMessageStructured(renderedForSummary, null, groupType, imageUrls);
+            // 「人层」：用触发批量任务的用户所选人格；没有上下文时回退内置默认档案
+            String personaConfig = astrBotPersonaService.resolveConfigName(
+                    payload.getRequestedBy(), !imageUrls.isEmpty());
+            summary = astrBotService.summarizeMessageStructured(
+                    renderedForSummary, null, groupType, imageUrls, personaConfig);
         } catch (Exception e) {
             throw new RuntimeException("AI分析失败: " + payload, e);
         }

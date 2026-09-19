@@ -83,6 +83,10 @@ public class GroupDigestService {
     @Autowired
     private AstrBotService astrBotService;
 
+    /** 人层（用户选定的人格）；单元测试直接 new 时为 null，自动跳过 */
+    @Autowired(required = false)
+    private AstrBotPersonaService astrBotPersonaService;
+
     /**
      * 运行时配置（enabled / 群白名单 / minLength / maxInputChars）。
      * 允许为空：单元测试直接 {@code new GroupDigestService()} 时回退到本类常量默认值。
@@ -108,19 +112,24 @@ public class GroupDigestService {
      * @throws BizException 400 当天没有可摘要的消息；403 功能已关闭 / 群不在白名单；503 大模型不可用
      */
     public GroupDigest generateDailyDigest(String groupId, LocalDate date) {
-        return generateDailyDigest(groupId, date, false);
+        return generateDailyDigest(groupId, date, false, null);
+    }
+
+    public GroupDigest generateDailyDigest(String groupId, LocalDate date, boolean force) {
+        return generateDailyDigest(groupId, date, force, null);
     }
 
     /**
      * 生成（或读取）某群某天的日报。
      *
-     * @param groupId 群号
-     * @param date    归属日期，为空表示今天
-     * @param force   true = 即使当天已有日报也重新调用大模型生成（就地覆盖同一条记录，不新增行）
+     * @param groupId       群号
+     * @param date          归属日期，为空表示今天
+     * @param force         true = 即使当天已有日报也重新调用大模型生成（就地覆盖同一条记录，不新增行）
+     * @param personaUserId 触发者的用户 id（「人层」用他选定的人格）；定时任务/系统调用传 null 用默认
      * @return 已存在或新生成的日报记录
      * @throws BizException 400 当天没有可摘要的消息；403 功能已关闭 / 群不在白名单；503 大模型不可用
      */
-    public GroupDigest generateDailyDigest(String groupId, LocalDate date, boolean force) {
+    public GroupDigest generateDailyDigest(String groupId, LocalDate date, boolean force, Long personaUserId) {
         if (groupId == null || groupId.isBlank()) {
             throw new BizException(400, "群号不能为空");
         }
@@ -143,7 +152,10 @@ public class GroupDigestService {
         String input = buildDigestInput(candidates);
         String raw;
         try {
-            raw = astrBotService.chat(buildPrompt(groupId, target, input), null, MODEL_TAG);
+            // 人层：按调用方（触发者）选定的人格挑档案；后台定时任务没有用户 → 用默认
+            String personaConfig = astrBotPersonaService == null
+                    ? null : astrBotPersonaService.resolveConfigName(personaUserId, false);
+            raw = astrBotService.chat(buildPrompt(groupId, target, input), null, MODEL_TAG, personaConfig);
         } catch (Exception e) {
             log.warn("群日报调用大模型失败 groupId={}, date={}: {}", groupId, target, e.getMessage());
             throw new BizException(503, "AI 服务暂不可用：" + e.getMessage());

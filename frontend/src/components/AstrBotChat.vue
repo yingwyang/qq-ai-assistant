@@ -44,6 +44,10 @@
         <button class="action-btn" @click="createNewConversation" title="新对话">
           <Icon name="add" :size="16" />
         </button>
+        <!-- 设置入口：提供商配置 + 「人格与状态」（双层提示词的人层） -->
+        <button class="action-btn" @click="openSettings" title="AstrBot 设置 / 人格与状态">
+          <Icon name="settings" :size="16" />
+        </button>
       </div>
     </div>
 
@@ -162,6 +166,20 @@
         <div class="settings-panel-body">
           <!-- 左侧提供商列表 -->
           <div class="settings-sidebar">
+            <!-- 双层提示词：岗位（后端规则）× 人（AstrBot 人格）两个面板 -->
+            <div class="settings-tabs">
+              <button
+                class="settings-tab"
+                :class="{ active: settingsTab === 'provider' }"
+                @click="switchSettingsTab('provider')"
+              >提供商</button>
+              <button
+                class="settings-tab"
+                :class="{ active: settingsTab === 'persona' }"
+                @click="switchSettingsTab('persona')"
+              >人格与状态</button>
+            </div>
+            <template v-if="settingsTab === 'provider'">
             <div class="sidebar-header">
               <span class="sidebar-title">提供商</span>
               <button class="btn-add-provider" @click="showAddProvider = !showAddProvider" title="新增提供商">
@@ -193,11 +211,101 @@
                 </button>
               </div>
             </div>
+            </template>
+            <template v-else>
+              <div class="sidebar-header">
+                <span class="sidebar-title">我的人格</span>
+                <span
+                  class="astrbot-status-dot"
+                  :class="astrbotStatus.status === 'online' ? 'online' : 'offline'"
+                  :title="astrbotStatus.status === 'online' ? 'AstrBot 运行中' : 'AstrBot 未运行'"
+                ></span>
+              </div>
+              <div class="persona-pick-list">
+                <div
+                  class="persona-pick-item"
+                  :class="{ active: !personaSelection?.personaId }"
+                  @click="applyPersona('')"
+                >
+                  <div class="persona-pick-name">不指定（用 AstrBot 默认）</div>
+                  <div class="persona-pick-preview">岗位规则照常生效</div>
+                </div>
+                <div
+                  v-for="p in personaOptions"
+                  :key="p.personaId"
+                  class="persona-pick-item"
+                  :class="{ active: personaSelection?.personaId === p.personaId }"
+                  @click="applyPersona(p.personaId)"
+                >
+                  <div class="persona-pick-name">
+                    {{ p.personaId }}
+                    <span v-if="p.isDefault" class="persona-tag">AstrBot 默认</span>
+                    <span v-if="!p.cloneReady" class="persona-tag warn">首次启用需重启</span>
+                  </div>
+                  <div class="persona-pick-preview">{{ p.preview || '（无人格提示词）' }}</div>
+                </div>
+                <div v-if="personaOptions.length === 0" class="empty-models">
+                  <Icon name="inbox" :size="28" />
+                  <p>没有读到 AstrBot 人格</p>
+                </div>
+              </div>
+            </template>
           </div>
 
           <!-- 右侧配置详情 -->
           <div class="settings-content">
-            <div v-if="currentProvider" class="provider-config">
+            <!-- 人格与状态：双层提示词（岗位=后端规则，人=AstrBot 人格）+ AstrBot 运行状态 -->
+            <div v-if="settingsTab === 'persona'" class="persona-status-panel">
+              <div class="provider-header">
+                <div class="provider-title-row">
+                  <div class="provider-icon-large">
+                    <Icon name="bot" :size="20" />
+                  </div>
+                  <div>
+                    <h3 class="provider-display-name">人格与 AstrBot 状态</h3>
+                    <span class="provider-url-text">「岗位」由本系统提供（任务规则 / 输出格式），「人」由 AstrBot 人格提供</span>
+                  </div>
+                </div>
+                <button class="btn-save-config" :disabled="personaBusy" @click="restartAstrBot">
+                  <Icon name="refresh" :size="14" /> 重启 AstrBot
+                </button>
+              </div>
+
+              <div class="status-card" :class="astrbotStatus.status === 'online' ? 'ok' : 'bad'">
+                <span class="status-dot" :class="astrbotStatus.status === 'online' ? 'online' : 'offline'"></span>
+                <div class="status-text">
+                  <strong>{{ astrbotStatus.status === 'online' ? 'AstrBot 运行中' : 'AstrBot 未运行' }}</strong>
+                  <span v-if="astrbotStatus.message" class="status-sub">{{ astrbotStatus.message }}</span>
+                </div>
+                <button class="btn-mini" :disabled="personaBusy" @click="refreshAstrBotStatus">
+                  <Icon name="refresh" :size="12" /> 刷新
+                </button>
+              </div>
+
+              <div class="status-card neutral">
+                <div class="status-text">
+                  <strong>当前人格：{{ personaSelection?.personaId || '未指定（用 AstrBot 默认）' }}</strong>
+                  <span class="status-sub">
+                    文本档案 {{ personaSelection?.textProfileReady ? '已就绪' : '未就绪' }} ·
+                    视觉档案 {{ personaSelection?.imageProfileReady ? '已就绪' : '未就绪' }} ·
+                    无工具副本 {{ personaSelection?.cloneReady === null ? '—' : (personaSelection?.cloneReady ? '已就绪' : '未创建') }}
+                  </span>
+                </div>
+              </div>
+
+              <div v-if="personaMessage" class="persona-message">{{ personaMessage }}</div>
+              <div v-if="personaBusy" class="persona-busy">
+                <span class="spinner"></span> 处理中，请不要关闭窗口…
+              </div>
+
+              <div class="persona-help">
+                <p><strong>生效范围：</strong>单条 AI 摘要、批量摘要、群分析、群日报、AI 对话与带图提问全部使用你选择的人格。</p>
+                <p><strong>为什么首次要重启：</strong>AstrBot 的人格列表在启动时载入；首次启用某个人格时需要为它生成一份「无工具副本」（避免模型去调工具、把"请稍等片刻"当成回答），所以这一次会自动重启 AstrBot，之后切换即时生效。</p>
+                <p><strong>原人格不会被改动：</strong>副本只复制话术（system prompt / 预设对话），工具清空。</p>
+              </div>
+            </div>
+
+            <div v-else-if="currentProvider" class="provider-config">
               <!-- 提供商头部 -->
               <div class="provider-header">
                 <div class="provider-title-row">
@@ -316,7 +424,7 @@
               </div>
             </div>
 
-            <!-- 智能体/人格管理 -->
+            <!-- 没有任何提供商时：人格管理（管理员可在此增删改 AstrBot 人格） -->
             <div v-else class="persona-config">
               <PersonaManager :embedded="true" />
             </div>
@@ -711,6 +819,85 @@ export default {
     // 设置弹窗
     const showSettings = ref(false);
 
+    // ==================== 双层提示词：人层（AstrBot 人格）+ AstrBot 状态 ====================
+    // 「岗位」由后端 prompts.yml 提供（任务规则/输出格式），「人」由 AstrBot 人格提供。
+    // 选人格后由后端生成/绑定配置档案；首次选中某人格要先给它建无工具副本 → 需要重启 AstrBot
+    // （所以前端要显示"重启中…"并轮询状态），之后再切换是秒切。
+    const settingsTab = ref('provider');          // 'provider' | 'persona'
+    const personaOptions = ref([]);
+    const personaSelection = ref(null);
+    const personaBusy = ref(false);
+    const personaMessage = ref('');
+    const astrbotStatus = ref({ status: 'unknown', message: '' });
+
+    const loadPersonaConfig = async () => {
+      try {
+        const res = await astrBotApi.getPersonas();
+        const data = res?.data || res || {};
+        personaOptions.value = data.personas || [];
+        personaSelection.value = data.selection || null;
+      } catch (e) {
+        personaMessage.value = '读取人格列表失败：' + (e.message || e);
+      }
+    };
+
+    const refreshAstrBotStatus = async () => {
+      try {
+        const res = await astrBotApi.getStatus();
+        astrbotStatus.value = { status: res?.status || 'unknown', message: res?.message || '' };
+        if (res?.persona) personaSelection.value = res.persona;
+      } catch (e) {
+        astrbotStatus.value = { status: 'offline', message: e.message || String(e) };
+      }
+    };
+
+    const applyPersona = async (personaId) => {
+      if (personaBusy.value) return;
+      personaBusy.value = true;
+      const willRestart = !!personaId && personaOptions.value.some(
+        p => p.personaId === personaId && !p.cloneReady
+      );
+      personaMessage.value = willRestart
+        ? '首次启用该人格：正在生成无工具副本并重启 AstrBot，约需 10–60 秒…'
+        : '正在应用人格…';
+      try {
+        const res = await astrBotApi.selectPersona(personaId || '');
+        personaSelection.value = res?.data || res?.selection || personaSelection.value;
+        await loadPersonaConfig();
+        await refreshAstrBotStatus();
+        personaMessage.value = personaId
+          ? `已启用「${personaId}」，摘要 / 分析 / 对话都会用这个人的说话方式`
+          : '已恢复默认：不再指定人格，使用 AstrBot 默认配置';
+      } catch (e) {
+        personaMessage.value = '启用失败：' + (e.message || e);
+      } finally {
+        personaBusy.value = false;
+      }
+    };
+
+    const restartAstrBot = async () => {
+      if (personaBusy.value) return;
+      personaBusy.value = true;
+      personaMessage.value = '正在重启 AstrBot…';
+      try {
+        await systemApi.stopAstrBot();
+        await systemApi.startAstrBot();
+        // 轮询直到就绪（后端启动 AstrBot 后端口就绪需要几秒到几十秒）
+        for (let i = 0; i < 20; i++) {
+          await new Promise(r => setTimeout(r, 3000));
+          const res = await astrBotApi.getStatus();
+          if (res?.status === 'online') break;
+        }
+        await refreshAstrBotStatus();
+        await loadPersonaConfig();
+        personaMessage.value = 'AstrBot 已重启完成';
+      } catch (e) {
+        personaMessage.value = '重启失败：' + (e.message || e);
+      } finally {
+        personaBusy.value = false;
+      }
+    };
+
     // TTS 角色选择
     const ttsCharacters = ref([]);
     const selectedTtsCharacter = ref(localStorage.getItem('tts_character') || '');
@@ -1047,6 +1234,23 @@ export default {
       // 恢复原来的值
       loadSettings();
       showSettings.value = false;
+    };
+
+    // 打开设置时按当前标签页刷新数据（人格页要拉 AstrBot 状态与人格列表）
+    const openSettings = async () => {
+      showSettings.value = true;
+      if (settingsTab.value === 'persona') {
+        await loadPersonaConfig();
+        await refreshAstrBotStatus();
+      }
+    };
+
+    const switchSettingsTab = async (tab) => {
+      settingsTab.value = tab;
+      if (tab === 'persona') {
+        await loadPersonaConfig();
+        await refreshAstrBotStatus();
+      }
     };
     
     // 头像加载错误处理
@@ -1832,6 +2036,19 @@ export default {
       llmModels,
       showAstrbotKey,
       showSettings,
+      // 双层提示词：人层
+      settingsTab,
+      personaOptions,
+      personaSelection,
+      personaBusy,
+      personaMessage,
+      astrbotStatus,
+      loadPersonaConfig,
+      refreshAstrBotStatus,
+      applyPersona,
+      restartAstrBot,
+      openSettings,
+      switchSettingsTab,
       newModelName,
       showCustomModel,
       modelSearch,
@@ -2798,6 +3015,193 @@ export default {
 .persona-config {
   padding: 20px;
 }
+
+/* ==================== 双层提示词：人格与状态面板 ==================== */
+.settings-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 10px 10px 0;
+}
+
+.settings-tab {
+  flex: 1;
+  padding: 7px 6px;
+  font-size: 12px;
+  border: 1px solid var(--border-color, #e5e7eb);
+  background: transparent;
+  color: var(--text-secondary, #6b7280);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.settings-tab.active {
+  background: #3498db;
+  border-color: #3498db;
+  color: #fff;
+}
+
+.astrbot-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.astrbot-status-dot.online { background: #2ecc71; }
+.astrbot-status-dot.offline { background: #e74c3c; }
+
+.persona-pick-list {
+  padding: 8px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.persona-pick-item {
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  margin-bottom: 4px;
+}
+
+.persona-pick-item:hover {
+  background: var(--hover-bg, rgba(52, 152, 219, 0.08));
+}
+
+.persona-pick-item.active {
+  border-color: #3498db;
+  background: rgba(52, 152, 219, 0.12);
+}
+
+.persona-pick-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary, #2c3e50);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.persona-tag {
+  font-size: 10px;
+  font-weight: 400;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(46, 204, 113, 0.15);
+  color: #27ae60;
+}
+
+.persona-tag.warn {
+  background: rgba(241, 196, 15, 0.18);
+  color: #b7950b;
+}
+
+.persona-pick-preview {
+  font-size: 11px;
+  color: var(--text-secondary, #7f8c8d);
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.persona-status-panel {
+  padding: 20px;
+  overflow-y: auto;
+}
+
+.status-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  margin-bottom: 10px;
+  border: 1px solid var(--border-color, #e5e7eb);
+  background: var(--card-bg, #fff);
+}
+
+.status-card.ok { border-left: 3px solid #2ecc71; }
+.status-card.bad { border-left: 3px solid #e74c3c; }
+.status-card.neutral { border-left: 3px solid #3498db; }
+
+.status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.status-dot.online { background: #2ecc71; }
+.status-dot.offline { background: #e74c3c; }
+
+.status-text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 13px;
+  color: var(--text-primary, #2c3e50);
+}
+
+.status-sub {
+  font-size: 11px;
+  color: var(--text-secondary, #7f8c8d);
+}
+
+.btn-mini {
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 5px;
+  border: 1px solid var(--border-color, #e5e7eb);
+  background: transparent;
+  color: var(--text-secondary, #6b7280);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.persona-message {
+  font-size: 12px;
+  color: #2980b9;
+  background: rgba(52, 152, 219, 0.1);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+}
+
+.persona-busy {
+  font-size: 12px;
+  color: var(--text-secondary, #7f8c8d);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(52, 152, 219, 0.3);
+  border-top-color: #3498db;
+  border-radius: 50%;
+  animation: persona-spin 0.8s linear infinite;
+}
+
+@keyframes persona-spin {
+  to { transform: rotate(360deg); }
+}
+
+.persona-help {
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--text-secondary, #7f8c8d);
+  border-top: 1px dashed var(--border-color, #e5e7eb);
+  padding-top: 10px;
+}
+
+.persona-help p { margin: 0 0 6px; }
 
 /* 设置弹窗底部 */
 .settings-dialog-footer {

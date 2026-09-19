@@ -117,6 +117,10 @@ public class AstrBotController {
     @Value("${astrbot.vision-task-config-name:vision-task}")
     private String visionTaskConfigName;
 
+    /** 双层提示词的人层：用户选定的人格 → 配置档案 */
+    @Autowired
+    private com.qqai.service.AstrBotPersonaService astrBotPersonaService;
+
     @Value("${server.port:8081}")
     private int serverPort;
 
@@ -285,26 +289,36 @@ public class AstrBotController {
     }
 
     /**
-     * 带图的分析请求切到「无工具视觉配置」。
+     * 双层提示词的「人层」落地：按当前用户选定的人格挑配置档案。
      *
-     * <p>Agent 管线里模型来自配置文件（config profile），请求体的 model 对 Agent 不生效：
-     * 默认 profile 指向纯文本模型时，图片段会被丢掉，模型只能答"看不到图"。
-     * 而普通视觉 profile 的人格挂着全部工具，模型会去调 send_message_to_user 而给出
-     * "请稍等片刻"。因此分析链路统一用 vision-task（同模型、无人格工具）。</p>
+     * <p>规则（优先级从上到下）：</p>
+     * <ol>
+     *   <li>用户选了人格 → 用该人格的档案（带图用 {@code -image} 视觉版，否则 {@code -text}）；</li>
+     *   <li>没选人格但带图 → 用内置 {@code vision-task}（视觉模型 + 无工具人格）；</li>
+     *   <li>都没有 → 不改档案，走 AstrBot 默认。</li>
+     * </ol>
+     *
+     * <p>只要指定了档案就带一个全新 {@code session_id}：AstrBot 会话记录里的 persona
+     * 优先级高于档案，复用旧会话会让新人格不生效。</p>
      */
-    private void applyVisionConfig(Map<String, Object> body, Map<String, Object> chatFlags, List<String> imageUrls) {
-        if (imageUrls == null || imageUrls.isEmpty()) return;
-        String cfg = (visionTaskConfigName != null && !visionTaskConfigName.isBlank())
-                ? visionTaskConfigName.trim() : visionConfigName;
+    private void applyPersonaLayer(Map<String, Object> body, Map<String, Object> chatFlags,
+                                   List<String> imageUrls) {
+        boolean hasImage = imageUrls != null && !imageUrls.isEmpty();
+        String personaCfg = astrBotPersonaService.resolveConfigName(securityHelper.getCurrentUserId(), hasImage);
+        String cfg = personaCfg;
+        if (cfg == null && hasImage) {
+            cfg = (visionTaskConfigName != null && !visionTaskConfigName.isBlank())
+                    ? visionTaskConfigName.trim() : visionConfigName;
+        }
         if (cfg != null && !cfg.isBlank()) {
             body.put("config_name", cfg);
+            // 新会话 → 不会沿用旧会话记住的人格（挂着全部工具的人格会让模型跑去调工具）
+            body.put("session_id", "qqai-" + java.util.UUID.randomUUID());
         }
-        // 新会话 → 不会沿用旧会话记住的人格（挂着全部工具的人格会让模型跑去调工具）
-        body.put("session_id", "vision-task-" + java.util.UUID.randomUUID());
-        if (chatFlags != null) {
+        if (hasImage && chatFlags != null) {
             chatFlags.put("enable_default_system_prompt", false);
         }
-        log.info("本次请求带图 {} 张，已切换到视觉配置: {}", imageUrls.size(), cfg);
+        log.info("本次请求：带图 {} 张，人层档案={}（用户选择={}）", imageUrls == null ? 0 : imageUrls.size(), cfg, personaCfg);
     }
 
     private String getCurrentUserAstrbotApiKey() {
@@ -538,8 +552,8 @@ public class AstrBotController {
             chatFlags.put("enable_streaming", false);
             chatFlags.put("enable_reasoning", false);
             body.put("flags", chatFlags);
-            // 带图 → 视觉配置文件（否则图片段被纯文本模型丢弃，只会答"内容未知"）
-            applyVisionConfig(body, chatFlags, rendered.getAllImageUrls());
+            // 人层：用户人格档案（带图则视觉版），没选人格时回退内置视觉档案
+            applyPersonaLayer(body, chatFlags, rendered.getAllImageUrls());
 
             // 模型选择：优先用户默认模型，允许请求体 model 字段覆盖
             String defaultModel = getCurrentUserLlmModel();
@@ -805,8 +819,8 @@ public class AstrBotController {
             chatFlags.put("enable_streaming", false);
             chatFlags.put("enable_reasoning", false);
             body.put("flags", chatFlags);
-            // 带图 → 视觉配置文件（同 /analyze 链路）
-            applyVisionConfig(body, chatFlags, rendered.getAllImageUrls());
+            // 人层：用户人格档案（同 /analyze 链路）
+            applyPersonaLayer(body, chatFlags, rendered.getAllImageUrls());
 
             String selectedModel = getCurrentUserLlmModel();
             if (selectedModel != null) {
@@ -989,11 +1003,57 @@ public class AstrBotController {
             ResponseEntity<String> response = restTemplate.getForEntity(url, String.class);
             result.put("status", "online");
             result.put("message", "AstrBot 运行中");
-            return ResponseEntity.ok(result);
         } catch (Exception e) {
             result.put("status", "offline");
             result.put("message", e.getMessage());
-            return ResponseEntity.ok(result);
+        }
+        // 「人层」状态：当前用户选的人格、副本与档案是否就绪、是否需要重启
+        try {
+            result.put("persona", astrBotPersonaService.selectionStatus(securityHelper.getCurrentUserId()));
+        } catch (Exception e) {
+            log.debug("读取人格状态失败: {}", e.getMessage());
+        }
+        return ResponseEntity.ok(result);
+    }
+
+    // ==================== 双层提示词：人层（AstrBot 人格）====================
+
+    /**
+     * 可选人格列表 + 当前用户的选择（供 AstrBot 模块的「人格」下拉框使用）。
+     *
+     * <p>列表直接读 AstrBot 的 personas 表（不需要 persona scope 的 API Key）；
+     * 写入时由 {@link com.qqai.service.AstrBotPersonaService} 生成「无工具副本 + 配置档案」。</p>
+     */
+    @GetMapping("/personas")
+    public ResponseEntity<?> listPersonas() {
+        try {
+            Map<String, Object> data = new HashMap<>();
+            data.put("personas", astrBotPersonaService.listPersonas());
+            data.put("selection", astrBotPersonaService.selectionStatus(securityHelper.getCurrentUserId()));
+            data.put("note", "人格由 AstrBot 提供（'人'），任务规则与输出格式由本后端提供（'岗位'）");
+            return ResponseEntity.ok(Map.of("status", "ok", "data", data));
+        } catch (com.qqai.exception.BizException e) {
+            return ResponseEntity.status(e.getCode())
+                    .body(Map.of("status", "error", "message", e.getMessage()));
+        }
+    }
+
+    /**
+     * 选择「人」：{@code {"personaId":"灰泽满"}}，传空字符串表示恢复默认（不指定人格）。
+     *
+     * <p>首次选中某个人格时需要给它生成无工具副本（AstrBot 的人格列表是启动时载入的），
+     * 因此这一次会自动重启 AstrBot 并等它就绪；之后切换是秒切。</p>
+     */
+    @PostMapping("/persona")
+    public ResponseEntity<?> selectPersona(@RequestBody Map<String, Object> request) {
+        Object raw = request.get("personaId");
+        String personaId = raw == null ? null : String.valueOf(raw);
+        try {
+            Map<String, Object> view = astrBotPersonaService.select(securityHelper.getCurrentUserId(), personaId);
+            return ResponseEntity.ok(Map.of("status", "ok", "data", view));
+        } catch (com.qqai.exception.BizException e) {
+            return ResponseEntity.status(e.getCode())
+                    .body(Map.of("status", "error", "message", e.getMessage()));
         }
     }
 
@@ -1254,9 +1314,15 @@ public class AstrBotController {
                 chatFlags.put("enable_default_system_prompt", false);
             }
             body.put("flags", chatFlags);
-            // 带图时指定「配置文件」：4.28 的 Agent 以 profile 里的主模型为准（body 的 model 不覆盖它），
-            // 主模型若是纯文本模型就会把图片降级成文本路径。指向视觉 profile 后图片才能被识别。
-            if (cfgName != null && !cfgName.isBlank()) {
+            // 人层（双层提示词）：用户选定的人格 → 对应配置档案，带图用视觉版。
+            // 优先级高于 sendMessageWithImage 传入的内置 vision 档案。
+            String personaCfg = astrBotPersonaService.resolveConfigName(userId, hasImage);
+            if (personaCfg != null && !personaCfg.isBlank()) {
+                body.put("config_name", personaCfg);
+                log.info("AI 对话使用人格档案: {}", personaCfg);
+            } else if (cfgName != null && !cfgName.isBlank()) {
+                // 带图时指定「配置文件」：4.28 的 Agent 以 profile 里的主模型为准（body 的 model 不覆盖它），
+                // 主模型若是纯文本模型就会把图片降级成文本路径。指向视觉 profile 后图片才能被识别。
                 body.put("config_name", cfgName);
                 log.info("使用 AstrBot 配置文件: {}", cfgName);
             }
@@ -1273,7 +1339,13 @@ public class AstrBotController {
                 log.info("使用模型: {} (fromRequest={})", activeModel, (model != null && !model.isBlank() && !"default".equalsIgnoreCase(model)));
             }
             if (groupId != null) {
-                body.put("session_id", groupId);
+                // 会话 id 带上人格标识：AstrBot 的会话记录里存了 persona 且优先级高于档案，
+                // 换人格后沿用旧 session 会让新人格不生效。上下文由我们自己的 context 字段提供，
+                // 不依赖 AstrBot 侧记忆，所以换 id 不会丢上下文。
+                String personaId = astrBotPersonaService.currentPersonaId(userId);
+                body.put("session_id", personaId == null
+                        ? groupId
+                        : groupId + "@" + com.qqai.service.AstrBotPersonaService.slug(personaId));
             }
             // 在上下文最前面追加系统提示（从 prompts.yml 渲染，按群类型定制）
             String groupType = resolveGroupType(groupId);
