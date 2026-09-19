@@ -1350,9 +1350,22 @@ public class AstrBotController {
             String activeModel = (model != null && !model.isBlank() && !"default".equalsIgnoreCase(model))
                     ? model
                     : getCurrentUserLlmModel();
+            boolean profileApplied = false;
+            // 是否已经用「配置档案（profile）」决定了模型：带图走视觉档案、选了人格走人格档案。
+            // 这种情况下模型的来源是档案本身，不能再叠加下方的一次性模型选择。
+            profileApplied = (personaCfg != null && !personaCfg.isBlank()) || (cfgName != null && !cfgName.isBlank());
             if (activeModel != null && !activeModel.isBlank()) {
-                body.put("model", activeModel);
-                log.info("使用模型: {} (fromRequest={})", activeModel, (model != null && !model.isBlank() && !"default".equalsIgnoreCase(model)));
+                body.put("model", activeModel);   // 4.26 及以前版本读这个字段
+                // AstrBot 4.28 的 /api/v1/chat 改为读 selected_provider / selected_model：
+                // 只传 model 会被静默忽略（模型选择器点了没反应）。这里两个字段名都带上，
+                // 并且只有在没有档案覆盖时才传，避免把「带图必走视觉档案」的既定行为顶掉。
+                if (!profileApplied) {
+                    fillSelectedModel(body, activeModel);
+                }
+                log.info("使用模型: {} (fromRequest={}, profileApplied={})",
+                        activeModel,
+                        (model != null && !model.isBlank() && !"default".equalsIgnoreCase(model)),
+                        profileApplied);
             }
             if (groupId != null) {
                 // 会话 id 带上人格标识：AstrBot 的会话记录里存了 persona 且优先级高于档案，
@@ -1829,12 +1842,20 @@ public class AstrBotController {
     }
 
     /**
-     * 获取 AstrBot 可用模型列表
-     * 优先读取本地 cmd_config.json 解析，失败时 fallback 到 AstrBot /api/v1/models 接口
+     * 获取 AstrBot 可用模型列表。
+     *
+     * <p>数据来源顺序（AstrBot 4.28 起 {@code /api/v1/models} 已被移除，404，所以不能再依赖它）：
+     * <ol>
+     *   <li>{@code <data-path>/cmd_config.json} 的 {@code provider[]}（4.28 仍是这个结构）</li>
+     *   <li>配置档案目录 {@code <data-path>/config/abconf_*.json}——4.28 里每个档案都是整份配置的快照，
+     *       同样带 {@code provider[]}；当主配置被拆到档案里时从这里兜底</li>
+     *   <li>最后才尝试旧的 HTTP 接口（4.26 及以前可用）</li>
+     * </ol>
      */
     @GetMapping("/models")
     public ResponseEntity<?> getModels() {
         ArrayNode modelsArray = objectMapper.createArrayNode();
+        String source = "";
 
         // ========== 策略1：优先从本地 cmd_config.json 读取 ==========
         if (astrBotDataPath != null && !astrBotDataPath.isBlank()) {
@@ -1842,57 +1863,39 @@ public class AstrBotController {
                 java.io.File configFile = new java.io.File(astrBotDataPath, "cmd_config.json");
                 if (configFile.exists() && configFile.canRead()) {
                     JsonNode root = objectMapper.readTree(configFile);
-                    JsonNode providers = root.has("provider") ? root.get("provider") : null;
-                    if (providers != null && providers.isArray()) {
-                        for (JsonNode p : providers) {
-                            ObjectNode modelInfo = objectMapper.createObjectNode();
-                            String id = p.has("id") ? p.get("id").asText() : "";
-                            String modelName = p.has("model") ? p.get("model").asText() : id;
-                            boolean enabled = p.has("enable") && p.get("enable").asBoolean();
-                            String providerSource = p.has("provider_source_id") ? p.get("provider_source_id").asText() : "";
+                    modelsArray = collectModelsFromConfig(root);
+                    if (modelsArray.size() > 0) {
+                        source = "cmd_config.json";
+                    }
+                }
+            } catch (Exception e) {
+                log.warn("从 cmd_config.json 读取模型失败: {}", e.getMessage());
+                modelsArray = objectMapper.createArrayNode();
+            }
+        }
 
-                            // 生成友好的显示名（去掉 provider 前缀）
-                            String label = modelName;
-                            if (modelName.contains("/")) {
-                                String[] parts = modelName.split("/");
-                                label = parts[parts.length - 1];
-                            }
-                            // 去掉 Pro/ 前缀（如果有）
-                            if (label.startsWith("Pro/")) {
-                                label = label.substring(4);
-                            }
-
-                            modelInfo.put("id", id.isEmpty() ? modelName : id);
-                            modelInfo.put("name", label);
-                            modelInfo.put("fullName", modelName);
-                            modelInfo.put("enabled", enabled);
-                            modelInfo.put("provider", providerSource);
-
-                            // 解析 modalities 作为标签
-                            if (p.has("modalities")) {
-                                JsonNode mods = p.get("modalities");
-                                ArrayNode tags = objectMapper.createArrayNode();
-                                if (mods.isArray()) {
-                                    for (JsonNode m : mods) {
-                                        tags.add(m.asText());
-                                    }
-                                }
-                                modelInfo.set("modalities", tags);
-                            }
-                            if (p.has("max_context_tokens")) {
-                                modelInfo.put("maxContextTokens", p.get("max_context_tokens").asLong(0));
-                            }
-                            modelsArray.add(modelInfo);
+        // ========== 策略2：主配置里没有 provider[] 时，从配置档案兜底 ==========
+        if (modelsArray.size() == 0 && astrBotDataPath != null && !astrBotDataPath.isBlank()) {
+            try {
+                java.io.File configDir = new java.io.File(astrBotDataPath, "config");
+                java.io.File[] profiles = configDir.listFiles(
+                        (dir, name) -> name.startsWith("abconf_") && name.endsWith(".json"));
+                if (profiles != null) {
+                    for (java.io.File profile : profiles) {
+                        ArrayNode fromProfile = collectModelsFromConfig(objectMapper.readTree(profile));
+                        if (fromProfile.size() > 0) {
+                            modelsArray = fromProfile;
+                            source = "config/" + profile.getName();
+                            break;
                         }
                     }
                 }
             } catch (Exception e) {
-                log.warn("从 cmd_config.json 读取模型失败，fallback 到 AstrBot API: {}", e.getMessage());
-                modelsArray = objectMapper.createArrayNode(); // 清空，走 fallback
+                log.warn("从配置档案读取模型失败: {}", e.getMessage());
             }
         }
 
-        // ========== 策略2：如果本地读取为空，fallback 到 AstrBot API ==========
+        // ========== 策略3：兜底走 AstrBot HTTP 接口（4.28+ 已移除该接口，会 404） ==========
         if (modelsArray.size() == 0) {
             try {
                 String userApiKey = getCurrentUserAstrbotApiKey();
@@ -1925,28 +1928,122 @@ public class AstrBotController {
                             modelsArray.add(modelInfo);
                         }
                     }
+                    source = "api";
                 }
             } catch (Exception e) {
-                log.error("AstrBot API 模型列表也获取失败: {}", e.getMessage());
+                // 4.28 起 /api/v1/models 不存在（404），这里只记 debug 级即可，真正的原因在下面的 message 里说明
+                log.warn("AstrBot HTTP 模型接口不可用（4.28+ 已移除 /api/v1/models）: {}", e.getMessage());
             }
         }
 
-        // ========== 响应：无论成功与否都返回当前结果，前端根据 count 判断是否有错误 ==========
         if (modelsArray.size() > 0) {
             return ResponseEntity.ok(Map.of(
                     "status", "ok",
                     "models", modelsArray,
                     "count", modelsArray.size(),
-                    "source", (astrBotDataPath != null && !astrBotDataPath.isBlank()) ? "cmd_config.json" : "api"
+                    "source", source
             ));
         }
 
         return ResponseEntity.ok(Map.of(
                 "status", "error",
-                "message", "未找到可用模型，请在 AstrBot 中配置后重试",
+                "message", "未读到任何模型：请确认 astrbot.data-path 指向 AstrBot 的 data 目录"
+                        + "（其中应有 cmd_config.json 或在 config/ 下有 abconf_*.json 档案），"
+                        + "并在 AstrBot 里配置模型。注意 AstrBot 4.28 起不再提供 /api/v1/models 接口。",
                 "models", modelsArray,
                 "count", 0
         ));
+    }
+
+    /**
+     * 从一份 AstrBot 配置（cmd_config.json 或 abconf_*.json 档案）里提取 provider[] 模型列表。
+     * 两份文件结构一致：{@code provider[]} 每项含 id / model / enable / provider_source_id / modalities。
+     *
+     * <p>包级可见是为了让单测直接喂 JSON（不需要启动 Spring）。</p>
+     */
+    ArrayNode collectModelsFromConfig(JsonNode root) {
+        ArrayNode modelsArray = objectMapper.createArrayNode();
+        if (root == null) return modelsArray;
+        JsonNode providers = root.has("provider") ? root.get("provider") : null;
+        if (providers == null || !providers.isArray()) return modelsArray;
+
+        for (JsonNode p : providers) {
+            ObjectNode modelInfo = objectMapper.createObjectNode();
+            String id = p.has("id") ? p.get("id").asText() : "";
+            String modelName = p.has("model") ? p.get("model").asText() : id;
+            boolean enabled = p.has("enable") && p.get("enable").asBoolean();
+            String providerSource = p.has("provider_source_id") ? p.get("provider_source_id").asText() : "";
+
+            // 生成友好的显示名（去掉 provider 前缀）
+            String label = modelName;
+            if (modelName.contains("/")) {
+                String[] parts = modelName.split("/");
+                label = parts[parts.length - 1];
+            }
+            // 去掉 Pro/ 前缀（如果有）
+            if (label.startsWith("Pro/")) {
+                label = label.substring(4);
+            }
+
+            modelInfo.put("id", id.isEmpty() ? modelName : id);
+            modelInfo.put("name", label);
+            modelInfo.put("fullName", modelName);
+            modelInfo.put("enabled", enabled);
+            modelInfo.put("provider", providerSource);
+
+            // 解析 modalities 作为标签
+            if (p.has("modalities")) {
+                JsonNode mods = p.get("modalities");
+                ArrayNode tags = objectMapper.createArrayNode();
+                if (mods.isArray()) {
+                    for (JsonNode m : mods) {
+                        tags.add(m.asText());
+                    }
+                }
+                modelInfo.set("modalities", tags);
+            }
+            if (p.has("max_context_tokens")) {
+                modelInfo.put("maxContextTokens", p.get("max_context_tokens").asLong(0));
+            }
+            modelsArray.add(modelInfo);
+        }
+        return modelsArray;
+    }
+
+    /**
+     * 把「模型 id」翻译成 AstrBot 4.28 的 {@code selected_provider} + {@code selected_model}。
+     *
+     * <p>4.28 的对话接口先按 {@code selected_provider} 从 provider 实例表里取提供商
+     * （取不到会直接报「未找到指定的提供商」），再用 {@code selected_model} 覆盖请求里的模型名。
+     * 我们模型列表里的 id 就是 provider 实例 id（形如 {@code siliconflow/Pro/deepseek-ai/DeepSeek-V3.2}），
+     * model 名则是去掉 provider 前缀剩下的部分。</p>
+     *
+     * <p>只在该 id 确实存在于 AstrBot 配置里时才写这两个字段：模型被删掉/改名后，
+     * 传一个不存在的 provider 会让 AstrBot 直接失败，不如退回它自己的默认模型。</p>
+     *
+     * @param body      待发送的请求体
+     * @param activeModel 前端选择的模型（provider 前缀 + 模型名）
+     */
+    void fillSelectedModel(Map<String, Object> body, String activeModel) {
+        if (activeModel == null || activeModel.isBlank()) return;
+        if (astrBotDataPath == null || astrBotDataPath.isBlank()) return;
+        try {
+            java.io.File configFile = new java.io.File(astrBotDataPath, "cmd_config.json");
+            if (!configFile.exists() || !configFile.canRead()) return;
+            ArrayNode models = collectModelsFromConfig(objectMapper.readTree(configFile));
+            for (JsonNode m : models) {
+                if (m.has("id") && activeModel.equals(m.get("id").asText())) {
+                    body.put("selected_provider", activeModel);
+                    if (m.has("fullName") && !m.get("fullName").asText().isBlank()) {
+                        body.put("selected_model", m.get("fullName").asText());
+                    }
+                    return;
+                }
+            }
+            log.info("模型 {} 不在 AstrBot 配置里，跳过 selected_provider（交给 AstrBot 默认模型）", activeModel);
+        } catch (Exception e) {
+            log.warn("解析 selected_provider 失败，回退到 AstrBot 默认模型: {}", e.getMessage());
+        }
     }
 
     /**

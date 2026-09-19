@@ -437,14 +437,22 @@
                     <h4 class="section-title">已配置的模型</h4>
                     <div class="section-actions">
                       <input v-model="modelSearch" type="text" class="search-input" placeholder="搜索模型或ID">
+                      <button class="btn-get-models" :disabled="modelLoading" @click="refreshAvailableModels">
+                        <Icon name="refresh" :size="14" /> {{ modelLoading ? '读取中...' : '从 AstrBot 刷新' }}
+                      </button>
                       <button class="btn-get-models" @click="fetchModels">
-                        <Icon name="download" :size="14" /> 获取模型列表
+                        <Icon name="download" :size="14" /> 从提供商拉取
                       </button>
                       <button class="btn-custom-model" @click="showCustomModel = !showCustomModel">
                         <Icon name="plus" :size="14" /> 自定义模型
                       </button>
                     </div>
                   </div>
+
+                  <p class="model-source-note">
+                    {{ modelSourceLabel }}
+                    <span class="model-source-hint">· 列表来自 AstrBot 自身配置（模型的开关请在 AstrBot WebUI 调整）</span>
+                  </p>
 
                   <div v-if="showCustomModel" class="custom-model-form">
                     <input v-model="newModelName" type="text" class="form-input" placeholder="输入模型名称，如 gpt-4o" @keyup.enter="addModel">
@@ -457,30 +465,35 @@
                       v-for="(model, idx) in filteredModels" 
                       :key="idx" 
                       class="model-config-item"
+                      :class="{ 'is-current': model.current }"
                     >
                       <div class="model-info">
-                        <span class="model-name" :title="model.name">{{ model.name }}</span>
-                        <span class="model-id">{{ model.id || model.name }}</span>
+                        <span class="model-name" :title="model.fullName">
+                          {{ model.name }}
+                          <span v-if="model.current" class="model-current-tag">当前</span>
+                          <span v-if="model.modalities.includes('image')" class="model-vision-tag">视觉</span>
+                        </span>
+                        <span class="model-id">{{ model.provider ? model.provider + ' · ' : '' }}{{ model.fullName }}</span>
                       </div>
                       <div class="model-actions">
-                        <label class="model-switch">
-                          <input type="checkbox" v-model="model.enabled" class="switch-input">
-                          <span class="switch-track"></span>
-                        </label>
-                        <button class="model-action-btn" @click="copyModelName(model.name)" title="复制">
+                        <button class="model-action-btn" @click="copyModelName(model.id)" title="复制模型 ID（provider 前缀 + 模型名）">
                           <Icon name="copy" :size="12" />
                         </button>
-                        <button class="model-action-btn" @click="setAsCurrentModel(model.name)" title="设为当前模型">
+                        <button
+                          class="model-action-btn"
+                          :title="model.current ? '已在使用' : '设为当前模型'"
+                          :disabled="model.current"
+                          @click="setAsCurrentModel(model.id)"
+                        >
                           <Icon name="check-circle" :size="12" />
-                        </button>
-                        <button class="model-action-btn delete-btn" @click="removeModel(model.name)" title="删除">
-                          <Icon name="trash" :size="12" />
                         </button>
                       </div>
                     </div>
                     <div v-if="filteredModels.length === 0" class="empty-models">
                       <Icon name="inbox" :size="32" />
-                      <p>暂无模型，请添加或获取模型列表</p>
+                      <p v-if="modelError">{{ modelError }}</p>
+                      <p v-else-if="modelSearch">没有匹配「{{ modelSearch }}」的模型</p>
+                      <p v-else>暂无模型，请先在 AstrBot 中配置并启用模型，然后点「从 AstrBot 刷新」</p>
                     </div>
                   </div>
                 </div>
@@ -883,9 +896,11 @@ export default {
 
     // 聊天界面模型选择器（本次会话覆盖用）
     const currentModel = ref('');
-    const availableModels = ref([]); // 数组元素: { id: '完整ID', label: '短名显示' }
+    const availableModels = ref([]); // 数组元素: { id: '完整ID', label: '短名显示', fullName, provider, enabled }
     const modelLoading = ref(false);
     const modelError = ref(''); // 加载错误信息
+    /** 模型列表来源（cmd_config.json / config/abconf_*.json / api），用于面板说明 */
+    const modelSource = ref('');
 
     // 根据当前选中的 model id 找到显示用的短名
     const currentModelLabel = computed(() => {
@@ -1016,15 +1031,38 @@ export default {
       return providers.value[currentProviderIndex.value] || null;
     });
 
-    // 过滤后的模型列表
+    /**
+     * 过滤后的模型列表 —— 数据来自 AstrBot 自身配置（availableModels），而不是用户手输的清单。
+     *
+     * 改造前这里渲染的是 llmModels：它只在点击「获取模型列表」、且**必须在本对话框里填过
+     * 提供商 API Key** 时才会被填充。于是 AstrBot 明明配了 27 个模型，面板却显示
+     * 「暂无模型，请添加或获取模型列表」——AstrBot 4.28 升级后尤其容易被误判成"模型全丢了"。
+     */
     const filteredModels = computed(() => {
-      if (!modelSearch.value) {
-        return llmModels.value.map(name => ({ name, id: name, enabled: llmModel.value === name }));
-      }
-      const search = modelSearch.value.toLowerCase();
-      return llmModels.value
-        .filter(name => name.toLowerCase().includes(search))
-        .map(name => ({ name, id: name, enabled: llmModel.value === name }));
+      const keyword = modelSearch.value.trim().toLowerCase();
+      const list = availableModels.value.map(m => ({
+        id: m.id,
+        name: m.label || m.id,
+        fullName: m.fullName || m.id,
+        provider: m.provider || '',
+        modalities: m.modalities || [],
+        astrbotEnabled: m.enabled !== false,
+        // 「当前」标记：聊天选择器里正在用的模型
+        current: currentModel.value === m.id,
+      }));
+      if (!keyword) return list;
+      return list.filter(m =>
+        (m.name || '').toLowerCase().includes(keyword)
+        || (m.id || '').toLowerCase().includes(keyword)
+        || (m.provider || '').toLowerCase().includes(keyword));
+    });
+
+    /** 面板头部说明：数据来源与启用数量，避免"看不到模型"时无从判断 */
+    const modelSourceLabel = computed(() => {
+      if (modelLoading.value) return '读取中...';
+      if (availableModels.value.length === 0) return 'AstrBot 未返回模型';
+      const enabled = availableModels.value.filter(m => m.enabled !== false).length;
+      return `${modelSource.value || 'AstrBot 配置'}：${availableModels.value.length} 个模型（已启用 ${enabled} 个）`;
     });
 
     // 添加提供商
@@ -1081,6 +1119,7 @@ export default {
             throw new Error(msg);
           }
           const models = res && Array.isArray(res.models) ? res.models : [];
+          modelSource.value = res && res.source ? res.source : '';
 
           // 只取 enabled=true 的模型，和 AstrBot WebUI 表现一致
           const enabledModels = models.filter(m => m.enabled !== false);
@@ -1095,7 +1134,8 @@ export default {
               fullName: m.fullName || m.id,
               modalities: m.modalities || [],
               maxContextTokens: m.maxContextTokens || 0,
-              provider: m.provider || ''
+              provider: m.provider || '',
+              enabled: m.enabled !== false
             };
           }).filter(Boolean);
 
@@ -1238,10 +1278,20 @@ export default {
       }
     };
 
-    // 设置为当前模型
-    const setAsCurrentModel = (name) => {
-      llmModel.value = name;
-      showToast(`已设为当前模型: ${name}`, 'success');
+    /**
+     * 设为当前模型：同时更新「本次会话的选择」与「默认模型」，
+     * 否则点了按钮聊天选择器不会跟着变（面板显示的和实际用的会不一致）。
+     */
+    const setAsCurrentModel = (modelId) => {
+      if (!modelId) return;
+      llmModel.value = modelId;
+      currentModel.value = modelId;
+      localStorage.setItem('astrbot_current_model', modelId);
+      if (currentConversationId.value) {
+        localStorage.setItem(`astrbot_current_model_${currentConversationId.value}`, modelId);
+      }
+      const found = availableModels.value.find(m => m.id === modelId);
+      showToast(`已设为当前模型: ${found ? found.label : modelId}`, 'success');
     };
 
     // 加载设置 - 只从后端获取（掩码值填入输入框，提交时原样返回后端判断是否更新）
@@ -1303,27 +1353,35 @@ export default {
       showSettings.value = false;
     };
 
-    // 添加模型
+    /**
+     * 自定义模型：AstrBot 配置里没有、但想临时指定的模型名。
+     * 只加进当前会话的可用列表并设为当前模型，不写回 AstrBot 配置。
+     */
     const addModel = () => {
       const name = newModelName.value.trim();
       if (!name) return;
-      if (llmModels.value.includes(name)) {
-        showToast('该模型已存在', 'error');
+      if (availableModels.value.some(m => m.id === name || m.fullName === name)) {
+        showToast('该模型已在列表中', 'error');
         return;
       }
-      llmModels.value.push(name);
+      availableModels.value.push({ id: name, label: name, fullName: name, provider: '自定义', enabled: true });
+      setAsCurrentModel(name);
       newModelName.value = '';
       showCustomModel.value = false;
+      showToast(`已添加并切换为 ${name}（仅本次会话可用，未写入 AstrBot 配置）`, 'success');
     };
 
     // 删除模型
+    /**
+     * 从列表里移除：只可能是「自定义模型」加进来的临时项
+     * （AstrBot 配置里的模型只能去 AstrBot WebUI 增删）。
+     * 目前面板已不再提供删除按钮，这里保留给自定义项使用。
+     */
     const removeModel = (model) => {
-      const index = llmModels.value.indexOf(model);
-      if (index > -1) {
-        llmModels.value.splice(index, 1);
-        if (llmModel.value === model) {
-          llmModel.value = llmModels.value[0] || '';
-        }
+      availableModels.value = availableModels.value.filter(
+        m => m.id !== model && m.fullName !== model);
+      if (currentModel.value === model) {
+        currentModel.value = availableModels.value[0]?.id || '';
       }
     };
     
@@ -2202,6 +2260,7 @@ export default {
       newProviderName,
       currentProvider,
       filteredModels,
+      modelSourceLabel,
       showInsufficientCredits,
       insufficientNeed,
       insufficientBalance,
@@ -3191,6 +3250,43 @@ export default {
 
 .model-config-item:hover {
   background: var(--bg-tertiary, #f8f9fa);
+}
+
+/* 当前正在使用的模型：左侧色条 + 淡底色，避免在一长串模型里找不到 */
+.model-config-item.is-current {
+  border-color: var(--accent-color, #3498db);
+  background: rgba(52, 152, 219, 0.08);
+}
+
+.model-current-tag,
+.model-vision-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 500;
+  vertical-align: middle;
+}
+
+.model-current-tag {
+  background: var(--accent-color, #3498db);
+  color: #fff;
+}
+
+.model-vision-tag {
+  background: rgba(155, 89, 182, 0.16);
+  color: #8e44ad;
+}
+
+.model-source-note {
+  margin: 0 0 10px 0;
+  font-size: 12px;
+  color: var(--text-secondary, #666);
+}
+
+.model-source-hint {
+  color: var(--text-muted, #999);
 }
 
 .model-info {
