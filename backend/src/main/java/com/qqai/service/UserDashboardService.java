@@ -8,6 +8,8 @@ import com.qqai.repository.AstrBotMessageRepository;
 import com.qqai.repository.FileRecordRepository;
 import com.qqai.repository.GroupRepository;
 import com.qqai.repository.MessageRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -18,6 +20,8 @@ import java.util.*;
 
 @Service
 public class UserDashboardService {
+
+    private static final Logger log = LoggerFactory.getLogger(UserDashboardService.class);
 
     @Autowired
     private SecurityHelper securityHelper;
@@ -318,19 +322,23 @@ public class UserDashboardService {
                                 conversationIds, start, end);
                         if (rows != null) {
                             for (Object[] row : rows) {
-                                String dayKey = row[0] != null ? row[0].toString() : "";
+                                // 聚合查询的日期列类型随数据库/方言变化，统一归一化成 MM-dd
+                                String dayKey = com.qqai.util.DateKeys.toMonthDay(row[0]);
                                 long count = row[1] != null ? ((Number) row[1]).longValue() : 0L;
-                                if (!dayKey.isEmpty()) {
+                                if (dayKey != null) {
                                     dayMap.put(dayKey, count);
                                 }
                             }
                         }
                     } catch (Exception e) {
+                        // 以前这里静默清空 → 图表变成全 0 也无人发现，至少留一条日志
+                        log.warn("用户 AI 对话趋势统计失败，将返回全 0 序列: {}", e.toString());
                         dayMap.clear();
                     }
                 }
             }
         } catch (Exception e) {
+            log.warn("用户 AI 对话趋势统计失败，将返回全 0 序列: {}", e.toString());
             dayMap.clear();
         }
 

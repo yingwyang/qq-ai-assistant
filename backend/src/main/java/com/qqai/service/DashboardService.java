@@ -6,6 +6,8 @@ import com.qqai.repository.FileRecordRepository;
 import com.qqai.repository.GroupRepository;
 import com.qqai.repository.MessageRepository;
 import com.qqai.repository.UserRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -17,6 +19,8 @@ import java.util.*;
 
 @Service
 public class DashboardService {
+
+    private static final Logger log = LoggerFactory.getLogger(DashboardService.class);
 
     @Autowired
     private MessageRepository messageRepository;
@@ -388,12 +392,19 @@ public class DashboardService {
         try {
             List<Object[]> rows = astrBotMessageRepository.countDailyBetween(start, end);
             for (Object[] row : rows) {
-                java.sql.Date day = (java.sql.Date) row[0];
+                // 这里是原生 DATE_FORMAT 查询，返回的是字符串而不是 Date；
+                // 用 DateKeys 归一化，避免硬转型 ClassCastException 把整段时间线清零。
+                String key = com.qqai.util.DateKeys.toIsoDate(row[0]);
+                if (key == null) {
+                    log.warn("AI 趋势：无法识别的日期值 {}，已跳过该行", row[0]);
+                    continue;
+                }
                 long count = row[1] != null ? ((Number) row[1]).longValue() : 0L;
-                dayMap.put(day.toString(), count);
+                dayMap.put(key, count);
             }
         } catch (Exception e) {
-            // ignore
+            // 以前这里是空 catch，图表静默变成全 0；至少留下日志，别再让问题无声无息
+            log.warn("AI 对话趋势统计失败，将返回全 0 序列: {}", e.toString());
         }
 
         DateTimeFormatter fmt = DateTimeFormatter.ofPattern("MM-dd");

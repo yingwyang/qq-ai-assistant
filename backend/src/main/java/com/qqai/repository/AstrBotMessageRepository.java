@@ -83,11 +83,16 @@ public interface AstrBotMessageRepository extends JpaRepository<AstrBotMessage, 
     long countByTimeCreatedBetween(@Param("start") LocalDateTime start, @Param("end") LocalDateTime end);
 
     /**
-     * 按天统计指定时间范围内的消息数量（用于 AI 对话趋势）
+     * 按天统计指定时间范围内的消息数量（用于 AI 对话趋势）。
+     *
+     * <p>这里用标准的 {@code CAST(... AS DATE)} 而不是 MySQL 专有的
+     * {@code DATE_FORMAT(col, '%Y-%m-%d')}：后者在新版 MySQL 里返回字符串，
+     * 早先调用方把它硬转成 java.sql.Date 就抛 ClassCastException，
+     * 导致趋势图 7 天全是 0；而且 H2 里没有 DATE_FORMAT，测试根本跑不了这条查询。</p>
      */
-    @Query(value = "SELECT DATE_FORMAT(time_created, '%Y-%m-%d') AS day, COUNT(*) AS cnt FROM astrbot_messages " +
+    @Query(value = "SELECT CAST(time_created AS DATE) AS tx_day, COUNT(*) AS cnt FROM astrbot_messages " +
             "WHERE time_created >= :start AND time_created < :end " +
-            "GROUP BY DATE_FORMAT(time_created, '%Y-%m-%d') ORDER BY day", nativeQuery = true)
+            "GROUP BY CAST(time_created AS DATE) ORDER BY CAST(time_created AS DATE)", nativeQuery = true)
     List<Object[]> countDailyBetween(@Param("start") LocalDateTime start, @Param("end") LocalDateTime end);
 
     /**
@@ -115,13 +120,16 @@ public interface AstrBotMessageRepository extends JpaRepository<AstrBotMessage, 
     long countByConversationIdIn(List<String> conversationIds);
 
     /**
-     * 按天统计多个会话在指定时间范围内的每日消息数量（用于用户级 AI 对话趋势）
-     * 返回 [date(MM-dd), count] 对
+     * 按天统计多个会话在指定时间范围内的每日消息数量（用于用户级 AI 对话趋势）。
+     * 返回 [日期, count] 对，日期由调用方用 {@code DateKeys.toMonthDay} 归一化成 MM-dd。
+     *
+     * <p>与管理员端同样改用标准 {@code CAST(... AS DATE)}：不依赖 MySQL 专有函数，
+     * 返回类型由 DateKeys 容忍，避免硬转型异常又把图表静默清零。</p>
      */
-    @Query(value = "SELECT DATE_FORMAT(time_created, '%m-%d') AS date, COUNT(*) AS cnt FROM astrbot_messages " +
+    @Query(value = "SELECT CAST(time_created AS DATE) AS tx_day, COUNT(*) AS cnt FROM astrbot_messages " +
             "WHERE conversation_id IN :conversationIds " +
             "AND time_created >= :start AND time_created < :end " +
-            "GROUP BY DATE_FORMAT(time_created, '%m-%d') ORDER BY DATE_FORMAT(time_created, '%m-%d')", nativeQuery = true)
+            "GROUP BY CAST(time_created AS DATE) ORDER BY CAST(time_created AS DATE)", nativeQuery = true)
     List<Object[]> countDailyByConversationIdInAndTimeCreatedBetween(
             @Param("conversationIds") List<String> conversationIds,
             @Param("start") LocalDateTime start,

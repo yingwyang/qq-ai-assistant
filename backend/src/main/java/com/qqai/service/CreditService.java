@@ -1108,8 +1108,12 @@ public class CreditService {
         List<Object[]> rows = creditTransactionRepository.sumEarnedSpentGroupByDate(userId, startDt, endDt);
         Map<LocalDate, Object[]> rowMap = new HashMap<>();
         for (Object[] row : rows) {
-            java.sql.Date d = (java.sql.Date) row[0];
-            rowMap.put(d.toLocalDate(), row);
+            // 聚合查询的日期列类型随数据库/方言变化（Date / LocalDate / String），统一归一化
+            String key = com.qqai.util.DateKeys.toIsoDate(row[0]);
+            if (key == null) {
+                continue;
+            }
+            rowMap.put(LocalDate.parse(key), row);
         }
 
         List<Map<String, Object>> series = new ArrayList<>();
