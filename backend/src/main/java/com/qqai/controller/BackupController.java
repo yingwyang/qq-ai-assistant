@@ -1,5 +1,6 @@
 package com.qqai.controller;
 
+import com.qqai.common.SecurityHelper;
 import com.qqai.service.BackupService;
 import com.qqai.service.MessageArchiveService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -25,6 +26,12 @@ public class BackupController {
 
     @Autowired
     private MessageArchiveService messageArchiveService;
+
+    @Autowired
+    private com.qqai.service.AuditLogService auditLogService;
+
+    @Autowired
+    private SecurityHelper securityHelper;
 
     @PostMapping("/backup")
     public ResponseEntity<?> triggerBackup() {
@@ -66,6 +73,37 @@ public class BackupController {
                     .body(resource);
         } catch (Exception e) {
             return ResponseEntity.internalServerError().build();
+        }
+    }
+
+    /**
+     * 删除一个备份文件。文件名沿用下载接口的白名单校验（拒绝 .. 与路径分隔符）。
+     */
+    @DeleteMapping("/backup/{fileName}")
+    public ResponseEntity<?> deleteBackup(@PathVariable String fileName) {
+        try {
+            String deleted = backupService.deleteBackup(fileName);
+            auditLogService.log(securityHelper.getCurrentUsername(), "BACKUP_DELETE",
+                    deleted, "SUCCESS", "删除备份文件");
+            return ResponseEntity.ok(Map.of("message", "备份已删除", "fileName", deleted));
+        } catch (java.io.FileNotFoundException e) {
+            return ResponseEntity.status(404).body(Map.of("error", e.getMessage()));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().body(Map.of("error", "删除备份失败: " + e.getMessage()));
+        }
+    }
+
+    /**
+     * 归档预检：只统计影响面，不执行归档。
+     */
+    @GetMapping("/archive/preview")
+    public ResponseEntity<?> previewArchive(@RequestParam(defaultValue = "90") int days) {
+        try {
+            return ResponseEntity.ok(messageArchiveService.previewArchive(days));
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().body(Map.of("error", "归档预检失败: " + e.getMessage()));
         }
     }
 

@@ -29,26 +29,36 @@ public class ConfigService {
 
     private static final List<ConfigGroupDef> GROUP_DEFS = List.of(
             new ConfigGroupDef("AstrBot", List.of(
-                    new ConfigItemDef("astrbot.api-url", "API 地址", false, false),
-                    new ConfigItemDef("astrbot.token", "Token", true, true)
+                    new ConfigItemDef("astrbot.api-url", "API 地址", false, false,
+                            "AstrBot 的 HTTP 接口地址，形如 http://127.0.0.1:6185"),
+                    new ConfigItemDef("astrbot.token", "Token", true, true,
+                            "AstrBot 控制台 → 配置 → API Key")
             )),
             new ConfigGroupDef("NapCat", List.of(
-                    new ConfigItemDef("napcat.api-url", "API 地址", false, false),
-                    new ConfigItemDef("napcat.token", "Token", true, true),
-                    new ConfigItemDef("napcat.webhook-token", "Webhook Token", true, true)
+                    new ConfigItemDef("napcat.api-url", "API 地址", false, false,
+                            "NapCat 的 HTTP 接口地址，形如 http://127.0.0.1:3000"),
+                    new ConfigItemDef("napcat.token", "Token", true, true,
+                            "与 NapCat WebUI 中配置的 token 保持一致"),
+                    new ConfigItemDef("napcat.webhook-token", "Webhook Token", true, true,
+                            "NapCat 上报事件时携带的校验 token")
             )),
             new ConfigGroupDef("GPT-SoVITS", List.of(
-                    new ConfigItemDef("gpt-sovits.api-url", "API 地址", false, false),
-                    new ConfigItemDef("gpt-sovits.token", "Token", true, true)
+                    new ConfigItemDef("gpt-sovits.api-url", "API 地址", false, false,
+                            "GPT-SoVITS 推理服务地址，形如 http://127.0.0.1:9880"),
+                    new ConfigItemDef("gpt-sovits.token", "Token", true, true,
+                            "留空表示不校验")
             )),
             new ConfigGroupDef("MinIO", List.of(
-                    new ConfigItemDef("minio.endpoint", "Endpoint", false, false),
-                    new ConfigItemDef("minio.access-key", "Access Key", true, true),
-                    new ConfigItemDef("minio.secret-key", "Secret Key", true, true)
+                    new ConfigItemDef("minio.endpoint", "Endpoint", false, false,
+                            "对象存储地址，形如 http://127.0.0.1:9000；未部署 MinIO 时媒体文件会落到本地磁盘"),
+                    new ConfigItemDef("minio.access-key", "Access Key", true, true, "MinIO 访问密钥 ID"),
+                    new ConfigItemDef("minio.secret-key", "Secret Key", true, true, "MinIO 访问密钥")
             )),
             new ConfigGroupDef("JWT", List.of(
-                    new ConfigItemDef("jwt.secret", "Secret", true, true),
-                    new ConfigItemDef("jwt.expiration", "过期时间(ms)", false, true)
+                    new ConfigItemDef("jwt.secret", "Secret", true, true,
+                            "签发登录 token 的密钥，修改后所有已登录用户都需要重新登录"),
+                    new ConfigItemDef("jwt.expiration", "过期时间(ms)", false, true,
+                            "正整数，如 86400000 表示 24 小时")
             ))
     );
 
@@ -59,7 +69,8 @@ public class ConfigService {
             for (ConfigItemDef itemDef : def.items) {
                 String value = env.getProperty(itemDef.key, "");
                 String displayValue = itemDef.secret ? MASK : value;
-                items.add(new ConfigItem(itemDef.key, itemDef.label, displayValue, itemDef.secret, itemDef.restartRequired));
+                items.add(new ConfigItem(itemDef.key, itemDef.label, displayValue, itemDef.secret,
+                        itemDef.restartRequired, itemDef.description));
             }
             groups.add(new ConfigGroup(def.name, items));
         }
@@ -170,13 +181,17 @@ public class ConfigService {
         public String value;
         public boolean secret;
         public boolean restartRequired;
+        /** 字段说明（给管理员看的取值提示，可为空） */
+        public String description;
 
-        public ConfigItem(String key, String label, String value, boolean secret, boolean restartRequired) {
+        public ConfigItem(String key, String label, String value, boolean secret, boolean restartRequired,
+                          String description) {
             this.key = key;
             this.label = label;
             this.value = value;
             this.secret = secret;
             this.restartRequired = restartRequired;
+            this.description = description;
         }
     }
 
@@ -195,12 +210,18 @@ public class ConfigService {
         final String label;
         final boolean secret;
         final boolean restartRequired;
+        final String description;
 
         ConfigItemDef(String key, String label, boolean secret, boolean restartRequired) {
+            this(key, label, secret, restartRequired, null);
+        }
+
+        ConfigItemDef(String key, String label, boolean secret, boolean restartRequired, String description) {
             this.key = key;
             this.label = label;
             this.secret = secret;
             this.restartRequired = restartRequired;
+            this.description = description;
         }
     }
 }

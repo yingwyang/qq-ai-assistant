@@ -8,10 +8,61 @@ export function useMediaManager({ showSystemMsg, loadDiskUsage } = {}) {
   const mediaFilesLoading = ref(false);
   const mediaFilesError = ref('');
   const mediaFileFilter = ref('ALL');
+  const mediaKeyword = ref('');
+  const mediaFrom = ref('');
+  const mediaTo = ref('');
+  const mediaSortField = ref('time');
+  const mediaSortDir = ref('desc');
   const mediaFilePage = ref(0);
   const mediaFileSize = ref(20);
   const mediaFilesTotal = ref(0);
   const selectedMediaFileIds = ref(new Set());
+
+  const mediaSortOptions = [
+    { value: 'time,desc', label: '时间（新→旧）' },
+    { value: 'time,asc', label: '时间（旧→新）' },
+    { value: 'size,desc', label: '体积（大→小）' },
+    { value: 'size,asc', label: '体积（小→大）' },
+    { value: 'name,asc', label: '文件名（A→Z）' },
+  ];
+
+  const mediaSort = computed(() => `${mediaSortField.value},${mediaSortDir.value}`);
+  const setMediaSort = (value) => {
+    const [field, dir] = String(value || 'time,desc').split(',');
+    mediaSortField.value = field || 'time';
+    mediaSortDir.value = dir || 'desc';
+    mediaFilePage.value = 0;
+    loadMediaFiles();
+  };
+
+  /** 当前筛选条件（供列表、预览、全量加载共用） */
+  const mediaQuery = computed(() => ({
+    type: mediaFileFilter.value,
+    kw: mediaKeyword.value.trim() || undefined,
+    from: mediaFrom.value || undefined,
+    to: mediaTo.value || undefined,
+    sort: mediaSort.value,
+  }));
+
+  // 各类型媒体文件的数量与占用（清理预览用）
+  const mediaSummary = ref(null);
+  const mediaSummaryLoading = ref(false);
+  const loadMediaSummary = async () => {
+    mediaSummaryLoading.value = true;
+    try {
+      const res = await messageApi.getMediaSummary();
+      mediaSummary.value = (res && res.byType) || null;
+    } catch (error) {
+      logger.warn('统计媒体文件失败:', error);
+      mediaSummary.value = null;
+    } finally {
+      mediaSummaryLoading.value = false;
+    }
+  };
+  const summaryOf = (type) => {
+    const bucket = mediaSummary.value && mediaSummary.value[type];
+    return bucket || { count: 0, bytes: 0 };
+  };
 
   // 跨页文件缓存：用于预览已选中但不在当前页的文件
   const mediaFileCache = ref(new Map());
@@ -59,7 +110,11 @@ export function useMediaManager({ showSystemMsg, loadDiskUsage } = {}) {
     mediaFilesLoading.value = true;
     mediaFilesError.value = '';
     try {
-      const res = await messageApi.getMediaFiles(mediaFileFilter.value, mediaFilePage.value, mediaFileSize.value);
+      const res = await messageApi.getMediaFiles({
+        ...mediaQuery.value,
+        page: mediaFilePage.value,
+        size: mediaFileSize.value,
+      });
       if (res) {
         const content = res.content || [];
         mediaFiles.value = content;
@@ -89,7 +144,48 @@ export function useMediaManager({ showSystemMsg, loadDiskUsage } = {}) {
     selectedMediaFileIds.value = new Set();
     mediaFileCache.value = new Map();
     loadMediaFiles();
+    loadMediaSummary();
   };
+
+  const setMediaKeyword = (value) => {
+    mediaKeyword.value = value || '';
+    mediaFilePage.value = 0;
+    loadMediaFiles();
+  };
+
+  const setMediaRange = ({ from, to }) => {
+    if (from !== undefined) mediaFrom.value = from;
+    if (to !== undefined) mediaTo.value = to;
+    mediaFilePage.value = 0;
+    loadMediaFiles();
+  };
+
+  const setMediaPageSize = (size) => {
+    mediaFileSize.value = Number(size) || 20;
+    mediaFilePage.value = 0;
+    loadMediaFiles();
+  };
+
+  const resetMediaFilters = () => {
+    mediaFileFilter.value = 'ALL';
+    mediaKeyword.value = '';
+    mediaFrom.value = '';
+    mediaTo.value = '';
+    mediaSortField.value = 'time';
+    mediaSortDir.value = 'desc';
+    mediaFilePage.value = 0;
+    loadMediaFiles();
+  };
+
+  const goToMediaPage = (page) => {
+    const totalPages = Math.max(1, Math.ceil(mediaFilesTotal.value / mediaFileSize.value));
+    if (page < 0 || page >= totalPages) return;
+    mediaFilePage.value = page;
+    loadMediaFiles();
+  };
+
+  const mediaFilterActive = computed(() =>
+    mediaFileFilter.value !== 'ALL' || !!mediaKeyword.value.trim() || !!mediaFrom.value || !!mediaTo.value);
 
   const toggleMediaFileSelection = (id) => {
     const set = new Set(selectedMediaFileIds.value);
@@ -144,7 +240,7 @@ export function useMediaManager({ showSystemMsg, loadDiskUsage } = {}) {
       const allFiles = [];
       const newCache = new Map(mediaFileCache.value);
       do {
-        const res = await messageApi.getMediaFiles(mediaFileFilter.value, page, size);
+        const res = await messageApi.getMediaFiles({ ...mediaQuery.value, page, size });
         if (!res) break;
         const content = res.content || [];
         total = res.totalElements || 0;
@@ -227,7 +323,7 @@ export function useMediaManager({ showSystemMsg, loadDiskUsage } = {}) {
   const loadPreviewPage = async (page) => {
     previewLoadingPage.value = true;
     try {
-      const res = await messageApi.getMediaFiles(mediaFileFilter.value, page, previewPageSize.value);
+      const res = await messageApi.getMediaFiles({ ...mediaQuery.value, page, size: previewPageSize.value });
       if (res) {
         const content = res.content || [];
         previewFiles.value = content;
@@ -335,12 +431,15 @@ export function useMediaManager({ showSystemMsg, loadDiskUsage } = {}) {
   return {
     mediaFiles, mediaFilesLoading, mediaFilesError,
     mediaFileFilter, mediaFilePage, mediaFileSize, mediaFilesTotal,
+    mediaKeyword, mediaFrom, mediaTo, mediaSort, mediaSortOptions, mediaFilterActive,
+    mediaSummary, mediaSummaryLoading, loadMediaSummary, summaryOf,
     selectedMediaFileIds, selectedMediaFilesCount, selectedMediaFilesTotalSize,
     mediaFileCache, mediaErrorIds,
     isPurging, purgeTypes, purgeResult, hasPurgeSelection,
     markMediaError, isMediaError,
     formatBytes,
-    loadMediaFiles, setMediaFileFilter,
+    loadMediaFiles, setMediaFileFilter, setMediaKeyword, setMediaRange, setMediaSort,
+    setMediaPageSize, resetMediaFilters, goToMediaPage,
     toggleMediaFileSelection, selectAllMediaFiles, clearMediaFileSelection,
     deleteSelectedMediaFiles, loadAllMediaFilesForPreview, confirmPurgeMedia,
     // 预览

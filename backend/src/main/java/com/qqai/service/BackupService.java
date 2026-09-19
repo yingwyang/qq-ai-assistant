@@ -32,10 +32,16 @@ public class BackupService {
     @Value("${file.storage.archive-path:./uploads/archive}")
     private String archivePath;
 
-    private static final String BACKUP_DIR = "data/backups";
+    /** 备份目录（可配置，便于测试指向临时目录） */
+    @Value("${backup.dir:data/backups}")
+    private String backupDirPath;
+
+    private Path backupDir() {
+        return Path.of(backupDirPath);
+    }
 
     public String triggerBackup() throws Exception {
-        Path backupDir = Path.of(BACKUP_DIR);
+        Path backupDir = backupDir();
         if (!Files.exists(backupDir)) {
             Files.createDirectories(backupDir);
         }
@@ -51,7 +57,7 @@ public class BackupService {
     }
 
     public List<BackupFileInfo> getBackupList() {
-        Path backupDir = Path.of(BACKUP_DIR);
+        Path backupDir = backupDir();
         if (!Files.exists(backupDir)) {
             return Collections.emptyList();
         }
@@ -84,11 +90,39 @@ public class BackupService {
         if (fileName.contains("..") || fileName.contains("/") || fileName.contains("\\")) {
             throw new IllegalArgumentException("非法文件名");
         }
-        Path path = Path.of(BACKUP_DIR, fileName);
+        Path path = Path.of(backupDirPath, fileName);
         if (!Files.exists(path)) {
             return null;
         }
         return path;
+    }
+
+    /**
+     * 删除一个备份文件。
+     *
+     * <p>文件名校验与下载共用 {@link #getBackupFilePath(String)}：拒绝 .. / 路径分隔符，
+     * 且只允许删除 {@link #backupDirPath} 下真实存在的 .sql 备份。</p>
+     *
+     * @return 被删除的文件名
+     * @throws IllegalArgumentException 文件名非法或不是 .sql 备份
+     * @throws java.io.FileNotFoundException 文件不存在
+     */
+    public String deleteBackup(String fileName) throws IOException {
+        Path path = getBackupFilePath(fileName);
+        if (path == null) {
+            throw new java.io.FileNotFoundException("备份文件不存在: " + fileName);
+        }
+        if (!fileName.toLowerCase().endsWith(".sql")) {
+            throw new IllegalArgumentException("只能删除 .sql 备份文件");
+        }
+        Path normalized = path.toAbsolutePath().normalize();
+        Path dir = backupDir().toAbsolutePath().normalize();
+        if (!normalized.startsWith(dir)) {
+            throw new IllegalArgumentException("不允许删除备份目录之外的文件");
+        }
+        Files.delete(normalized);
+        log.info("备份文件已删除: {}", normalized);
+        return fileName;
     }
 
     private void exportDatabase(Path backupFile) throws Exception {
@@ -112,13 +146,13 @@ public class BackupService {
 
     private void exportH2(Connection conn, PrintWriter writer) throws SQLException, IOException {
         try (Statement stmt = conn.createStatement()) {
-            stmt.execute("SCRIPT TO '" + Path.of(BACKUP_DIR).toAbsolutePath() + "/temp_script.sql'");
+            stmt.execute("SCRIPT TO '" + backupDir().toAbsolutePath() + "/temp_script.sql'");
         }
         // H2 SCRIPT TO writes to file system, read and copy
-        Path tempScript = Path.of(BACKUP_DIR, "temp_script.sql");
+        Path tempScript = backupDir().resolve("temp_script.sql");
         try {
             if (Files.exists(tempScript)) {
-                Files.copy(tempScript, Path.of(BACKUP_DIR).resolve("backup_latest.sql"), StandardCopyOption.REPLACE_EXISTING);
+                Files.copy(tempScript, backupDir().resolve("backup_latest.sql"), StandardCopyOption.REPLACE_EXISTING);
                 writer.println("-- H2 Script export completed");
             }
         } finally {

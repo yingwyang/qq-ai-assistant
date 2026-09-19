@@ -23,12 +23,27 @@ export function useComponentControl({ showSystemMsg } = {}) {
 
   let statusInterval = null;
 
+  /** 各组件最近一次启停失败原因（接口只返回运行状态，失败原因只能在调用侧记录） */
+  const componentErrors = ref({ astrbot: '', napcat: '', gptsovits: '' });
+  const lastStatusAt = ref('');
+  const isStartingAll = ref(false);
+  const isStoppingAll = ref(false);
+  const isRefreshing = ref(false);
+
   const getComponentStatus = async () => {
+    isRefreshing.value = true;
     try {
       componentStatus.value = await systemApi.getComponentStatus();
+      lastStatusAt.value = new Date().toLocaleTimeString('zh-CN');
     } catch (error) {
       logger.error('获取组件状态失败:', error);
+    } finally {
+      isRefreshing.value = false;
     }
+  };
+
+  const setComponentError = (key, message) => {
+    componentErrors.value = { ...componentErrors.value, [key]: message || '' };
   };
 
   const refreshQrCode = () => {
@@ -78,11 +93,13 @@ export function useComponentControl({ showSystemMsg } = {}) {
 
   const startAstrBot = async () => {
     isStartingAstrBot.value = true;
+    setComponentError('astrbot', '');
     try {
       const res = await systemApi.startAstrBot();
       if (showSystemMsg) showSystemMsg(res.message || 'AstrBot 启动成功');
       await getComponentStatus();
     } catch (error) {
+      setComponentError('astrbot', error.message);
       if (showSystemMsg) showSystemMsg('AstrBot 启动失败: ' + error.message, 'error');
     } finally {
       isStartingAstrBot.value = false;
@@ -91,11 +108,13 @@ export function useComponentControl({ showSystemMsg } = {}) {
 
   const stopAstrBot = async () => {
     isStoppingAstrBot.value = true;
+    setComponentError('astrbot', '');
     try {
       const res = await systemApi.stopAstrBot();
       if (showSystemMsg) showSystemMsg(res.message || 'AstrBot 停止成功');
       await getComponentStatus();
     } catch (error) {
+      setComponentError('astrbot', error.message);
       if (showSystemMsg) showSystemMsg('AstrBot 停止失败: ' + error.message, 'error');
     } finally {
       isStoppingAstrBot.value = false;
@@ -104,12 +123,14 @@ export function useComponentControl({ showSystemMsg } = {}) {
 
   const startNapCat = async () => {
     isStartingNapCat.value = true;
+    setComponentError('napcat', '');
     try {
       const res = await systemApi.startNapCat(autoLogin.value);
       if (showSystemMsg) showSystemMsg(res.message || 'NapCat 启动成功');
       await getComponentStatus();
       setTimeout(refreshQrCode, 3000);
     } catch (error) {
+      setComponentError('napcat', error.message);
       if (showSystemMsg) showSystemMsg('NapCat 启动失败: ' + error.message, 'error');
     } finally {
       isStartingNapCat.value = false;
@@ -118,11 +139,13 @@ export function useComponentControl({ showSystemMsg } = {}) {
 
   const stopNapCat = async () => {
     isStoppingNapCat.value = true;
+    setComponentError('napcat', '');
     try {
       const res = await systemApi.stopNapCat();
       if (showSystemMsg) showSystemMsg(res.message || 'NapCat 停止成功');
       await getComponentStatus();
     } catch (error) {
+      setComponentError('napcat', error.message);
       if (showSystemMsg) showSystemMsg('NapCat 停止失败: ' + error.message, 'error');
     } finally {
       isStoppingNapCat.value = false;
@@ -131,11 +154,13 @@ export function useComponentControl({ showSystemMsg } = {}) {
 
   const startGptSovits = async () => {
     isStartingGptSovits.value = true;
+    setComponentError('gptsovits', '');
     try {
       const res = await systemApi.startGptSovits();
       if (showSystemMsg) showSystemMsg(res.message || 'GPT-SoVITS 启动成功');
       await getComponentStatus();
     } catch (error) {
+      setComponentError('gptsovits', error.message);
       if (showSystemMsg) showSystemMsg('GPT-SoVITS 启动失败: ' + error.message, 'error');
     } finally {
       isStartingGptSovits.value = false;
@@ -144,14 +169,44 @@ export function useComponentControl({ showSystemMsg } = {}) {
 
   const stopGptSovits = async () => {
     isStoppingGptSovits.value = true;
+    setComponentError('gptsovits', '');
     try {
       const res = await systemApi.stopGptSovits();
       if (showSystemMsg) showSystemMsg(res.message || 'GPT-SoVITS 停止成功');
       await getComponentStatus();
     } catch (error) {
+      setComponentError('gptsovits', error.message);
       if (showSystemMsg) showSystemMsg('GPT-SoVITS 停止失败: ' + error.message, 'error');
     } finally {
       isStoppingGptSovits.value = false;
+    }
+  };
+
+  /** 一键启动全部组件（后端逐个拉起，失败项在返回值里） */
+  const startAllComponents = async () => {
+    isStartingAll.value = true;
+    componentErrors.value = { astrbot: '', napcat: '', gptsovits: '' };
+    try {
+      const res = await systemApi.startAllComponents();
+      if (showSystemMsg) showSystemMsg(res.message || '已触发全部组件启动');
+      await getComponentStatus();
+    } catch (error) {
+      if (showSystemMsg) showSystemMsg('批量启动失败: ' + error.message, 'error');
+    } finally {
+      isStartingAll.value = false;
+    }
+  };
+
+  const stopAllComponents = async () => {
+    isStoppingAll.value = true;
+    try {
+      const res = await systemApi.stopAllComponents();
+      if (showSystemMsg) showSystemMsg(res.message || '已触发全部组件停止');
+      await getComponentStatus();
+    } catch (error) {
+      if (showSystemMsg) showSystemMsg('批量停止失败: ' + error.message, 'error');
+    } finally {
+      isStoppingAll.value = false;
     }
   };
 
@@ -175,6 +230,8 @@ export function useComponentControl({ showSystemMsg } = {}) {
     getComponentStatus, refreshQrCode, onAutoLoginChange, checkNapCatLogin,
     loadNapCatWebUiUrl, openNapCatWebUI, openGptSovitsWebUI,
     startAstrBot, stopAstrBot, startNapCat, stopNapCat, startGptSovits, stopGptSovits,
+    startAllComponents, stopAllComponents,
+    componentErrors, lastStatusAt, isStartingAll, isStoppingAll, isRefreshing,
     startPolling, stopPolling,
   };
 }

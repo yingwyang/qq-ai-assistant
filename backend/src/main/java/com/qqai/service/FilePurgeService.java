@@ -19,14 +19,18 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Stream;
 
@@ -57,6 +61,24 @@ public class FilePurgeService {
     /** 本地媒体文件存储根目录 */
     @Value("${file.storage.local-path:./uploads/images}")
     private String localStoragePath;
+
+    /**
+     * 媒体目录扫描结果缓存（按类型分组，30 秒）。
+     * 与 TokenBlacklistService 一样直接用 Caffeine，不引入 Spring Cache 抽象。
+     */
+    private final com.github.benmanes.caffeine.cache.Cache<String, List<MediaFileDto>> mediaScanCache =
+            com.github.benmanes.caffeine.cache.Caffeine.newBuilder()
+                    .expireAfterWrite(java.time.Duration.ofSeconds(30))
+                    .maximumSize(16)
+                    .build();
+
+    private final com.github.benmanes.caffeine.cache.Cache<String, MediaSummary> mediaSummaryCache =
+            com.github.benmanes.caffeine.cache.Caffeine.newBuilder()
+                    .expireAfterWrite(java.time.Duration.ofSeconds(30))
+                    .maximumSize(4)
+                    .build();
+
+    private static final String MEDIA_SUMMARY_KEY = "summary";
 
     /** 图片扩展名（小写比较） */
     private static final Set<String> IMAGE_EXTS = Set.of(
@@ -166,6 +188,7 @@ public class FilePurgeService {
      */
     public PurgeResult purgeMedia(List<String> types, String operator) {
         PurgeResult result = purgeMedia(types);
+        invalidateMediaCaches();
         String action = "FILE_PURGE";
         String target = "types:" + (types == null ? "[]" : types);
         if (result.getTotalDeleted() > 0 || (result.getNote() != null && result.getNote().contains("IO 错误"))) {
@@ -222,11 +245,102 @@ public class FilePurgeService {
      * @return 媒体文件 DTO 分页结果
      */
     public Page<MediaFileDto> listMediaFiles(String type, Pageable pageable) {
+        return listMediaFiles(type, pageable, null, null, null, null);
+    }
+
+    /**
+     * 带筛选与排序的媒体文件列表。
+     *
+     * <p>实现说明：媒体文件不是数据库记录而是磁盘文件，筛选/排序只能在扫描结果上做，
+     * 因此每次都需遍历 uploads 目录。为避免「改筛选条件/翻页/改每页条数」把全量遍历
+     * 放大成多次，这里用 Caffeine 缓存 30 秒内的扫描结果，清理/删除成功后立即失效。</p>
+     *
+     * @param type      IMAGE / VIDEO / AUDIO / FILE / ALL(空)
+     * @param pageable  分页参数
+     * @param keyword   文件名关键字（忽略大小写，可为空）
+     * @param from      修改时间起（含，可为空）
+     * @param to        修改时间止（含，可为空）
+     * @param sortSpec  排序，格式 time|size|name + 方向（如 "size,desc"），默认 time,desc
+     */
+    public Page<MediaFileDto> listMediaFiles(String type, Pageable pageable, String keyword,
+                                            LocalDate from, LocalDate to, String sortSpec) {
+        List<MediaFileDto> allFiles = scanMediaFiles(type);
+
+        String kw = keyword == null ? null : keyword.trim().toLowerCase();
+        List<MediaFileDto> filtered = new ArrayList<>();
+        for (MediaFileDto dto : allFiles) {
+            if (kw != null && !kw.isEmpty()) {
+                String name = dto.getFileName() == null ? "" : dto.getFileName().toLowerCase();
+                if (!name.contains(kw)) continue;
+            }
+            if (from != null || to != null) {
+                LocalDateTime ts = dto.getCreatedAt();
+                if (ts == null) continue;
+                if (from != null && ts.isBefore(from.atStartOfDay())) continue;
+                if (to != null && ts.isAfter(LocalDateTime.of(to, LocalTime.MAX))) continue;
+            }
+            filtered.add(dto);
+        }
+
+        sortMediaFiles(filtered, sortSpec);
+
+        int total = filtered.size();
+        int page = pageable.getPageNumber();
+        int size = pageable.getPageSize();
+        int fromIdx = Math.min(page * size, total);
+        int toIdx = Math.min(fromIdx + size, total);
+        List<MediaFileDto> content = fromIdx < total ? filtered.subList(fromIdx, toIdx) : Collections.emptyList();
+        return new PageImpl<>(content, pageable, total);
+    }
+
+    /**
+     * 各类型媒体文件的数量与占用（供「清理预览」展示，避免误清理）。
+     */
+    public MediaSummary summarizeMediaFiles() {
+        return mediaSummaryCache.get(MEDIA_SUMMARY_KEY, key -> buildMediaSummary());
+    }
+
+    private MediaSummary buildMediaSummary() {
+        List<MediaFileDto> all = scanMediaFiles(null);
+        Map<String, long[]> byType = new LinkedHashMap<>();
+        for (String t : List.of("IMAGE", "VIDEO", "AUDIO", "FILE")) {
+            byType.put(t, new long[]{0L, 0L});
+        }
+        long totalCount = 0;
+        long totalBytes = 0;
+        for (MediaFileDto dto : all) {
+            String fileType = dto.getFileType() == null ? "FILE" : dto.getFileType().toUpperCase();
+            long[] slot = byType.computeIfAbsent(fileType, k -> new long[]{0L, 0L});
+            slot[0]++;
+            slot[1] += dto.getFileSize();
+            totalCount++;
+            totalBytes += dto.getFileSize();
+        }
+        MediaSummary summary = new MediaSummary();
+        for (Map.Entry<String, long[]> entry : byType.entrySet()) {
+            summary.put(entry.getKey(), entry.getValue()[0], entry.getValue()[1]);
+        }
+        summary.put("TOTAL", totalCount, totalBytes);
+        return summary;
+    }
+
+    /** 目录扫描结果缓存：筛选/翻页会反复触发全量遍历，缓存 30s；改造/删除后立即失效 */
+    private List<MediaFileDto> scanMediaFiles(String type) {
+        String key = type == null || type.isBlank() ? "ALL" : type.toUpperCase();
+        return mediaScanCache.get(key, k -> scanMediaFilesUncached(k));
+    }
+
+    private void invalidateMediaCaches() {
+        mediaScanCache.invalidateAll();
+        mediaSummaryCache.invalidateAll();
+    }
+
+    private List<MediaFileDto> scanMediaFilesUncached(String type) {
         Path root = getBasePath();
         File rootFile = root.toFile();
         if (!rootFile.exists() || !rootFile.isDirectory()) {
             log.info("媒体目录不存在: {}", root);
-            return new PageImpl<>(Collections.emptyList(), pageable, 0);
+            return Collections.emptyList();
         }
 
         Set<String> targetExts = resolveExtensions(type);
@@ -253,19 +367,41 @@ public class FilePurgeService {
                 });
         } catch (IOException e) {
             log.warn("扫描媒体目录失败: {}", e.getMessage());
-            return new PageImpl<>(Collections.emptyList(), pageable, 0);
+            return Collections.emptyList();
         }
 
-        // 按修改时间倒序
-        allFiles.sort(Comparator.comparing(MediaFileDto::getCreatedAt).reversed());
+        // 默认按修改时间倒序
+        sortMediaFiles(allFiles, "time,desc");
+        return allFiles;
+    }
 
-        int total = allFiles.size();
-        int page = pageable.getPageNumber();
-        int size = pageable.getPageSize();
-        int from = Math.min(page * size, total);
-        int to = Math.min(from + size, total);
-        List<MediaFileDto> content = from < total ? allFiles.subList(from, to) : Collections.emptyList();
-        return new PageImpl<>(content, pageable, total);
+    /** 排序字段白名单：time / size / name，方向 asc / desc，非法值一律回落 time,desc */
+    private void sortMediaFiles(List<MediaFileDto> files, String sortSpec) {
+        String field = "time";
+        boolean desc = true;
+        if (sortSpec != null && !sortSpec.isBlank()) {
+            String[] parts = sortSpec.split(",");
+            String candidate = parts[0].trim().toLowerCase();
+            if (Set.of("time", "size", "name").contains(candidate)) {
+                field = candidate;
+            }
+            if (parts.length > 1) {
+                desc = !"asc".equalsIgnoreCase(parts[1].trim());
+            }
+        }
+        Comparator<MediaFileDto> comparator;
+        switch (field) {
+            case "size":
+                comparator = Comparator.comparingLong(MediaFileDto::getFileSize);
+                break;
+            case "name":
+                comparator = Comparator.comparing(f -> f.getFileName() == null ? "" : f.getFileName().toLowerCase());
+                break;
+            default:
+                comparator = Comparator.comparing(MediaFileDto::getCreatedAt,
+                        Comparator.nullsFirst(Comparator.naturalOrder()));
+        }
+        files.sort(desc ? comparator.reversed() : comparator);
     }
 
     private Set<String> resolveExtensions(String type) {
@@ -373,6 +509,7 @@ public class FilePurgeService {
      */
     public PurgeResult deleteFilesByIds(List<String> ids, String operator) {
         PurgeResult result = deleteFilesByIds(ids);
+        invalidateMediaCaches();
         auditLogService.log(operator, "FILE_DELETE", "files:" + (ids == null ? 0 : ids.size()),
                 "SUCCESS",
                 "删除 " + result.getTotalDeleted() + " 个文件, 释放 " + result.getFreedMB()
@@ -500,5 +637,19 @@ public class FilePurgeService {
         public LocalDateTime getCreatedAt() { return createdAt; }
         public String getUrl() { return url; }
         public String getPath() { return path; }
+    }
+
+    /** 各类型媒体文件的数量与占用体积（清理预览用） */
+    public static class MediaSummary {
+        private final Map<String, Map<String, Object>> byType = new LinkedHashMap<>();
+
+        public void put(String type, long count, long bytes) {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("count", count);
+            item.put("bytes", bytes);
+            byType.put(type, item);
+        }
+
+        public Map<String, Map<String, Object>> getByType() { return byType; }
     }
 }

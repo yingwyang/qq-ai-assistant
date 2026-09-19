@@ -314,8 +314,28 @@ export const messageApi = {
   }),
   manualArchive: (daysBefore = 90) => request(`/messages/archive?daysBefore=${daysBefore}`, { method: 'POST' }),
 
-  getMediaFiles: (type, page = 0, size = 20) =>
-    request(`/messages/media-files?type=${encodeURIComponent(type || 'ALL')}&page=${page}&size=${size}`),
+  /**
+   * 分页扫描本地媒体文件。
+   * @param {object|string} options 兼容旧签名（字符串 type）；推荐传对象：
+   *        { type, kw, from, to, sort, page, size }
+   */
+  getMediaFiles: (options = {}, page = 0, size = 20) => {
+    const params = typeof options === 'string'
+      ? { type: options, page, size }
+      : options;
+    const query = new URLSearchParams();
+    query.append('type', params.type || 'ALL');
+    if (params.kw) query.append('kw', params.kw);
+    if (params.from) query.append('from', params.from);
+    if (params.to) query.append('to', params.to);
+    if (params.sort) query.append('sort', params.sort);
+    query.append('page', params.page != null ? params.page : 0);
+    query.append('size', params.size != null ? params.size : 20);
+    return request(`/messages/media-files?${query.toString()}`);
+  },
+
+  /** 各类型媒体文件的数量与占用体积（清理预览） */
+  getMediaSummary: () => request('/messages/media-files/summary'),
 
   deleteMediaFiles: (ids) => request('/messages/delete-media-files', {
     method: 'POST',
@@ -658,23 +678,55 @@ export const adminApi = {
   downloadBackupUrl: (fileName) => {
     return `${API_BASE_URL}/admin/backup/${encodeURIComponent(fileName)}/download`;
   },
+  deleteBackup: (fileName) => request(`/admin/backup/${encodeURIComponent(fileName)}`, { method: 'DELETE' }),
+  /** 归档预检：只统计影响面，不执行归档 */
+  previewArchive: (days) => request(`/admin/archive/preview?days=${days}`),
   triggerArchive: (days) => request(`/admin/archive?days=${days}`, { method: 'POST' }),
   getLogs: (params = {}) => {
     const query = new URLSearchParams();
     if (params.level) query.append('level', params.level);
+    if (params.keyword) query.append('keyword', params.keyword);
+    if (params.from) query.append('from', params.from);
+    if (params.to) query.append('to', params.to);
     if (params.page != null) query.append('page', params.page);
     if (params.size != null) query.append('size', params.size);
     const qs = query.toString();
     return request(`/admin/logs${qs ? '?' + qs : ''}`);
   },
+  /** 应用日志导出直链（浏览器下载，沿用 /logs 的过滤条件） */
+  exportLogsUrl: (params = {}) => {
+    const query = new URLSearchParams();
+    if (params.level) query.append('level', params.level);
+    if (params.keyword) query.append('keyword', params.keyword);
+    if (params.from) query.append('from', params.from);
+    if (params.to) query.append('to', params.to);
+    const qs = query.toString();
+    return `${API_BASE_URL}/admin/logs/export${qs ? '?' + qs : ''}`;
+  },
   getAuditLogs: (params = {}) => {
     const query = new URLSearchParams();
     if (params.keyword) query.append('keyword', params.keyword);
     if (params.action) query.append('action', params.action);
+    if (params.target) query.append('target', params.target);
+    if (params.result) query.append('result', params.result);
+    if (params.from) query.append('from', params.from);
+    if (params.to) query.append('to', params.to);
     if (params.page != null) query.append('page', params.page);
     if (params.size != null) query.append('size', params.size);
     const qs = query.toString();
     return request(`/admin/audit-logs${qs ? '?' + qs : ''}`);
+  },
+  /** 审计日志导出直链（CSV，服务端上限 20000 行） */
+  exportAuditLogsUrl: (params = {}) => {
+    const query = new URLSearchParams();
+    if (params.keyword) query.append('keyword', params.keyword);
+    if (params.action) query.append('action', params.action);
+    if (params.target) query.append('target', params.target);
+    if (params.result) query.append('result', params.result);
+    if (params.from) query.append('from', params.from);
+    if (params.to) query.append('to', params.to);
+    const qs = query.toString();
+    return `${API_BASE_URL}/admin/audit-logs/export${qs ? '?' + qs : ''}`;
   },
 };
 

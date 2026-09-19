@@ -688,6 +688,10 @@ export default {
       } else if (prevKey === 'components') {
         componentCtrl.stopPolling();
       }
+      // 系统日志的自动刷新只在日志页生效
+      if (prevKey === 'log' && key !== 'log') {
+        systemLog.stopAutoRefresh();
+      }
       // 审批队列每次进入都要拿最新数据，其余页面只加载一次
       loadTabData(key, { force: ORDER_TABS.includes(key) });
     };
@@ -878,6 +882,7 @@ export default {
       stopShellPolling();
       userMgmt.cleanup();
       adminUserCredits.cleanup();
+      systemLog.cleanup();
       window.removeEventListener('keydown', media.onPreviewKeydown);
       document.title = 'QQ AI 助手';
     });
@@ -930,6 +935,8 @@ export default {
     provide('adminOpenMediaImagePreview', openMediaImagePreview);
     provide('adminCurrentTheme', currentTheme);
     provide('adminActiveTab', activeTab);
+    // 子页面之间互相跳转（如组件控制 → AI 摘要 / 配置管理）
+    provide('adminSetActiveTab', setActiveTab);
 
     return {
       currentTheme, activeTab, sidebarOpen, currentComponent, navItems, systemMessage, systemMessageType,

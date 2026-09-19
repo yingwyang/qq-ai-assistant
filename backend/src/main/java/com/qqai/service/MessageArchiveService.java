@@ -147,4 +147,53 @@ public class MessageArchiveService {
             messageRepository.saveAll(oldMessages);
         }
     }
+
+    /**
+     * 归档预检：只统计不落盘，让管理员在执行前看到影响面。
+     *
+     * @param daysBefore 归档多少天前的消息
+     * @return messageCount / cutoff / archivePath / existingArchiveFiles
+     */
+    public ArchivePreview previewArchive(int daysBefore) {
+        LocalDateTime cutoffDate = LocalDateTime.now().minusDays(daysBefore);
+        long count = messageRepository.findBySendTimeBeforeAndArchivedFalse(cutoffDate).size();
+
+        int existingFiles = 0;
+        long existingBytes = 0L;
+        File archiveDir = new File(archivePath);
+        File[] files = archiveDir.listFiles();
+        if (files != null) {
+            for (File f : files) {
+                if (f.isFile()) {
+                    existingFiles++;
+                    existingBytes += f.length();
+                }
+            }
+        }
+        return new ArchivePreview(count, cutoffDate, archiveDir.getAbsolutePath(), existingFiles, existingBytes);
+    }
+
+    /** 归档预检结果 */
+    public static class ArchivePreview {
+        private final long messageCount;
+        private final LocalDateTime cutoff;
+        private final String archivePath;
+        private final int existingArchiveFiles;
+        private final long existingArchiveBytes;
+
+        public ArchivePreview(long messageCount, LocalDateTime cutoff, String archivePath,
+                              int existingArchiveFiles, long existingArchiveBytes) {
+            this.messageCount = messageCount;
+            this.cutoff = cutoff;
+            this.archivePath = archivePath;
+            this.existingArchiveFiles = existingArchiveFiles;
+            this.existingArchiveBytes = existingArchiveBytes;
+        }
+
+        public long getMessageCount() { return messageCount; }
+        public LocalDateTime getCutoff() { return cutoff; }
+        public String getArchivePath() { return archivePath; }
+        public int getExistingArchiveFiles() { return existingArchiveFiles; }
+        public long getExistingArchiveBytes() { return existingArchiveBytes; }
+    }
 }

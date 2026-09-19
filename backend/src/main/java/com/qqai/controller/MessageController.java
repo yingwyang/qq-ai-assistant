@@ -916,12 +916,18 @@ public class MessageController {
     /**
      * 分页扫描本地媒体文件。
      *
-     * 示例: GET /api/messages/media-files?type=IMAGE&page=0&size=20
+     * 示例: GET /api/messages/media-files?type=IMAGE&page=0&size=20&sort=size,desc&from=2026-01-01
      * type 可选: IMAGE / VIDEO / AUDIO / FILE / ALL，为空或 ALL 时查询全部本地文件
+     * sort 可选: time|size|name（默认 time,desc）；from/to 为修改日期（yyyy-MM-dd）
+     * kw 为文件名关键字
      */
     @GetMapping("/media-files")
     public ResponseEntity<ApiResponse<Map<String, Object>>> listMediaFiles(
             @RequestParam(required = false) String type,
+            @RequestParam(required = false) String kw,
+            @RequestParam(required = false) String from,
+            @RequestParam(required = false) String to,
+            @RequestParam(required = false) String sort,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
         try {
@@ -937,7 +943,7 @@ public class MessageController {
 
             Pageable pageable = PageRequest.of(page, size);
             org.springframework.data.domain.Page<com.qqai.service.FilePurgeService.MediaFileDto> result =
-                    filePurgeService.listMediaFiles(type, pageable);
+                    filePurgeService.listMediaFiles(type, pageable, kw, parseDateOrNull(from), parseDateOrNull(to), sort);
 
             Map<String, Object> data = new HashMap<>();
             data.put("content", result.getContent());
@@ -949,6 +955,36 @@ public class MessageController {
             return ResponseEntity.badRequest().body(ApiResponse.error(400, "无效的文件类型: " + type));
         } catch (Exception e) {
             return ResponseEntity.badRequest().body(ApiResponse.error(400, "查询媒体文件失败: " + e.getMessage()));
+        }
+    }
+
+    /**
+     * 各类型媒体文件的数量与占用体积（清理预览用）。
+     * GET /api/messages/media-files/summary → { byType: { IMAGE: {count, bytes}, ..., TOTAL: {...} } }
+     */
+    @GetMapping("/media-files/summary")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> summarizeMediaFiles() {
+        try {
+            String role = securityHelper.getCurrentUserRole();
+            if (!"ADMIN".equalsIgnoreCase(role)) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(ApiResponse.error(403, "需要管理员权限"));
+            }
+            Map<String, Object> data = new HashMap<>();
+            data.put("byType", filePurgeService.summarizeMediaFiles().getByType());
+            return ResponseEntity.ok(ApiResponse.success(data));
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(ApiResponse.error(400, "统计媒体文件失败: " + e.getMessage()));
+        }
+    }
+
+    /** 解析 yyyy-MM-dd 日期参数，无法解析时返回 null（不因一个脏参数让整页报错） */
+    private java.time.LocalDate parseDateOrNull(String value) {
+        if (value == null || value.isBlank()) return null;
+        try {
+            String trimmed = value.trim();
+            return java.time.LocalDate.parse(trimmed.length() > 10 ? trimmed.substring(0, 10) : trimmed);
+        } catch (Exception e) {
+            return null;
         }
     }
 
