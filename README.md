@@ -16,6 +16,11 @@ QQ AI Assistant 是一款基于 NapCat + AstrBot 的 QQ 群智能管理平台，
 | QQ 协议 | NapCat (OneBot 11) |
 | 插件 | Groovy 脚本引擎 |
 
+> 上表里除了「自研的 Spring Boot 后端 + Vue 前端 + 4 个 Groovy 插件脚本」之外，全部是第三方：
+> AstrBot、NapCat、GPT-SoVITS、MySQL、RabbitMQ、MinIO 需要单独安装运行；前端还用到
+> markdown-it（Markdown 渲染）、DOMPurify、ECharts 等。**版本、用途与许可证逐项列在
+> [第三方组件与外部依赖](#第三方组件与外部依赖)**。
+
 ## 目录结构
 
 ```
@@ -349,6 +354,97 @@ docker-compose up -d
 | 2026-09-15 | 修复视频无法入库（三级取源 + 缩略图兜底）；修复 AI 摘要全量失败（SSE / `username` / 错误响应过滤） |
 | 2026-09-15 | 安全整改：密钥移出仓库并强制校验、默认管理员密码随机化、订阅待确认、媒体不再公开、权限矩阵收口；git 历史清洗 |
 | 2026-09-15 | 管理后台从 4600 行单文件拆分为 1 个壳 + 13 个懒加载子页；修复登录后白屏与共享样式失效 |
+
+## 第三方组件与外部依赖
+
+本仓库**只包含自研代码**；下列内容均为第三方，随项目一起运行但不属于本项目开发成果。
+许可证信息以各项目官方仓库为准（这里标注版本与用途便于溯源）。
+
+### 一、外部服务/程序（需单独安装运行）
+
+| 组件 | 版本 | 用途 | 许可证 |
+|------|------|------|--------|
+| [AstrBot](https://github.com/AstrBotDevs/AstrBot) | 4.28.1 | AI 对话 / 摘要 / 分析的 Agent 引擎，本项目通过其 OpenAPI（`/api/v1/chat`、`/api/v1/file`、配置档案）调用 | AGPL-3.0 |
+| [NapCatQQ](https://github.com/NapNeko/NapCatQQ) | 4.x | QQ 协议端（OneBot 11）：收发消息、拉群成员/群列表、上传群文件 | 自定义许可（见其仓库 LICENSE） |
+| [GPT-SoVITS](https://github.com/RVC-Boss/GPT-SoVITS) | v2Pro | TTS 语音合成（把 AI 回复念出来） | MIT |
+| [MySQL](https://www.mysql.com/) | 9.5（本机实测；8.x 亦可） | 业务数据库 `qq_chat` | GPLv2 / 商业双许可 |
+| [RabbitMQ](https://www.rabbitmq.com/) | 4.2（本机实测；CI/compose 用 3.12 镜像） | 消息队列（媒体下载 / 语音转码 / AI 分析 / 群日报） | MPL-2.0 |
+| [MinIO](https://min.io/) | 最新版 | 可选的对象存储（本机未启动时自动回退本地磁盘存储） | AGPL-3.0 |
+
+> 这些组件都**不在本仓库内**：部署时按 `doc/` 手册单独安装，`.env` 里填地址与令牌即可。
+
+### 二、后端依赖（Maven，`backend/pom.xml`）
+
+| 依赖 | 版本 | 用途 | 许可证 |
+|------|------|------|--------|
+| Spring Boot（web / validation / websocket / data-jpa / amqp / security / test） | 3.2.0 | Web、参数校验、WebSocket 推送、JPA、RabbitMQ、鉴权、测试 | Apache-2.0 |
+| **Groovy** | 3.0.22 | **Groovy 脚本插件引擎**：`GroovyClassLoader` 加载 `backend/plugins/*.groovy`（详见下节） | Apache-2.0 |
+| Apache HttpClient5 | 5.3 | 调 AstrBot / NapCat / GPT-SoVITS 的 HTTP 客户端 | Apache-2.0 |
+| JJWT（api / impl / jackson） | 0.12.3 | JWT 签发与校验 | Apache-2.0 |
+| sqlite-jdbc | 3.45.2.0 | 只读/维护 AstrBot 的 `data_v4.db`（读人格列表、写无工具副本） | Apache-2.0 |
+| Caffeine | 随 Boot 版本 | 本地缓存（JWT 黑名单等） | Apache-2.0 |
+| Flyway（core / mysql） | 随 Boot 版本 | 数据库版本管理（当前 `FLYWAY_ENABLED=false`） | Apache-2.0 |
+| MySQL Connector/J | 随 Boot 版本 | MySQL 驱动 | GPLv2 + FOSS 例外 |
+| H2 | 随 Boot 版本 | 单元测试内存库 | MPL-2.0 / EPL-1.0 |
+| MinIO Java SDK | 8.5.7 | 对象存储客户端 | Apache-2.0 |
+| Thumbnailator | 0.4.20 | 图片缩放/缩略图 | MIT |
+| Apache Commons Exec | 1.3 | 调外部进程（PowerShell / cmd，组件启停） | Apache-2.0 |
+| Jackson JSR-310 | 随 Boot 版本 | `LocalDateTime` 序列化 | Apache-2.0 |
+| spring-dotenv | 3.0.0 | 读取 `backend/.env` | MIT |
+
+### 三、前端依赖（npm，`frontend/package.json`）
+
+| 依赖 | 版本 | 用途 | 许可证 |
+|------|------|------|--------|
+| Vue | 3.5.30 | 前端框架 | MIT |
+| vue-router | 4.6.4 | 路由 | MIT |
+| **markdown-it** | 14.1.0 | **Markdown 渲染**（AI 回复 / 摘要 / 站内文档的 Markdown → HTML） | MIT |
+| **DOMPurify** | 3.1.6 | 渲染前对 HTML 做 XSS 清洗（与 markdown-it 配套） | Apache-2.0 / MPL-2.0 |
+| ECharts | 6.1.0 | 管理后台图表 | Apache-2.0 |
+| vue-echarts | 8.0.1 | ECharts 的 Vue 封装 | MIT |
+| Vite | 8.2.1 | 构建/开发服务器（含 rolldown 打包器） | MIT |
+| @vitejs/plugin-vue | 6.0.5 | Vite 的 Vue 单文件组件支持 | MIT |
+| playwright-core | 1.61.1 | 仅开发期使用：端到端回归脚本 `frontend/scripts/*.mjs` | Apache-2.0 |
+
+> 图标：`frontend/src/components/Icon.vue` 里的 SVG 路径取自 **Material Design Icons**（Apache-2.0），
+> 按项目需要做了增删与颜色适配，未引入图标字体或图标库依赖。
+
+### 四、后端 Groovy 插件（`backend/plugins/*.groovy`）
+
+插件**引擎**是第三方（Groovy 3.0.22，见上表）；放在 `backend/plugins/` 下的 4 个脚本是本项目自研，
+用于对 AI 回复做后处理，随 jar 一起分发：
+
+| 脚本 | 作用 |
+|------|------|
+| `MarkdownCleanerPlugin.groovy` | 兜底清理工具 JSON 残留与多余空行 |
+| `SummaryCardPlugin.groovy` | 把「摘要：xxx」这类行转成可折叠的 `<details>` 块 |
+| `TocMarkerPlugin.groovy` | 文本含 Markdown 标题时在开头插入 `[TOC]`，供前端生成目录 |
+| `AutoLinkPlugin.groovy` | 把文本里的裸 URL 转成 Markdown 链接 |
+
+> 接口约定见 `backend/src/main/java/com/qqai/plugin/AiResponsePlugin.java`：实现该接口（`name()` / `order()` / 处理方法）
+> 并放进 `backend/plugins/`，即由 `PluginManager` 用 `GroovyClassLoader` 加载执行。
+
+### 五、AstrBot 侧第三方插件（部署环境，不在本仓库）
+
+本项目调用的是 AstrBot 的**模型与人格**能力，不依赖具体插件；但当前部署环境另外装了下列
+第三方 AstrBot 插件（可用于扩展 QQ 侧行为，属于别人的作品）：
+
+`astrbot_plugin_angel_smile`、`astrbot_plugin_bilivideo`、`astrbot_plugin_cet6`、
+`astrbot_plugin_gpt_sovits`、`astrbot_plugin_img_tool`、`astrbot_plugin_knowledge_base`、
+`astrbot_plugin_opencode`、`astrbot_plugin_pixiv_reborn`、`astrbot_plugin_screen_companion`、
+`astrbot_plugin_self_evolution`、`astrbot_plugin_skland`
+
+### 六、内容与素材来源（非代码）
+
+| 内容 | 位置 | 来源与归属 |
+|------|------|------------|
+| 人格提示词（`doc/personas/*.md`） | 仓库内 | 由本项目按《人格编写规范》重写整理；**角色形象与设定版权归原作者** —— 「瑞吉儿·加德纳」出自《杀戮的天使》，「爱莉希雅」出自《崩坏3》（© miHoYo），「灰泽满」为 VirtuaReal 所属虚拟主播。仅供个人学习使用，请勿商用 |
+| 「无工具人格副本」与配置档案 | AstrBot 数据库（运行时生成） | 由本项目脚本/服务按用户所选人格克隆生成，原始人格不受影响 |
+| QQ 头像、群名、群成员昵称 | 运行时经 NapCat 获取 | 归腾讯/群成员所有，仅本地展示，不入库到本仓库 |
+| 站内文档与用户手册 | `doc/`、`frontend/src/docs/` | 本项目自研 |
+
+> 若你二次分发本项目，请一并遵守上表中各第三方组件的许可证（尤其是 **AstrBot 的 AGPL-3.0**：
+> 若你修改并向网络用户提供 AstrBot 本身，需按 AGPL 开放相应源码）。
 
 ## 许可证
 
