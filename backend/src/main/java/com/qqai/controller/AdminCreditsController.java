@@ -71,6 +71,10 @@ public class AdminCreditsController {
     @Autowired
     private com.qqai.repository.CreditTransactionRepository creditTransactionRepository;
 
+    /** 用户积分列表：按余额/消耗排序需要 LEFT JOIN user_credit，单独用一个查询服务 */
+    @Autowired
+    private com.qqai.service.AdminUserCreditQueryService userCreditQueryService;
+
     private final ObjectMapper objectMapper = new ObjectMapper()
             .registerModule(new com.fasterxml.jackson.datatype.jsr310.JavaTimeModule())
             .disable(com.fasterxml.jackson.databind.SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
@@ -219,55 +223,128 @@ public class AdminCreditsController {
     @GetMapping("/user-credits")
     public ResponseEntity<ApiResponse<Map<String, Object>>> getUserCredits(
             @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) String tier,
+            @RequestParam(required = false) Integer min,
+            @RequestParam(required = false) Integer max,
+            @RequestParam(required = false) String sort,
+            @RequestParam(required = false) String order,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
         securityHelper.requireAdmin();
-        Pageable pageable = PageRequest.of(page, Math.min(size, 200));
-        Page<User> userPage;
-        if (keyword != null && !keyword.isBlank()) {
-            userPage = userRepository.findByUsernameContainingOrNicknameContaining(keyword, keyword, pageable);
-        } else {
-            userPage = userRepository.findAll(pageable);
-        }
+        int pageSize = Math.min(Math.max(size, 1), 200);
+
+        com.qqai.service.AdminUserCreditQueryService.UserCreditPage pageResult =
+                userCreditQueryService.query(keyword, tier, min, max, sort, order, page, pageSize);
 
         List<Map<String, Object>> content = new ArrayList<>();
-        for (User user : userPage.getContent()) {
-            Map<String, Object> row = new HashMap<>();
-            row.put("userId", user.getId());
-            row.put("username", user.getUsername());
-            row.put("nickname", user.getNickname());
-            row.put("role", user.getRole());
-            row.put("active", user.isActive());
-
-            Optional<UserCredit> creditOpt = userCreditRepository.findByUserId(user.getId());
-            if (creditOpt.isPresent()) {
-                UserCredit c = creditOpt.get();
-                row.put("balance", c.getBalance());
-                row.put("totalEarned", c.getTotalEarned());
-                row.put("totalSpent", c.getTotalSpent());
-                row.put("consumptionBanned", c.getConsumptionBanned());
-                row.put("subscriptionTier", c.getSubscriptionTier() != null ? c.getSubscriptionTier().name() : "FREE");
-                row.put("subscriptionExpiresAt", c.getSubscriptionExpiresAt());
-            } else {
-                row.put("balance", 0);
-                row.put("totalEarned", 0);
-                row.put("totalSpent", 0);
-                row.put("consumptionBanned", false);
-                row.put("subscriptionTier", "FREE");
-                row.put("subscriptionExpiresAt", null);
-            }
-            content.add(row);
+        for (Long userId : pageResult.userIds()) {
+            userRepository.findById(userId).ifPresent(user -> content.add(userCreditRow(user)));
         }
 
         Map<String, Object> pageData = new HashMap<>();
         pageData.put("content", content);
-        pageData.put("totalElements", userPage.getTotalElements());
-        pageData.put("totalPages", userPage.getTotalPages());
-        pageData.put("number", userPage.getNumber());
-        pageData.put("size", userPage.getSize());
-        pageData.put("first", userPage.isFirst());
-        pageData.put("last", userPage.isLast());
+        pageData.put("totalElements", pageResult.totalElements());
+        pageData.put("totalPages", pageSize > 0
+                ? (int) Math.ceil((double) pageResult.totalElements() / pageSize) : 0);
+        pageData.put("number", page);
+        pageData.put("size", pageSize);
+        pageData.put("first", page == 0);
+        pageData.put("last", (page + 1L) * pageSize >= pageResult.totalElements());
         return ResponseEntity.ok(ApiResponse.success(pageData));
+    }
+
+    /**
+     * 导出用户积分列表为 CSV（沿用列表页的筛选与排序，最多 {@link #USER_CREDIT_EXPORT_MAX_ROWS} 行）。
+     */
+    @GetMapping("/user-credits/export")
+    public ResponseEntity<byte[]> exportUserCredits(
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) String tier,
+            @RequestParam(required = false) Integer min,
+            @RequestParam(required = false) Integer max,
+            @RequestParam(required = false) String sort,
+            @RequestParam(required = false) String order) {
+        securityHelper.requireAdmin();
+
+        com.qqai.service.AdminUserCreditQueryService.UserCreditPage pageResult = userCreditQueryService.query(
+                keyword, tier, min, max, sort, order, 0, USER_CREDIT_EXPORT_MAX_ROWS);
+
+        StringBuilder sb = new StringBuilder("\uFEFF");
+        sb.append("用户ID,账号,昵称,角色,状态,订阅层级,余额,累计获得,累计消耗,订阅到期,最近变动\n");
+        for (Long userId : pageResult.userIds()) {
+            userRepository.findById(userId).ifPresent(user -> {
+                Map<String, Object> row = userCreditRow(user);
+                sb.append(row.get("userId")).append(',')
+                        .append(csv((String) row.get("username"))).append(',')
+                        .append(csv((String) row.get("nickname"))).append(',')
+                        .append("ADMIN".equalsIgnoreCase((String) row.get("role")) ? "管理员" : "普通用户").append(',')
+                        .append(Boolean.TRUE.equals(row.get("active")) ? "正常" : "已禁用").append(',')
+                        .append(row.get("subscriptionTier")).append(',')
+                        .append(row.get("balance")).append(',')
+                        .append(row.get("totalEarned")).append(',')
+                        .append(row.get("totalSpent")).append(',')
+                        .append(csv(formatDateTime(row.get("subscriptionExpiresAt")))).append(',')
+                        .append(csv(formatDateTime(row.get("updatedAt")))).append('\n');
+            });
+        }
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(new org.springframework.http.MediaType("text", "csv", StandardCharsets.UTF_8));
+        headers.setContentDispositionFormData("attachment", "user-credits.csv");
+        headers.add("X-Truncated", String.valueOf(pageResult.totalElements() > USER_CREDIT_EXPORT_MAX_ROWS));
+        return new ResponseEntity<>(sb.toString().getBytes(StandardCharsets.UTF_8),
+                headers, org.springframework.http.HttpStatus.OK);
+    }
+
+    /** 用户积分导出上限 */
+    private static final int USER_CREDIT_EXPORT_MAX_ROWS = 100000;
+
+    /** 组装单行用户积分数据（缺省额度按 0 / FREE 处理） */
+    private Map<String, Object> userCreditRow(User user) {
+        Map<String, Object> row = new HashMap<>();
+        row.put("userId", user.getId());
+        row.put("username", user.getUsername());
+        row.put("nickname", user.getNickname());
+        row.put("role", user.getRole());
+        row.put("active", user.isActive());
+
+        Optional<UserCredit> creditOpt = userCreditRepository.findByUserId(user.getId());
+        if (creditOpt.isPresent()) {
+            UserCredit c = creditOpt.get();
+            row.put("balance", c.getBalance());
+            row.put("totalEarned", c.getTotalEarned());
+            row.put("totalSpent", c.getTotalSpent());
+            row.put("consumptionBanned", c.getConsumptionBanned());
+            row.put("subscriptionTier", c.getSubscriptionTier() != null ? c.getSubscriptionTier().name() : "FREE");
+            row.put("subscriptionExpiresAt", c.getSubscriptionExpiresAt());
+            row.put("updatedAt", c.getUpdatedAt());
+        } else {
+            row.put("balance", 0);
+            row.put("totalEarned", 0);
+            row.put("totalSpent", 0);
+            row.put("consumptionBanned", false);
+            row.put("subscriptionTier", "FREE");
+            row.put("subscriptionExpiresAt", null);
+            row.put("updatedAt", null);
+        }
+        return row;
+    }
+
+    private static String formatDateTime(Object value) {
+        if (value == null) return "";
+        if (value instanceof java.time.LocalDateTime dt) {
+            return dt.format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+        }
+        return String.valueOf(value);
+    }
+
+    private static String csv(String value) {
+        if (value == null) return "";
+        String v = value.replace("\r", " ").replace("\n", " ").trim();
+        if (v.contains(",") || v.contains("\"")) {
+            v = '"' + v.replace("\"", "\"\"") + '"';
+        }
+        return v;
     }
 
     /**

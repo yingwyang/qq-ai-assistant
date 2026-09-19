@@ -8,6 +8,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -98,6 +99,74 @@ public class UserService {
 
     public Page<User> searchUsers(String keyword, Pageable pageable) {
         return userRepository.findByUsernameContainingOrNicknameContaining(keyword, keyword, pageable);
+    }
+
+    /**
+     * 管理端用户查询：关键字 + 角色 + 启用状态 + 排序。
+     *
+     * <p>组合条件用 Specification 组装（关键字 3 选 1 × 角色 × 状态 × 排序会退化成大量派生方法）；
+     * 排序字段走白名单，非法值回落到注册时间倒序。</p>
+     *
+     * @param keyword 账号/昵称关键字（可为空）
+     * @param role    ADMIN / USER（可为空）
+     * @param active  true 只看启用、false 只看禁用、null 不限
+     * @param sort    createdAt / lastLoginTime / username（默认 createdAt）
+     * @param order   asc / desc（默认 desc）
+     */
+    public Page<User> queryUsers(String keyword, String role, Boolean active,
+                                 String sort, String order, Pageable pageable) {
+        final String kw = keyword == null || keyword.isBlank() ? null : keyword.trim();
+        final String roleFilter = role == null || role.isBlank() ? null : role.trim().toUpperCase();
+
+        org.springframework.data.jpa.domain.Specification<User> spec = (root, query, cb) -> {
+            List<jakarta.persistence.criteria.Predicate> predicates = new java.util.ArrayList<>();
+            if (kw != null) {
+                String like = "%" + kw.toLowerCase() + "%";
+                predicates.add(cb.or(
+                        cb.like(cb.lower(root.get("username")), like),
+                        cb.like(cb.lower(root.get("nickname")), like)));
+            }
+            if (roleFilter != null) {
+                predicates.add(cb.equal(cb.upper(root.get("role")), roleFilter));
+            }
+            if (active != null) {
+                predicates.add(cb.equal(root.get("active"), active));
+            }
+            return predicates.isEmpty() ? cb.conjunction()
+                    : cb.and(predicates.toArray(new jakarta.persistence.criteria.Predicate[0]));
+        };
+
+        return userRepository.findAll(spec, applyUserSort(pageable, sort, order));
+    }
+
+    /** 管理端用户列表排序字段白名单 */
+    public static final java.util.Set<String> USER_SORT_FIELDS =
+            java.util.Set.of("createdAt", "lastLoginTime", "username", "id");
+
+    private Pageable applyUserSort(Pageable pageable, String sort, String order) {
+        String field = sort == null || !USER_SORT_FIELDS.contains(sort) ? "createdAt" : sort;
+        org.springframework.data.domain.Sort.Direction direction =
+                "asc".equalsIgnoreCase(order == null ? "" : order)
+                        ? org.springframework.data.domain.Sort.Direction.ASC
+                        : org.springframework.data.domain.Sort.Direction.DESC;
+        return PageRequest.of(pageable.getPageNumber(), pageable.getPageSize(),
+                org.springframework.data.domain.Sort.by(direction, field));
+    }
+
+    /**
+     * 导出用：按同一套筛选条件取出全部用户（带上限，避免一次性拉爆内存）。
+     *
+     * @return 用户列表与「是否被截断」
+     */
+    public UserExportResult exportUsers(String keyword, String role, Boolean active,
+                                        String sort, String order, int maxRows) {
+        Page<User> page = queryUsers(keyword, role, active, sort, order, PageRequest.of(0, maxRows));
+        boolean truncated = page.getTotalElements() > page.getContent().size();
+        return new UserExportResult(page.getContent(), page.getTotalElements(), truncated);
+    }
+
+    /** 导出结果（内容 + 总条数 + 是否截断） */
+    public record UserExportResult(List<User> users, long totalElements, boolean truncated) {
     }
 
     public User save(User user) {

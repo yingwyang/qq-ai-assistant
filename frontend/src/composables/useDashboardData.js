@@ -15,16 +15,26 @@ export function useDashboardData() {
     totalFiles: 0,
     todayActiveUsers: 0,
     todayAiConversations: 0,
+    weekAiMessages: 0,
     totalAiMessages: 0,
+    rangeMessages: 0,
+    rangeActiveUsers: 0,
+    rangeAiMessages: 0,
   });
   const messageTrend = ref([]);
-  const trendDays = ref(7);
   const trendInterval = ref('day');
+  /** 概览页全局时间范围（7/30/90 天），驱动统计卡与全部图表 */
+  const rangeDays = ref(7);
   const groupRanking = ref([]);
   const qqRanking = ref([]);
   const messageTypeDistribution = ref([]);
   const hourlyDistribution = ref([]);
   const aiTrend = ref([]);
+  /** 分块加载失败信息：单个接口挂掉只让对应图显示错误，不整页白屏 */
+  const sectionErrors = ref({});
+  const loading = ref(false);
+  const lastLoadedAt = ref('');
+
   const diskUsage = ref({
     uploadsSizeFormatted: '0 B',
     totalSpaceFormatted: '0 B',
@@ -33,88 +43,92 @@ export function useDashboardData() {
     usagePercent: 0,
   });
 
-  const loadStats = async () => {
+  /** 包装单块加载：记录错误、供图表显示重试，不影响其它块 */
+  const loadSection = async (key, loader) => {
     try {
-      stats.value = await dashboardApi.getStats();
+      await loader();
+      if (sectionErrors.value[key]) {
+        sectionErrors.value = { ...sectionErrors.value, [key]: '' };
+      }
+      return true;
     } catch (error) {
-      logger.error('加载统计数据失败:', error);
+      logger.error(`加载 ${key} 失败:`, error);
+      sectionErrors.value = { ...sectionErrors.value, [key]: error.message || '加载失败' };
+      return false;
     }
   };
 
-  const loadTrend = async () => {
-    try {
-      messageTrend.value = await dashboardApi.getMessageTrend(trendDays.value, trendInterval.value);
-    } catch (error) {
-      logger.error('加载消息趋势失败:', error);
-    }
+  const loadStats = () => loadSection('stats', async () => {
+    stats.value = await dashboardApi.getStats(rangeDays.value);
+  });
+
+  const loadTrend = () => loadSection('trend', async () => {
+    messageTrend.value = await dashboardApi.getMessageTrend(rangeDays.value, trendInterval.value);
+  });
+
+  const setRangeDays = (days) => {
+    rangeDays.value = [7, 30, 90].includes(Number(days)) ? Number(days) : 7;
+    return loadAll();
   };
 
-  const setTrendDays = (days, interval = 'day') => {
-    trendDays.value = days;
-    trendInterval.value = interval;
-    loadTrend();
-  };
+  const loadRanking = () => loadSection('groupRanking', async () => {
+    groupRanking.value = await dashboardApi.getGroupRanking(rangeDays.value);
+  });
 
-  const loadRanking = async () => {
-    try {
-      groupRanking.value = await dashboardApi.getGroupRanking();
-    } catch (error) {
-      logger.error('加载群聊排行失败:', error);
-    }
-  };
+  const loadQQRanking = () => loadSection('qqRanking', async () => {
+    qqRanking.value = await dashboardApi.getQQRanking(rangeDays.value);
+  });
 
-  const loadQQRanking = async () => {
-    try {
-      qqRanking.value = await dashboardApi.getQQRanking();
-    } catch (error) {
-      logger.error('加载QQ排行失败:', error);
-    }
-  };
+  const loadDiskUsage = () => loadSection('diskUsage', async () => {
+    diskUsage.value = await systemApi.getDiskUsage();
+  });
 
-  const loadDiskUsage = async () => {
-    try {
-      diskUsage.value = await systemApi.getDiskUsage();
-    } catch (error) {
-      logger.error('加载磁盘使用情况失败:', error);
-    }
-  };
+  const loadDistribution = () => loadSection('distribution', async () => {
+    messageTypeDistribution.value = await dashboardApi.getMessageTypeDistribution(rangeDays.value);
+  });
 
-  const loadDistribution = async () => {
-    try {
-      messageTypeDistribution.value = await dashboardApi.getMessageTypeDistribution();
-    } catch (error) {
-      logger.error('加载消息分布失败:', error);
-    }
-  };
+  const loadHourlyDistribution = () => loadSection('hourly', async () => {
+    hourlyDistribution.value = await dashboardApi.getHourlyDistribution(rangeDays.value);
+  });
 
-  const loadHourlyDistribution = async () => {
-    try {
-      hourlyDistribution.value = await dashboardApi.getHourlyDistribution();
-    } catch (error) {
-      logger.error('加载时段分布失败:', error);
-    }
-  };
-
-  const loadAiTrend = async () => {
-    try {
-      aiTrend.value = await dashboardApi.getAiTrend();
-    } catch (error) {
-      logger.error('加载AI趋势失败:', error);
-    }
-  };
+  const loadAiTrend = () => loadSection('aiTrend', async () => {
+    aiTrend.value = await dashboardApi.getAiTrend(rangeDays.value);
+  });
 
   const loadAll = async () => {
-    await Promise.all([
-      loadStats(),
-      loadTrend(),
-      loadRanking(),
-      loadQQRanking(),
-      loadDiskUsage(),
-      loadDistribution(),
-      loadHourlyDistribution(),
-      loadAiTrend(),
-    ]);
+    loading.value = true;
+    try {
+      await Promise.all([
+        loadStats(),
+        loadTrend(),
+        loadRanking(),
+        loadQQRanking(),
+        loadDiskUsage(),
+        loadDistribution(),
+        loadHourlyDistribution(),
+        loadAiTrend(),
+      ]);
+      lastLoadedAt.value = new Date().toLocaleTimeString('zh-CN');
+    } finally {
+      loading.value = false;
+    }
   };
+
+  const retrySection = (key) => {
+    const map = {
+      stats: loadStats,
+      trend: loadTrend,
+      groupRanking: loadRanking,
+      qqRanking: loadQQRanking,
+      diskUsage: loadDiskUsage,
+      distribution: loadDistribution,
+      hourly: loadHourlyDistribution,
+      aiTrend: loadAiTrend,
+    };
+    return (map[key] || loadAll)();
+  };
+
+  const errorOf = (key) => sectionErrors.value[key] || '';
 
   const trendChartOption = computed(() => {
     const data = messageTrend.value.map(item => item.count);
@@ -411,10 +425,10 @@ export function useDashboardData() {
   });
 
   return {
-    stats, messageTrend, trendDays, trendInterval,
+    stats, messageTrend, rangeDays, trendInterval,
     groupRanking, qqRanking, messageTypeDistribution, diskUsage,
-    hourlyDistribution, aiTrend,
-    loadStats, loadTrend, setTrendDays,
+    hourlyDistribution, aiTrend, sectionErrors, loading, lastLoadedAt,
+    loadStats, loadTrend, setRangeDays, errorOf, retrySection,
     loadRanking, loadQQRanking, loadDiskUsage, loadDistribution,
     loadHourlyDistribution, loadAiTrend,
     trendChartOption, groupRankingOption, qqRankingOption,

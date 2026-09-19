@@ -216,7 +216,7 @@
 </template>
 
 <script>
-import { inject, ref, computed, onMounted } from 'vue';
+import { inject, ref, computed, onMounted, watch } from 'vue';
 import Icon from '../../components/Icon.vue';
 import AdminPageHeader from '../../components/admin/AdminPageHeader.vue';
 import VChart from 'vue-echarts';
@@ -247,11 +247,36 @@ export default {
     const txTypeTextLabel = inject('adminTxTypeTextLabel');
     const cashCategories = inject('adminCashCategories');
     const formatDate = inject('adminFormatDate');
+    const route = inject('adminRoute', null);
 
     const showCashModal = ref(false);
     const cashForm = ref({ direction: 'IN', amount: '', category: 'MANUAL', userId: '', remark: '' });
     /** 只在表格层过滤「有现金变动」，不动后端分页参数（避免与分页总数打架） */
     const cashOnly = ref(false);
+
+    /**
+     * 深度链接筛选：用户积分页跳进来会带 ?userId=，
+     * 订单抽屉「查看资金流水」会带 ?orderNo=（映射到 relatedId）。
+     */
+    const applyQueryFilters = () => {
+      if (!route) return;
+      const { userId, orderNo } = route.query;
+      let changed = false;
+      if (userId !== undefined && String(userId) !== String(adminTx.filters.userId)) {
+        adminTx.filters.userId = String(userId);
+        changed = true;
+      }
+      if (orderNo !== undefined && String(orderNo) !== String(adminTx.filters.relatedId)) {
+        adminTx.filters.relatedId = String(orderNo);
+        changed = true;
+      }
+      if (changed) adminTx.loadTransactions(0);
+    };
+
+    onMounted(applyQueryFilters);
+    if (route) {
+      watch(() => [route.query.userId, route.query.orderNo], applyQueryFilters);
+    }
 
     const money = (v) => Number(v ?? 0).toFixed(2);
     const signed = (v) => {

@@ -937,6 +937,9 @@ export default {
     provide('adminActiveTab', activeTab);
     // 子页面之间互相跳转（如组件控制 → AI 摘要 / 配置管理）
     provide('adminSetActiveTab', setActiveTab);
+    // 子页面需要带上 query 做跨页筛选（如用户积分 → 资金流水 ?userId=）
+    provide('adminRouter', router);
+    provide('adminRoute', route);
 
     return {
       currentTheme, activeTab, sidebarOpen, currentComponent, navItems, systemMessage, systemMessageType,

@@ -37,11 +37,22 @@ public class DashboardService {
     private AstrBotMessageRepository astrBotMessageRepository;
 
     public Map<String, Object> getDashboardStats() {
+        return getDashboardStats(7);
+    }
+
+    /**
+     * 概览统计。
+     *
+     * @param days 时间范围（7/30/90 天），用于 range* 系列字段；非法值回落 7
+     */
+    public Map<String, Object> getDashboardStats(int days) {
         Map<String, Object> stats = new HashMap<>();
 
+        int rangeDays = normalizeDays(days);
         LocalDate today = LocalDate.now();
         LocalDateTime todayStart = today.atStartOfDay();
         LocalDateTime tomorrowStart = today.plusDays(1).atStartOfDay();
+        LocalDateTime rangeStart = today.minusDays(rangeDays - 1L).atStartOfDay();
 
         long totalMessages = messageRepository.count();
         long todayMessages = 0;
@@ -71,11 +82,36 @@ public class DashboardService {
             // ignore
         }
 
-        long todayAiConversations = 0;
+        // 区间统计（概览的时间范围选择器驱动）
+        long rangeMessages = 0;
+        long rangeActiveUsers = 0;
+        try {
+            Long count = messageRepository.countBySendTimeBetween(rangeStart, tomorrowStart);
+            rangeMessages = count != null ? count : 0;
+        } catch (Exception e) {
+            // ignore
+        }
+        try {
+            Long count = messageRepository.countActiveUsersBetween(rangeStart, tomorrowStart);
+            rangeActiveUsers = count != null ? count : 0;
+        } catch (Exception e) {
+            // ignore
+        }
+
+        // 近 7 天 AI 消息：字段名以前叫 todayAiConversations，实际统计的是 7 天，
+        // 命名与语义不符会让页面上出现「今日新增 1323」而总量只有几十的怪现象。
+        long weekAiMessages = 0;
         try {
             LocalDateTime weekStart = today.minusDays(6).atStartOfDay();
             long weekAiMsgs = astrBotMessageRepository.countByTimeCreatedBetween(weekStart, tomorrowStart);
-            todayAiConversations = weekAiMsgs;
+            weekAiMessages = weekAiMsgs;
+        } catch (Exception e) {
+            // ignore
+        }
+
+        long rangeAiMessages = 0;
+        try {
+            rangeAiMessages = astrBotMessageRepository.countByTimeCreatedBetween(rangeStart, tomorrowStart);
         } catch (Exception e) {
             // ignore
         }
@@ -91,10 +127,31 @@ public class DashboardService {
         stats.put("activeConversations", activeConversations);
         stats.put("totalFiles", totalFiles);
         stats.put("todayActiveUsers", todayActiveUsers);
-        stats.put("todayAiConversations", todayAiConversations);
+        // 保留旧字段名（附加上 weekAiMessages，避免破坏其它调用方）
+        stats.put("todayAiConversations", weekAiMessages);
+        stats.put("weekAiMessages", weekAiMessages);
         stats.put("totalAiMessages", totalAiMessages);
+        stats.put("rangeDays", rangeDays);
+        stats.put("rangeMessages", rangeMessages);
+        stats.put("rangeActiveUsers", rangeActiveUsers);
+        stats.put("rangeAiMessages", rangeAiMessages);
+        stats.put("rangeStart", rangeStart.toLocalDate().toString());
 
         return stats;
+    }
+
+    /** 时间范围白名单：只允许 7 / 30 / 90，其余一律回落到 7 */
+    private int normalizeDays(int days) {
+        if (days == 30 || days == 90) return days;
+        return 7;
+    }
+
+    private LocalDateTime rangeStart(int days) {
+        return LocalDate.now().minusDays(normalizeDays(days) - 1L).atStartOfDay();
+    }
+
+    private LocalDateTime rangeEnd() {
+        return LocalDate.now().plusDays(1).atStartOfDay();
     }
 
     public List<Map<String, Object>> getMessageTrend(int days, String interval) {
@@ -149,13 +206,31 @@ public class DashboardService {
     }
 
     public List<Map<String, Object>> getGroupRanking() {
+        return getGroupRanking(0);
+    }
+
+    /**
+     * 群消息排行。
+     *
+     * @param days 0 表示全量（历史行为）；7/30/90 时按区间统计
+     */
+    public List<Map<String, Object>> getGroupRanking(int days) {
         List<Map<String, Object>> ranking = new ArrayList<>();
-        List<Object[]> recentGroups = messageRepository.findRecentGroups();
+        List<Object[]> recentGroups;
+        boolean ranged = normalizeDaysOrZero(days) > 0;
+        if (ranged) {
+            recentGroups = messageRepository.findGroupRankingBetween(
+                    rangeStart(days), rangeEnd(), org.springframework.data.domain.PageRequest.of(0, 10));
+        } else {
+            recentGroups = messageRepository.findRecentGroups();
+        }
 
         for (Object[] row : recentGroups) {
-            String groupId = (String) row[0];
-            String groupName = (String) row[1];
-            Long count = messageRepository.countActiveMessagesByGroupId(groupId);
+            String groupId = row[0] != null ? row[0].toString() : "";
+            String groupName = row[1] != null ? row[1].toString() : null;
+            long count = ranged
+                    ? (row[2] != null ? ((Number) row[2]).longValue() : 0L)
+                    : safeCount(messageRepository.countActiveMessagesByGroupId(groupId));
 
             Map<String, Object> groupData = new HashMap<>();
             groupData.put("groupId", groupId);
@@ -176,10 +251,32 @@ public class DashboardService {
         return ranking;
     }
 
+    private long safeCount(Long value) {
+        return value != null ? value : 0L;
+    }
+
+    /** 0（全量）或 7/30/90（区间）；其它非法值按全量处理 */
+    private int normalizeDaysOrZero(int days) {
+        if (days == 7 || days == 30 || days == 90) return days;
+        return 0;
+    }
+
     public List<Map<String, Object>> getQQRanking() {
+        return getQQRanking(0);
+    }
+
+    /**
+     * 发言用户排行。
+     *
+     * @param days 0 表示全量（历史行为）；7/30/90 时按区间统计
+     */
+    public List<Map<String, Object>> getQQRanking(int days) {
         List<Map<String, Object>> ranking = new ArrayList<>();
         try {
-            List<Object[]> results = messageRepository.findTopQQByMessageCount();
+            List<Object[]> results = normalizeDaysOrZero(days) > 0
+                    ? messageRepository.findTopQQBetween(rangeStart(days), rangeEnd(),
+                            org.springframework.data.domain.PageRequest.of(0, 10))
+                    : messageRepository.findTopQQByMessageCount();
             for (Object[] row : results) {
                 String qq = row[0] != null ? row[0].toString() : "";
                 String nickname = row[1] != null ? row[1].toString() : null;
@@ -198,14 +295,21 @@ public class DashboardService {
     }
 
     public List<Map<String, Object>> getMessageTypeDistribution() {
+        return getMessageTypeDistribution(0);
+    }
+
+    /** 消息类型分布；days 为 0 时全量，7/30/90 时按区间统计 */
+    public List<Map<String, Object>> getMessageTypeDistribution(int days) {
         List<Map<String, Object>> distribution = new ArrayList<>();
         Map<String, Long> typeMap = new HashMap<>();
 
         try {
-            List<Object[]> results = messageRepository.countByMessageType();
+            List<Object[]> results = normalizeDaysOrZero(days) > 0
+                    ? messageRepository.countByMessageTypeBetween(rangeStart(days), rangeEnd())
+                    : messageRepository.countByMessageType();
             for (Object[] row : results) {
                 String typeName = row[0] != null ? row[0].toString() : "UNKNOWN";
-                Long count = row[1] != null ? (Long) row[1] : 0L;
+                Long count = row[1] != null ? ((Number) row[1]).longValue() : 0L;
                 typeMap.put(typeName, count);
             }
         } catch (Exception e) {
@@ -229,12 +333,23 @@ public class DashboardService {
      * 获取今日每小时消息分布（柱状图）
      */
     public List<Map<String, Object>> getHourlyDistribution() {
+        return getHourlyDistribution(0);
+    }
+
+    /**
+     * 小时分布。
+     *
+     * @param days 0 表示仅今天（历史行为）；7/30/90 时把区间内消息按小时聚合
+     */
+    public List<Map<String, Object>> getHourlyDistribution(int days) {
         List<Map<String, Object>> result = new ArrayList<>();
         LocalDate today = LocalDate.now();
 
         int[] hourCounts = new int[24];
         try {
-            List<Object[]> rows = messageRepository.countByHour(today);
+            List<Object[]> rows = normalizeDaysOrZero(days) > 0
+                    ? messageRepository.countByHourBetween(rangeStart(days), rangeEnd())
+                    : messageRepository.countByHour(today);
             for (Object[] row : rows) {
                 int hour = ((Number) row[0]).intValue();
                 long count = row[1] != null ? ((Number) row[1]).longValue() : 0L;
@@ -246,26 +361,27 @@ public class DashboardService {
             // ignore
         }
 
-        int peakHour = 0;
         for (int h = 0; h < 24; h++) {
             Map<String, Object> item = new HashMap<>();
             item.put("hour", String.format("%02d", h));
             item.put("count", hourCounts[h]);
-            if (hourCounts[h] > hourCounts[peakHour]) {
-                peakHour = h;
-            }
             result.add(item);
         }
         return result;
     }
 
     /**
-     * 获取近 7 天 AI 对话消息趋势
+     * 获取 AI 对话消息按天趋势（默认近 7 天）
      */
     public List<Map<String, Object>> getAiTrend() {
+        return getAiTrend(7);
+    }
+
+    public List<Map<String, Object>> getAiTrend(int days) {
+        int rangeDays = normalizeDays(days);
         List<Map<String, Object>> result = new ArrayList<>();
         LocalDate today = LocalDate.now();
-        LocalDateTime start = today.minusDays(6).atStartOfDay();
+        LocalDateTime start = today.minusDays(rangeDays - 1L).atStartOfDay();
         LocalDateTime end = today.plusDays(1).atStartOfDay();
 
         Map<String, Long> dayMap = new HashMap<>();
@@ -281,7 +397,7 @@ public class DashboardService {
         }
 
         DateTimeFormatter fmt = DateTimeFormatter.ofPattern("MM-dd");
-        for (int i = 6; i >= 0; i--) {
+        for (int i = rangeDays - 1; i >= 0; i--) {
             LocalDate date = today.minusDays(i);
             String key = date.toString();
             Map<String, Object> item = new HashMap<>();

@@ -644,8 +644,23 @@ export const adminApi = {
     if (params.page !== undefined) queryParams.append('page', params.page);
     if (params.size !== undefined) queryParams.append('size', params.size);
     if (params.keyword) queryParams.append('keyword', params.keyword);
+    if (params.role) queryParams.append('role', params.role);
+    if (params.active !== undefined && params.active !== '') queryParams.append('active', params.active);
+    if (params.sort) queryParams.append('sort', params.sort);
+    if (params.order) queryParams.append('order', params.order);
     const query = queryParams.toString();
     return request(`/admin/users${query ? '?' + query : ''}`);
+  },
+  /** 导出用户 CSV 直链（沿用列表页的筛选与排序；服务端上限 10 万行） */
+  exportUsersUrl: (params = {}) => {
+    const queryParams = new URLSearchParams();
+    if (params.keyword) queryParams.append('keyword', params.keyword);
+    if (params.role) queryParams.append('role', params.role);
+    if (params.active !== undefined && params.active !== '') queryParams.append('active', params.active);
+    if (params.sort) queryParams.append('sort', params.sort);
+    if (params.order) queryParams.append('order', params.order);
+    const query = queryParams.toString();
+    return `${API_BASE_URL}/admin/users/export${query ? '?' + query : ''}`;
   },
   updateUserRole: (id, role) => request(`/admin/users/${id}/role`, {
     method: 'PUT',
@@ -815,10 +830,27 @@ export const adminCreditsApi = {
   getUserCredits: (params = {}) => {
     const qs = new URLSearchParams();
     if (params.keyword) qs.append('keyword', params.keyword);
+    if (params.tier) qs.append('tier', params.tier);
+    if (params.min !== undefined && params.min !== '') qs.append('min', params.min);
+    if (params.max !== undefined && params.max !== '') qs.append('max', params.max);
+    if (params.sort) qs.append('sort', params.sort);
+    if (params.order) qs.append('order', params.order);
     if (params.page !== undefined) qs.append('page', params.page);
     if (params.size !== undefined) qs.append('size', params.size);
     const query = qs.toString();
     return request(`/credits/admin/user-credits${query ? '?' + query : ''}`);
+  },
+  /** 导出用户积分 CSV 直链（沿用列表页筛选与排序） */
+  exportUserCreditsUrl: (params = {}) => {
+    const qs = new URLSearchParams();
+    if (params.keyword) qs.append('keyword', params.keyword);
+    if (params.tier) qs.append('tier', params.tier);
+    if (params.min !== undefined && params.min !== '') qs.append('min', params.min);
+    if (params.max !== undefined && params.max !== '') qs.append('max', params.max);
+    if (params.sort) qs.append('sort', params.sort);
+    if (params.order) qs.append('order', params.order);
+    const query = qs.toString();
+    return `${API_BASE_URL}/credits/admin/user-credits/export${query ? '?' + query : ''}`;
   },
   /** POST /api/credits/admin/adjust { userId, amount, reason } → 调账结果 */
   adjust: ({ userId, amount, reason }) => request('/credits/admin/adjust', {

@@ -9,6 +9,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -42,33 +43,23 @@ public class AdminController {
     }
 
     /**
-     * 获取用户列表（分页+搜索，管理员专用）
+     * 获取用户列表（分页 + 关键字 + 角色 + 状态 + 排序，管理员专用）
      */
     @GetMapping("/users")
     public ResponseEntity<ApiResponse<Map<String, Object>>> getAllUsers(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
-            @RequestParam(required = false) String keyword) {
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) String role,
+            @RequestParam(required = false) Boolean active,
+            @RequestParam(required = false) String sort,
+            @RequestParam(required = false) String order) {
         Pageable pageable = PageRequest.of(page, size);
-        Page<User> userPage;
-        if (keyword != null && !keyword.isBlank()) {
-            userPage = userService.searchUsers(keyword, pageable);
-        } else {
-            userPage = userService.findAllPaginated(pageable);
-        }
+        Page<User> userPage = userService.queryUsers(keyword, role, active, sort, order, pageable);
 
         List<Map<String, Object>> content = new ArrayList<>();
         for (User user : userPage.getContent()) {
-            Map<String, Object> map = new HashMap<>();
-            map.put("id", user.getId());
-            map.put("username", user.getUsername());
-            map.put("nickname", user.getNickname());
-            map.put("avatar", user.getAvatar());
-            map.put("role", user.getRole());
-            map.put("active", user.isActive());
-            map.put("lastLoginTime", user.getLastLoginTime());
-            map.put("createdAt", user.getCreatedAt());
-            content.add(map);
+            content.add(userToMap(user));
         }
 
         Map<String, Object> pageData = new HashMap<>();
@@ -82,6 +73,71 @@ public class AdminController {
 
         auditLogService.log(currentUsername(), "ADMIN_LIST_USERS", "users", "SUCCESS", "查看用户列表");
         return ResponseEntity.ok(ApiResponse.success(pageData));
+    }
+
+    /**
+     * 导出用户列表为 CSV（沿用列表页的筛选与排序，最多 {@link #USER_EXPORT_MAX_ROWS} 行）。
+     * 超出上限时在响应头 X-Truncated 标记，前端据此提示收窄筛选条件。
+     */
+    @GetMapping("/users/export")
+    public ResponseEntity<byte[]> exportUsers(
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) String role,
+            @RequestParam(required = false) Boolean active,
+            @RequestParam(required = false) String sort,
+            @RequestParam(required = false) String order) {
+        UserService.UserExportResult result =
+                userService.exportUsers(keyword, role, active, sort, order, USER_EXPORT_MAX_ROWS);
+
+        StringBuilder sb = new StringBuilder("\uFEFF");
+        sb.append("ID,账号,昵称,角色,状态,最后登录,注册时间\n");
+        for (User user : result.users()) {
+            sb.append(user.getId()).append(',')
+                    .append(csv(user.getUsername())).append(',')
+                    .append(csv(user.getNickname())).append(',')
+                    .append("ADMIN".equalsIgnoreCase(user.getRole()) ? "管理员" : "普通用户").append(',')
+                    .append(user.isActive() ? "正常" : "已禁用").append(',')
+                    .append(csv(formatTime(user.getLastLoginTime()))).append(',')
+                    .append(csv(formatTime(user.getCreatedAt()))).append('\n');
+        }
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(new org.springframework.http.MediaType("text", "csv", java.nio.charset.StandardCharsets.UTF_8));
+        headers.setContentDispositionFormData("attachment", "users.csv");
+        headers.add("X-Truncated", String.valueOf(result.truncated()));
+        auditLogService.log(currentUsername(), "ADMIN_EXPORT_USERS", "users", "SUCCESS",
+                "导出 " + result.users().size() + " 条用户");
+        return new ResponseEntity<>(sb.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                headers, org.springframework.http.HttpStatus.OK);
+    }
+
+    /** 用户导出上限（超过时截断并在响应头标记） */
+    private static final int USER_EXPORT_MAX_ROWS = 100000;
+
+    private Map<String, Object> userToMap(User user) {
+        Map<String, Object> map = new HashMap<>();
+        map.put("id", user.getId());
+        map.put("username", user.getUsername());
+        map.put("nickname", user.getNickname());
+        map.put("avatar", user.getAvatar());
+        map.put("role", user.getRole());
+        map.put("active", user.isActive());
+        map.put("lastLoginTime", user.getLastLoginTime());
+        map.put("createdAt", user.getCreatedAt());
+        return map;
+    }
+
+    private static String formatTime(java.time.LocalDateTime time) {
+        return time == null ? "" : time.format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+    }
+
+    private static String csv(String value) {
+        if (value == null) return "";
+        String v = value.replace("\r", " ").replace("\n", " ").trim();
+        if (v.contains(",") || v.contains("\"")) {
+            v = '"' + v.replace("\"", "\"\"") + '"';
+        }
+        return v;
     }
 
     /**

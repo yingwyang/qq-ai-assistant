@@ -223,6 +223,42 @@ public interface MessageRepository extends JpaRepository<Message, Long>, JpaSpec
     @Query("SELECT m.messageType, COUNT(m) FROM Message m GROUP BY m.messageType")
     List<Object[]> countByMessageType();
 
+    // ===== 数据概览的时间范围支持（7/30/90 天） =====
+
+    /**
+     * 指定时间范围内的群聊消息排行：
+     * 返回 [groupId, groupName, count]，按消息数倒序（调用方用 Pageable 限制条数）
+     */
+    @Query("SELECT m.groupId, MAX(m.groupName), COUNT(m) FROM Message m "
+            + "WHERE m.sendTime >= :start AND m.sendTime < :end AND m.archived = false AND m.deleted = false "
+            + "GROUP BY m.groupId ORDER BY COUNT(m) DESC")
+    List<Object[]> findGroupRankingBetween(@Param("start") LocalDateTime start, @Param("end") LocalDateTime end,
+                                           org.springframework.data.domain.Pageable pageable);
+
+    /**
+     * 指定时间范围内的发言用户排行：[userQq, nickname, count]
+     */
+    @Query("SELECT m.userQq, MAX(m.userNickname), COUNT(m) FROM Message m "
+            + "WHERE m.sendTime >= :start AND m.sendTime < :end AND m.archived = false AND m.deleted = false "
+            + "GROUP BY m.userQq ORDER BY COUNT(m) DESC")
+    List<Object[]> findTopQQBetween(@Param("start") LocalDateTime start, @Param("end") LocalDateTime end,
+                                    org.springframework.data.domain.Pageable pageable);
+
+    /**
+     * 指定时间范围内的消息类型分布：[messageType, count]
+     */
+    @Query("SELECT m.messageType, COUNT(m) FROM Message m "
+            + "WHERE m.sendTime >= :start AND m.sendTime < :end GROUP BY m.messageType")
+    List<Object[]> countByMessageTypeBetween(@Param("start") LocalDateTime start, @Param("end") LocalDateTime end);
+
+    /**
+     * 指定时间范围内的「按小时」分布（把区间内所有消息按小时聚合）：[hour, count]
+     */
+    @Query(value = "SELECT HOUR(send_time) AS hour, COUNT(*) AS cnt FROM messages "
+            + "WHERE send_time >= :start AND send_time < :end GROUP BY HOUR(send_time) ORDER BY hour",
+            nativeQuery = true)
+    List<Object[]> countByHourBetween(@Param("start") LocalDateTime start, @Param("end") LocalDateTime end);
+
     /**
      * 统计群聊未读消息数量（未归档&未被用户删除）
      */
