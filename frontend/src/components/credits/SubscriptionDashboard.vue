@@ -130,7 +130,7 @@
               <div v-for="plan in monthlyCardPlans" :key="plan.planCode"
                    class="plan-card">
                 <div class="plan-card-name">{{ plan.planName }}</div>
-                <div class="plan-card-price"><sup>¥</sup>{{ Number(plan.price || 0).toFixed(1) }}<sub>/{{ plan.durationDays }}天</sub></div>
+                <div class="plan-card-price"><sup>¥</sup>{{ plan.priceText || formatYuan(plan.price) }}<sub>/{{ plan.durationDays }}天</sub></div>
                 <div class="plan-card-credits">+{{ plan.credits }} 积分</div>
                 <ul class="plan-card-features">
                   <li v-for="(f, i) in (plan.features || [])" :key="i">
@@ -164,7 +164,7 @@
               <div v-for="plan in directPurchasePlans" :key="plan.planCode"
                    class="plan-card">
                 <div class="plan-card-name">{{ plan.planName }}</div>
-                <div class="plan-card-price"><sup>¥</sup>{{ Number(plan.price || 0).toFixed(0) }}</div>
+                <div class="plan-card-price"><sup>¥</sup>{{ plan.priceText || formatYuan(plan.price) }}</div>
                 <div class="plan-card-credits">+{{ plan.credits }} 积分</div>
                 <button
                   class="plan-card-btn"
@@ -378,15 +378,26 @@ function tierLabel(tier) {
   return TIER_LABEL_MAP[tier] || tier || '免费版';
 }
 
+/**
+ * 价格文案：整数不带小数（59 → "59"），有角分才带（9.9 → "9.9"，9.95 → "9.95"）。
+ *
+ * 之前直购档位用 toFixed(0) 显示，9.9 元会显示成「¥10」——卡片价与下单实付不一致。
+ */
+function formatYuan(value) {
+  const n = Number(value || 0);
+  if (!Number.isFinite(n)) return '0';
+  return Number.isInteger(n) ? String(n) : String(Number(n.toFixed(2)));
+}
+
 // 标准化后端 plan → 模板字段
-function normalizePlan(p) {
-  if (!p) return null;
+function normalizePlan(p) {  if (!p) return null;
   const tier = p.tier || p.planCode || 'FREE';
   return {
     planCode: tierToPlanCode(tier) ?? p.planCode,
     tier,
     planName: p.planName || tierLabel(tier),
     price: p.priceYuan != null ? p.priceYuan : p.price,
+    priceText: formatYuan(p.priceYuan != null ? p.priceYuan : p.price),
     priceCents: p.priceCents,
     credits: p.pointsGranted != null ? p.pointsGranted : p.credits,
     durationDays: p.durationDays || 30,
@@ -680,14 +691,20 @@ export default {
       if (data.largeCardDiscount != null) largeCardDiscount.value = Number(data.largeCardDiscount);
     }
 
+    /**
+     * 接口不可用时的兜底档位（仅用于渲染骨架，真值一律以 GET /api/subscriptions/plans 为准）。
+     *
+     * 注意：这里的数字必须与后端 credit_rule 的出厂默认值保持一致 ——
+     * 旧版这张兜底表停留在更早的定价（600/3500/16000/45000），接口一挂就会显示过期价格。
+     */
     function mockPlans() {
       return [
         { planCode: 'SMALL_MONTH_CARD', tier: 'SMALL_MONTH_CARD', planName: '小月卡', price: 30, credits: 3000, durationDays: 30, category: 'MONTHLY_CARD', features: ['3000 积分基础', '每日签到额外 +100 积分', '基础模型支持', '专属折扣 9 折', '30 天有效'] },
         { planCode: 'LARGE_MONTH_CARD', tier: 'LARGE_MONTH_CARD', planName: '大月卡', price: 68, credits: 8000, durationDays: 30, category: 'MONTHLY_CARD', features: ['8000 积分基础', '每日签到额外 +300 积分', '全模型支持', '专属折扣 8 折', '优先响应队列', '30 天有效'] },
-        { planCode: 'LITE', tier: 'LITE', planName: '直购积分·600', price: 6, credits: 600, durationDays: 30, category: 'DIRECT', features: ['600 积分', '基础模型支持', '标准响应速度'] },
-        { planCode: 'PRO', tier: 'PRO', planName: '直购积分·3500', price: 30, credits: 3500, durationDays: 30, category: 'DIRECT', features: ['3500 积分', '全模型支持', '优先响应', '30 天文件存储'] },
-        { planCode: 'PROPLUS', tier: 'PROPLUS', planName: '直购积分·16000', price: 128, credits: 16000, durationDays: 30, category: 'DIRECT', features: ['16000 积分', '全模型支持', '高优先级队列', '高级分析功能', '90 天文件存储'] },
-        { planCode: 'ULTRA', tier: 'ULTRA', planName: '直购积分·45000', price: 328, credits: 45000, durationDays: 30, category: 'DIRECT', features: ['45000 积分', '全模型支持', '最高优先级', '全部高级功能', '永久文件存储'] },
+        { planCode: 'LITE', tier: 'LITE', planName: '直购积分·2000', price: 9.9, credits: 2000, durationDays: 30, category: 'DIRECT', features: ['2000 积分', '基础模型支持', '标准响应速度'] },
+        { planCode: 'PRO', tier: 'PRO', planName: '直购积分·4000', price: 59, credits: 4000, durationDays: 30, category: 'DIRECT', features: ['4000 积分', '全模型支持', '优先响应', '30 天文件存储'] },
+        { planCode: 'PROPLUS', tier: 'PROPLUS', planName: '直购积分·12000', price: 219, credits: 12000, durationDays: 30, category: 'DIRECT', features: ['12000 积分', '全模型支持', '高优先级队列', '高级分析功能', '90 天文件存储'] },
+        { planCode: 'ULTRA', tier: 'ULTRA', planName: '直购积分·40000', price: 629, credits: 40000, durationDays: 30, category: 'DIRECT', features: ['40000 积分', '全模型支持', '最高优先级', '全部高级功能', '永久文件存储'] },
         { planCode: 'MEGA', tier: 'MEGA', planName: '直购积分·100000', price: 648, credits: 100000, durationDays: 30, category: 'DIRECT', features: ['100000 积分', '全模型支持', '最高优先级', '全部高级功能', '永久文件存储', '专属客服支持'] }
       ];
     }
@@ -950,7 +967,8 @@ export default {
       showRefundDialog, refundTarget, refundReason, refundSubmitting, submitRefund,
       statusText, txTypeText, formatShortDate, formatLongDate,
       showDisputeDialog, disputeTarget, disputeReason, disputeSubmitting, openDisputeDialog, submitDispute,
-      copyText, goToCreditsWithRelated, goToOrders
+      copyText, goToCreditsWithRelated, goToOrders,
+      formatYuan
     };
   }
 };

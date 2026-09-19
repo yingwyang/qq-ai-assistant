@@ -57,9 +57,8 @@ public class CreditService {
     private static final List<SubscriptionTier> MONTHLY_CARD_TIERS = Arrays.asList(
             SubscriptionTier.SMALL_MONTH_CARD, SubscriptionTier.LARGE_MONTH_CARD);
 
-    /** 月卡每日签到额外积分：小月卡 +100、大月卡 +300；双持为两者叠加（+400）。 */
-    private static final int SMALL_MONTH_CARD_DAILY_BONUS = 100;
-    private static final int LARGE_MONTH_CARD_DAILY_BONUS = 300;
+    // 月卡每日签到额外积分（小月卡 / 大月卡 / 双持叠加）自 2026-09-19 起读「规则配置」表单，
+    // 不再写死常量：见 CreditRule.planSmallMonthCardDailyBonus / planLargeMonthCardDailyBonus。
 
     @Autowired
     private UserCreditRepository userCreditRepository;
@@ -864,13 +863,23 @@ public class CreditService {
     }
 
     /**
-     * 月卡每日额外积分：小月卡 100、大月卡 300，**双持叠加为 400**。
+     * 月卡每日额外积分（小月卡 / 大月卡；双持 = 两者之和）。
+     *
+     * <p>数值来自「规则配置」表单（{@code CreditRule.planSmallMonthCardDailyBonus} 等），
+     * 管理员改完立即生效，客户端订阅页的「每日签到额外 +N 积分」也读同一份配置。</p>
      */
     public int monthlyCardBonusFor(SubscriptionTier tier) {
-        if (tier == SubscriptionTier.LARGE_MONTH_CARD) return LARGE_MONTH_CARD_DAILY_BONUS;
-        if (tier == SubscriptionTier.SMALL_MONTH_CARD) return SMALL_MONTH_CARD_DAILY_BONUS;
-        if (tier == SubscriptionTier.ALL) return SMALL_MONTH_CARD_DAILY_BONUS + LARGE_MONTH_CARD_DAILY_BONUS;
+        CreditRule rule = creditRuleService.getRule();
+        if (tier == SubscriptionTier.LARGE_MONTH_CARD) return safeBonus(rule.getPlanLargeMonthCardDailyBonus());
+        if (tier == SubscriptionTier.SMALL_MONTH_CARD) return safeBonus(rule.getPlanSmallMonthCardDailyBonus());
+        if (tier == SubscriptionTier.ALL) {
+            return safeBonus(rule.getPlanSmallMonthCardDailyBonus()) + safeBonus(rule.getPlanLargeMonthCardDailyBonus());
+        }
         return 0;
+    }
+
+    private static int safeBonus(Integer v) {
+        return v == null || v < 0 ? 0 : v;
     }
 
     /** 用户当前有效月卡的每日额外积分合计（小 100 / 大 300 / 双持 400）；无卡返回 0。 */

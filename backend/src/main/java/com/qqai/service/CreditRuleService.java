@@ -86,6 +86,15 @@ public class CreditRuleService {
         if (updates.getPlanUltraPrice() != null) existing.setPlanUltraPrice(updates.getPlanUltraPrice());
         if (updates.getPlanUltraCredit() != null) existing.setPlanUltraCredit(updates.getPlanUltraCredit());
         if (updates.getPlanDurationDays() != null) existing.setPlanDurationDays(updates.getPlanDurationDays());
+        // 会员月卡 / MEGA（2026-09-19 起从硬编码改为表单配置）
+        if (updates.getPlanSmallMonthCardPrice() != null) existing.setPlanSmallMonthCardPrice(updates.getPlanSmallMonthCardPrice());
+        if (updates.getPlanSmallMonthCardCredit() != null) existing.setPlanSmallMonthCardCredit(updates.getPlanSmallMonthCardCredit());
+        if (updates.getPlanSmallMonthCardDailyBonus() != null) existing.setPlanSmallMonthCardDailyBonus(updates.getPlanSmallMonthCardDailyBonus());
+        if (updates.getPlanLargeMonthCardPrice() != null) existing.setPlanLargeMonthCardPrice(updates.getPlanLargeMonthCardPrice());
+        if (updates.getPlanLargeMonthCardCredit() != null) existing.setPlanLargeMonthCardCredit(updates.getPlanLargeMonthCardCredit());
+        if (updates.getPlanLargeMonthCardDailyBonus() != null) existing.setPlanLargeMonthCardDailyBonus(updates.getPlanLargeMonthCardDailyBonus());
+        if (updates.getPlanMegaPrice() != null) existing.setPlanMegaPrice(updates.getPlanMegaPrice());
+        if (updates.getPlanMegaCredit() != null) existing.setPlanMegaCredit(updates.getPlanMegaCredit());
         // 精细化计费字段
         if (updates.getModelRates() != null) existing.setModelRates(updates.getModelRates());
         if (updates.getImageExtraCost() != null) existing.setImageExtraCost(updates.getImageExtraCost());
@@ -149,6 +158,16 @@ public class CreditRuleService {
         nonNegativeDecimal(u.getPlanProPrice(), "Pro 价格");
         nonNegativeDecimal(u.getPlanProPlusPrice(), "ProPlus 价格");
         nonNegativeDecimal(u.getPlanUltraPrice(), "Ultra 价格");
+
+        // 会员月卡 / MEGA
+        nonNegativeDecimal(u.getPlanSmallMonthCardPrice(), "小月卡价格");
+        nonNegative(u.getPlanSmallMonthCardCredit(), "小月卡积分");
+        nonNegative(u.getPlanSmallMonthCardDailyBonus(), "小月卡每日签到加成");
+        nonNegativeDecimal(u.getPlanLargeMonthCardPrice(), "大月卡价格");
+        nonNegative(u.getPlanLargeMonthCardCredit(), "大月卡积分");
+        nonNegative(u.getPlanLargeMonthCardDailyBonus(), "大月卡每日签到加成");
+        nonNegativeDecimal(u.getPlanMegaPrice(), "直购积分·100000 价格");
+        nonNegative(u.getPlanMegaCredit(), "直购积分·100000 积分");
 
         if (u.getOvertaxRate() != null && u.getOvertaxRate() < 1.0) {
             throw new BizException(400, "超配额倍率不能小于 1.0（1.0 = 不涨价）");
@@ -270,6 +289,16 @@ public class CreditRuleService {
         rule.setPlanUltraPrice(new BigDecimal("629"));
         rule.setPlanUltraCredit(40000);
         rule.setPlanDurationDays(30);
+        // 会员月卡 / MEGA（与客户端订阅页一致：小月卡 ¥30/3000/每日+100，大月卡 ¥68/8000/每日+300，
+        // 双持每日加成 = 100+300 = +400；直购积分·100000 = ¥648）
+        rule.setPlanSmallMonthCardPrice(new BigDecimal("30"));
+        rule.setPlanSmallMonthCardCredit(3000);
+        rule.setPlanSmallMonthCardDailyBonus(100);
+        rule.setPlanLargeMonthCardPrice(new BigDecimal("68"));
+        rule.setPlanLargeMonthCardCredit(8000);
+        rule.setPlanLargeMonthCardDailyBonus(300);
+        rule.setPlanMegaPrice(new BigDecimal("648"));
+        rule.setPlanMegaCredit(100000);
         // 精细化计费默认值
         rule.setModelRates("{\"default\":1.0}");
         rule.setImageExtraCost(5);

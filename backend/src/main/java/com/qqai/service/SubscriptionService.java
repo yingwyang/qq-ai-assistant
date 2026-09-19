@@ -740,9 +740,8 @@ public class SubscriptionService {
     }
 
     /**
-     * 套餐价格唯一来源:四档直购积分(LITE/PRO/PROPLUS/ULTRA)读 credit_rule 数据库配置;
-     * MEGA 与月卡两档数据库无对应字段,保留硬编码(与 getPlans 的硬编码保持一致)。
-     * 管理员在后台修改积分规则后立即生效。
+     * 套餐价格唯一来源：全部档位都读 {@code credit_rule} 数据库配置（2026-09-19 起月卡与 MEGA 也进了表单，
+     * 不再是硬编码）。管理员在后台「规则配置」改完立即生效，客户端订阅页与「资金流水」的模拟现金账同步跟着变。
      */
     public BigDecimal getPlanPrice(SubscriptionTier tier, CreditRule rule) {
         return switch (tier) {
@@ -750,9 +749,9 @@ public class SubscriptionService {
             case PRO -> rule.getPlanProPrice();
             case PROPLUS -> rule.getPlanProPlusPrice();
             case ULTRA -> rule.getPlanUltraPrice();
-            case MEGA -> new BigDecimal("648");
-            case SMALL_MONTH_CARD -> new BigDecimal("30");
-            case LARGE_MONTH_CARD -> new BigDecimal("68");
+            case MEGA -> rule.getPlanMegaPrice();
+            case SMALL_MONTH_CARD -> rule.getPlanSmallMonthCardPrice();
+            case LARGE_MONTH_CARD -> rule.getPlanLargeMonthCardPrice();
             default -> throw new BizException(400, CreditErrorCode.PLAN_NOT_FOUND, "无效套餐");
         };
     }
@@ -763,10 +762,24 @@ public class SubscriptionService {
             case PRO -> rule.getPlanProCredit();
             case PROPLUS -> rule.getPlanProPlusCredit();
             case ULTRA -> rule.getPlanUltraCredit();
-            case MEGA -> 100000;
-            case SMALL_MONTH_CARD -> 3000;
-            case LARGE_MONTH_CARD -> 8000;
+            case MEGA -> rule.getPlanMegaCredit();
+            case SMALL_MONTH_CARD -> rule.getPlanSmallMonthCardCredit();
+            case LARGE_MONTH_CARD -> rule.getPlanLargeMonthCardCredit();
             default -> throw new BizException(400, CreditErrorCode.PLAN_NOT_FOUND, "无效套餐");
         };
+    }
+
+    /** 月卡每日签到额外积分（小 / 大；双持 = 两者之和）——读表单配置 */
+    public int getMonthlyCardDailyBonus(SubscriptionTier tier, CreditRule rule) {
+        if (tier == SubscriptionTier.SMALL_MONTH_CARD) return safeBonus(rule.getPlanSmallMonthCardDailyBonus());
+        if (tier == SubscriptionTier.LARGE_MONTH_CARD) return safeBonus(rule.getPlanLargeMonthCardDailyBonus());
+        if (tier == SubscriptionTier.ALL) {
+            return safeBonus(rule.getPlanSmallMonthCardDailyBonus()) + safeBonus(rule.getPlanLargeMonthCardDailyBonus());
+        }
+        return 0;
+    }
+
+    private static int safeBonus(Integer v) {
+        return v == null || v < 0 ? 0 : v;
     }
 }

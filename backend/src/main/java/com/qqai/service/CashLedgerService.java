@@ -186,16 +186,16 @@ public class CashLedgerService {
         return m.find() ? m.group(1) : null;
     }
 
-    /** SubscriptionService 不可用时（单测 new 出来的场景）的兜底价 */
+    /** SubscriptionService 不可用时（单测 new 出来的场景）的兜底价 —— 与 SubscriptionService 同一份规则字段 */
     private static BigDecimal fallbackPlanPrice(com.qqai.entity.enums.SubscriptionTier tier, CreditRule rule) {
         return switch (tier) {
             case LITE -> rule.getPlanLitePrice();
             case PRO -> rule.getPlanProPrice();
             case PROPLUS -> rule.getPlanProPlusPrice();
             case ULTRA -> rule.getPlanUltraPrice();
-            case MEGA -> new BigDecimal("648");
-            case SMALL_MONTH_CARD -> new BigDecimal("30");
-            case LARGE_MONTH_CARD -> new BigDecimal("68");
+            case MEGA -> rule.getPlanMegaPrice();
+            case SMALL_MONTH_CARD -> rule.getPlanSmallMonthCardPrice();
+            case LARGE_MONTH_CARD -> rule.getPlanLargeMonthCardPrice();
             default -> null;
         };
     }

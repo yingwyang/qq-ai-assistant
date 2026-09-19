@@ -29,6 +29,7 @@ export const RULE_FORM_FALLBACK = {
   minCost: 5,
   defaultCostPerMsg: 10,
   adminFree: true,
+  // 直购积分（客户端「直购积分·N」，代码里的 tier 名只作内部标识）
   planLitePrice: 9.9,
   planLiteCredit: 2000,
   planProPrice: 59,
@@ -37,6 +38,15 @@ export const RULE_FORM_FALLBACK = {
   planProPlusCredit: 12000,
   planUltraPrice: 629,
   planUltraCredit: 40000,
+  planMegaPrice: 648,
+  planMegaCredit: 100000,
+  // 会员月卡
+  planSmallMonthCardPrice: 30,
+  planSmallMonthCardCredit: 3000,
+  planSmallMonthCardDailyBonus: 100,
+  planLargeMonthCardPrice: 68,
+  planLargeMonthCardCredit: 8000,
+  planLargeMonthCardDailyBonus: 300,
   planDurationDays: 30,
   imageExtraCost: 5,
   analyzeBaseCost: 10,
@@ -78,7 +88,25 @@ export const FIELD_META = {
   contextFreeMsgCount: { label: '上下文免费条数', unit: '条', hint: '前 N 条历史消息不计费', group: 'discount' },
   contextExtraCostPerMsg: { label: '上下文每条增量', unit: '积分', hint: '超过免费条数后每条 +N', group: 'discount' },
   dailyCapCost: { label: '每日封顶消耗', unit: '积分', hint: '单日累计达到后本次免费；0 = 不限', group: 'discount' },
-  planDurationDays: { label: '套餐时长', unit: '天', hint: '4 档直购积分共享', positive: true, group: 'plan' },
+  planDurationDays: { label: '套餐时长', unit: '天', hint: '直购积分与月卡共享', positive: true, group: 'plan' },
+  // ====== 直购积分（客户端「直购积分·N」）======
+  planLitePrice: { label: '直购积分·2000 价格', unit: '元', group: 'plan' },
+  planLiteCredit: { label: '直购积分·2000 赠送积分', unit: '积分', group: 'plan' },
+  planProPrice: { label: '直购积分·4000 价格', unit: '元', group: 'plan' },
+  planProCredit: { label: '直购积分·4000 赠送积分', unit: '积分', group: 'plan' },
+  planProPlusPrice: { label: '直购积分·12000 价格', unit: '元', group: 'plan' },
+  planProPlusCredit: { label: '直购积分·12000 赠送积分', unit: '积分', group: 'plan' },
+  planUltraPrice: { label: '直购积分·40000 价格', unit: '元', group: 'plan' },
+  planUltraCredit: { label: '直购积分·40000 赠送积分', unit: '积分', group: 'plan' },
+  planMegaPrice: { label: '直购积分·100000 价格', unit: '元', group: 'plan' },
+  planMegaCredit: { label: '直购积分·100000 赠送积分', unit: '积分', group: 'plan' },
+  // ====== 会员月卡 ======
+  planSmallMonthCardPrice: { label: '小月卡价格', unit: '元', group: 'card' },
+  planSmallMonthCardCredit: { label: '小月卡赠送积分', unit: '积分', group: 'card' },
+  planSmallMonthCardDailyBonus: { label: '小月卡每日签到加成', unit: '积分/天', group: 'card' },
+  planLargeMonthCardPrice: { label: '大月卡价格', unit: '元', group: 'card' },
+  planLargeMonthCardCredit: { label: '大月卡赠送积分', unit: '积分', group: 'card' },
+  planLargeMonthCardDailyBonus: { label: '大月卡每日签到加成', unit: '积分/天', group: 'card' },
 };
 
 const INT_FIELDS = [
@@ -156,11 +184,34 @@ export function useAdminCreditsRule({ showSystemMsg } = {}) {
   const snapshot = ref('');
 
   const planMeta = [
-    { key: 'Lite', name: '轻享版 Lite', priceField: 'planLitePrice', creditField: 'planLiteCredit', color: '#4caf50' },
-    { key: 'Pro', name: '专业版 Pro', priceField: 'planProPrice', creditField: 'planProCredit', color: '#2196f3' },
-    { key: 'ProPlus', name: '旗舰版 ProPlus', priceField: 'planProPlusPrice', creditField: 'planProPlusCredit', color: '#9c27b0' },
-    { key: 'Ultra', name: '至尊版 Ultra', priceField: 'planUltraPrice', creditField: 'planUltraCredit', color: '#ff9800' },
+    { key: 'LITE', name: '直购积分·2000', tier: 'LITE', priceField: 'planLitePrice', creditField: 'planLiteCredit', color: '#4caf50' },
+    { key: 'PRO', name: '直购积分·4000', tier: 'PRO', priceField: 'planProPrice', creditField: 'planProCredit', color: '#2196f3' },
+    { key: 'PROPLUS', name: '直购积分·12000', tier: 'PROPLUS', priceField: 'planProPlusPrice', creditField: 'planProPlusCredit', color: '#9c27b0' },
+    { key: 'ULTRA', name: '直购积分·40000', tier: 'ULTRA', priceField: 'planUltraPrice', creditField: 'planUltraCredit', color: '#ff9800' },
+    { key: 'MEGA', name: '直购积分·100000', tier: 'MEGA', priceField: 'planMegaPrice', creditField: 'planMegaCredit', color: '#e91e63' },
   ];
+
+  /** 会员月卡：价格 / 赠送积分 / 每日签到加成（双持 = 两张卡相加） */
+  const cardMeta = [
+    {
+      key: 'SMALL_MONTH_CARD', name: '小月卡', tier: 'SMALL_MONTH_CARD', color: '#ffb300',
+      priceField: 'planSmallMonthCardPrice', creditField: 'planSmallMonthCardCredit',
+      bonusField: 'planSmallMonthCardDailyBonus', discountField: 'smallMonthCardDiscount',
+    },
+    {
+      key: 'LARGE_MONTH_CARD', name: '大月卡', tier: 'LARGE_MONTH_CARD', color: '#fb8c00',
+      priceField: 'planLargeMonthCardPrice', creditField: 'planLargeMonthCardCredit',
+      bonusField: 'planLargeMonthCardDailyBonus', discountField: 'largeMonthCardDiscount',
+    },
+  ];
+
+  /** 双持（小月卡 + 大月卡同时有效）的每日加成与折扣 */
+  const comboSummary = computed(() => ({
+    dailyBonus: (Number(form.planSmallMonthCardDailyBonus) || 0) + (Number(form.planLargeMonthCardDailyBonus) || 0),
+    price: (Number(form.planSmallMonthCardPrice) || 0) + (Number(form.planLargeMonthCardPrice) || 0),
+    credits: (Number(form.planSmallMonthCardCredit) || 0) + (Number(form.planLargeMonthCardCredit) || 0),
+    discount: form.allTierDiscount,
+  }));
 
   /** 当前表单的可比较快照（含结构化子表单） */
   function serialize() {
@@ -183,10 +234,14 @@ export function useAdminCreditsRule({ showSystemMsg } = {}) {
       'imageExtraCost', 'analyzeBaseCost', 'analyzeCostPerMsg', 'ttsCharsPerCredit',
       'ttsMinCost', 'monthlyFreeQuota', 'contextExtraCostPerMsg', 'contextFreeMsgCount',
       'dailyCapCost', 'planDurationDays', 'planLiteCredit', 'planProCredit',
-      'planProPlusCredit', 'planUltraCredit', 'newUserBonus', 'signInPoints'].forEach((k) => {
+      'planProPlusCredit', 'planUltraCredit', 'planMegaCredit',
+      'planSmallMonthCardCredit', 'planSmallMonthCardDailyBonus',
+      'planLargeMonthCardCredit', 'planLargeMonthCardDailyBonus',
+      'newUserBonus', 'signInPoints'].forEach((k) => {
       if (rule[k] !== null && rule[k] !== undefined) form[k] = Number(rule[k]);
     });
-    ['planLitePrice', 'planProPrice', 'planProPlusPrice', 'planUltraPrice'].forEach((k) => {
+    ['planLitePrice', 'planProPrice', 'planProPlusPrice', 'planUltraPrice', 'planMegaPrice',
+      'planSmallMonthCardPrice', 'planLargeMonthCardPrice'].forEach((k) => {
       if (rule[k] !== null && rule[k] !== undefined) form[k] = Number(rule[k]);
     });
     ['overtaxRate', 'smallMonthCardDiscount', 'largeMonthCardDiscount', 'allTierDiscount'].forEach((k) => {
@@ -216,7 +271,8 @@ export function useAdminCreditsRule({ showSystemMsg } = {}) {
       if (meta.discount && (v < 0.01 || v > 1.0)) e[key] = `${meta.label}需在 0.01~1.0 之间（1.0 = 不打折）`;
       if (key === 'overtaxRate' && v < 1.0) e[key] = '超配额倍率不能小于 1.0';
     });
-    ['planLitePrice', 'planProPrice', 'planProPlusPrice', 'planUltraPrice'].forEach((k) => {
+    ['planLitePrice', 'planProPrice', 'planProPlusPrice', 'planUltraPrice', 'planMegaPrice',
+      'planSmallMonthCardPrice', 'planLargeMonthCardPrice'].forEach((k) => {
       if (Number(form[k]) < 0) e[k] = '价格不能为负';
     });
     INT_FIELDS.forEach((k) => {
@@ -332,6 +388,14 @@ export function useAdminCreditsRule({ showSystemMsg } = {}) {
         planProPlusCredit: Number(form.planProPlusCredit),
         planUltraPrice: Number(form.planUltraPrice),
         planUltraCredit: Number(form.planUltraCredit),
+        planMegaPrice: Number(form.planMegaPrice),
+        planMegaCredit: Number(form.planMegaCredit),
+        planSmallMonthCardPrice: Number(form.planSmallMonthCardPrice),
+        planSmallMonthCardCredit: Number(form.planSmallMonthCardCredit),
+        planSmallMonthCardDailyBonus: Number(form.planSmallMonthCardDailyBonus),
+        planLargeMonthCardPrice: Number(form.planLargeMonthCardPrice),
+        planLargeMonthCardCredit: Number(form.planLargeMonthCardCredit),
+        planLargeMonthCardDailyBonus: Number(form.planLargeMonthCardDailyBonus),
         planDurationDays: Number(form.planDurationDays),
         modelRates: rateRowsToJson(modelRateRows.value),
         imageExtraCost: Number(form.imageExtraCost),
@@ -459,7 +523,7 @@ export function useAdminCreditsRule({ showSystemMsg } = {}) {
 
   return {
     ruleLoading, ruleSaving, defaultsLoading, loaded,
-    form, planMeta, errors, errorList, isValid, isDirty,
+    form, planMeta, cardMeta, comboSummary, errors, errorList, isValid, isDirty,
     modelRateRows, analyzeRateRows, thresholdRows,
     addModelRate, removeModelRate, addAnalyzeRate, removeAnalyzeRate,
     addThreshold, removeThreshold,

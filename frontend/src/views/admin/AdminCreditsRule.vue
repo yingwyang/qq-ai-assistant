@@ -190,11 +190,11 @@
           </div>
         </section>
 
-        <!-- 套餐 -->
+        <!-- 直购积分 + 会员月卡 -->
         <section id="sec-plan" class="section-card">
           <div class="section-head">
-            <h4>套餐配置</h4>
-            <span class="section-desc">4 档直购积分的价格与赠送积分（月卡价格由后端固定）</span>
+            <h4>直购积分</h4>
+            <span class="section-desc">客户端订阅页「直购积分」分组：按档购买，立即到账（名称按积分数展示）</span>
           </div>
           <div class="plans-grid">
             <div v-for="plan in planMeta" :key="plan.key" class="plan-card" :style="{ borderTopColor: plan.color }">
@@ -213,6 +213,52 @@
               </div>
             </div>
           </div>
+        </section>
+
+        <section id="sec-card" class="section-card">
+          <div class="section-head">
+            <h4>会员月卡</h4>
+            <span class="section-desc">客户端订阅页「会员月卡」分组：{{ form.planDurationDays }} 天权益，每日签到额外发积分</span>
+          </div>
+          <div class="plans-grid">
+            <div v-for="card in cardMeta" :key="card.key" class="plan-card" :style="{ borderTopColor: card.color }">
+              <div class="plan-name">{{ card.name }}</div>
+              <div class="plan-row">
+                <label>价格（元）</label>
+                <input v-model.number="form[card.priceField]" type="number" min="0" step="0.01" class="config-input" />
+              </div>
+              <div class="plan-row">
+                <label>赠送积分</label>
+                <input v-model.number="form[card.creditField]" type="number" min="0" class="config-input" />
+              </div>
+              <div class="plan-row">
+                <label>每日签到额外积分</label>
+                <input v-model.number="form[card.bonusField]" type="number" min="0" class="config-input" />
+              </div>
+              <div class="plan-meta">
+                折扣 ×{{ Number(form[card.discountField] || 1).toFixed(2) }}
+                · ¥{{ Number(form[card.priceField] || 0).toFixed(2) }} / {{ form[card.creditField] || 0 }} 积分
+              </div>
+            </div>
+            <div class="plan-card combo-card">
+              <div class="plan-name">双持（大小月卡同时有效）</div>
+              <div class="combo-line">
+                <span class="combo-label">每日签到额外</span>
+                <strong>+{{ comboSummary.dailyBonus }}</strong>
+                <span class="combo-hint">= 小 {{ form.planSmallMonthCardDailyBonus || 0 }} + 大 {{ form.planLargeMonthCardDailyBonus || 0 }}（自动叠加）</span>
+              </div>
+              <div class="combo-line">
+                <span class="combo-label">两张卡合计</span>
+                <strong>¥{{ Number(comboSummary.price).toFixed(2) }}</strong>
+                <span class="combo-hint">{{ comboSummary.credits }} 积分（两笔分别到账）</span>
+              </div>
+              <div class="combo-line">
+                <span class="combo-label">生效折扣</span>
+                <strong>×{{ Number(comboSummary.discount || 1).toFixed(2) }}</strong>
+                <span class="combo-hint">来自下方「折扣与封顶」里的双持折扣</span>
+              </div>
+            </div>
+          </div>
           <div class="field-grid plan-duration">
             <div class="field" :class="{ bad: errors.planDurationDays }">
               <label>{{ meta('planDurationDays').label }}<span class="unit">（{{ meta('planDurationDays').unit }}）</span></label>
@@ -222,8 +268,8 @@
             </div>
           </div>
           <div class="inline-note">
-            月卡（小月卡 ¥30/3000 积分、大月卡 ¥68/8000 积分、MEGA ¥648/100000 积分）由后端硬编码，不在这张表单里；
-            订阅收入会按这些价格计入后台「资金流水」的模拟现金账。
+            月卡与直购积分都在表单里，改完保存立即生效：客户端订阅页的卡片名称、价格、权益文案，
+            以及后台「资金流水」里按套餐价折算的订阅收入都会同步变化。
           </div>
         </section>
 
@@ -334,7 +380,8 @@ const SECTIONS = [
   { id: 'sec-ai', title: 'AI 对话计费', icon: 'chat' },
   { id: 'sec-analyze', title: '分析与语音', icon: 'file' },
   { id: 'sec-discount', title: '折扣与封顶', icon: 'tag' },
-  { id: 'sec-plan', title: '套餐配置', icon: 'wallet' },
+  { id: 'sec-plan', title: '直购积分', icon: 'wallet' },
+  { id: 'sec-card', title: '会员月卡', icon: 'coin' },
   { id: 'sec-preview', title: '费用试算', icon: 'chart' },
 ];
 
@@ -350,6 +397,15 @@ const FIELD_SECTION = {
   allTierDiscount: 'sec-discount', contextFreeMsgCount: 'sec-discount',
   contextExtraCostPerMsg: 'sec-discount', dailyCapCost: 'sec-discount', thresholds: 'sec-discount',
   planDurationDays: 'sec-plan',
+  planLitePrice: 'sec-plan', planLiteCredit: 'sec-plan',
+  planProPrice: 'sec-plan', planProCredit: 'sec-plan',
+  planProPlusPrice: 'sec-plan', planProPlusCredit: 'sec-plan',
+  planUltraPrice: 'sec-plan', planUltraCredit: 'sec-plan',
+  planMegaPrice: 'sec-plan', planMegaCredit: 'sec-plan',
+  planSmallMonthCardPrice: 'sec-card', planSmallMonthCardCredit: 'sec-card',
+  planSmallMonthCardDailyBonus: 'sec-card',
+  planLargeMonthCardPrice: 'sec-card', planLargeMonthCardCredit: 'sec-card',
+  planLargeMonthCardDailyBonus: 'sec-card',
 };
 
 /** 与后端 credits.cash.cost-per-credit 默认值一致：100 积分 = ¥1 */
@@ -505,6 +561,11 @@ export default {
 .plan-row { display: flex; flex-direction: column; gap: 4px; }
 .plan-row label { font-size: 12px; color: var(--text-secondary, #666); }
 .plan-meta { font-size: 11px; color: var(--text-muted, #999); }
+.combo-card { border-top-color: #607d8b; background: var(--card-bg, #fff); }
+.combo-line { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; font-size: 12px; }
+.combo-label { color: var(--text-secondary, #666); min-width: 84px; }
+.combo-line strong { font-size: 15px; color: var(--accent-color, #3498db); font-variant-numeric: tabular-nums; }
+.combo-hint { font-size: 11px; color: var(--text-muted, #999); }
 .plan-duration { margin-top: 14px; grid-template-columns: minmax(200px, 240px); }
 
 .inline-note { margin-top: 12px; padding: 9px 12px; border-radius: 6px; font-size: 12px; line-height: 1.6; color: var(--text-secondary, #666); background: var(--bg-tertiary, #f8f9fa); }

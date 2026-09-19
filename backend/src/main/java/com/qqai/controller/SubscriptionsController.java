@@ -52,6 +52,13 @@ public class SubscriptionsController {
     @Autowired(required = false)
     private AuditLogService auditLogService;
 
+    /**
+     * 订阅页档位清单（客户端「订阅管理」的数据源）。
+     *
+     * <p>命名与文案全部由 {@code credit_rule} 生成，不再有硬编码数字：
+     * 直购档位叫「直购积分·N」，月卡叫「小月卡 / 大月卡」，权益里的积分数、每日签到加成、
+     * 折扣都取当前配置 —— 后台改一次，这里和「资金流水」的模拟现金账一起变。</p>
+     */
     @GetMapping("/plans")
     public ResponseEntity<ApiResponse<Map<String, Object>>> getPlans() {
         Long userId = securityHelper.requireCurrentUserId();
@@ -59,32 +66,19 @@ public class SubscriptionsController {
         Integer durationDays = rule.getPlanDurationDays();
 
         List<Map<String, Object>> directPlans = new ArrayList<>();
-        // LITE/PRO/PROPLUS/ULTRA 从 creditRuleService 读取价格和积分
-        directPlans.add(planToMap("LITE", "直购积分·" + rule.getPlanLiteCredit(), rule.getPlanLitePrice(), rule.getPlanLiteCredit(),
-                durationDays, SubscriptionTier.LITE, "DIRECT",
-                Arrays.asList(rule.getPlanLiteCredit() + " 积分", "基础模型支持", "标准响应速度")));
-        directPlans.add(planToMap("PRO", "直购积分·" + rule.getPlanProCredit(), rule.getPlanProPrice(), rule.getPlanProCredit(),
-                durationDays, SubscriptionTier.PRO, "DIRECT",
-                Arrays.asList(rule.getPlanProCredit() + " 积分", "全模型支持", "优先响应", "30 天文件存储")));
-        directPlans.add(planToMap("PROPLUS", "直购积分·" + rule.getPlanProPlusCredit(), rule.getPlanProPlusPrice(), rule.getPlanProPlusCredit(),
-                durationDays, SubscriptionTier.PROPLUS, "DIRECT",
-                Arrays.asList(rule.getPlanProPlusCredit() + " 积分", "全模型支持", "高优先级队列", "高级分析功能", "90 天文件存储")));
-        directPlans.add(planToMap("ULTRA", "直购积分·" + rule.getPlanUltraCredit(), rule.getPlanUltraPrice(), rule.getPlanUltraCredit(),
-                durationDays, SubscriptionTier.ULTRA, "DIRECT",
-                Arrays.asList(rule.getPlanUltraCredit() + " 积分", "全模型支持", "最高优先级", "全部高级功能", "永久文件存储")));
-        // MEGA 在 CreditRule 中没有对应字段，保留硬编码
-        directPlans.add(planToMap("MEGA", "直购积分·100000", new BigDecimal("648"), 100000,
-                30, SubscriptionTier.MEGA, "DIRECT",
-                Arrays.asList("100000 积分", "全模型支持", "最高优先级", "全部高级功能", "永久文件存储", "专属客服支持")));
+        directPlans.add(directPlan("LITE", "基础模型支持", "标准响应速度"));
+        directPlans.add(directPlan("PRO", "全模型支持", "优先响应", "30 天文件存储"));
+        directPlans.add(directPlan("PROPLUS", "全模型支持", "高优先级队列", "高级分析功能", "90 天文件存储"));
+        directPlans.add(directPlan("ULTRA", "全模型支持", "最高优先级", "全部高级功能", "永久文件存储"));
+        directPlans.add(directPlan("MEGA", "全模型支持", "最高优先级", "全部高级功能", "永久文件存储", "专属客服支持"));
 
+        String smallDiscount = discountLabel(rule.getSmallMonthCardDiscount());
+        String largeDiscount = discountLabel(rule.getLargeMonthCardDiscount());
         List<Map<String, Object>> cardPlans = new ArrayList<>();
-        // 月卡档位（SMALL_MONTH_CARD/LARGE_MONTH_CARD）在 CreditRule 中没有对应字段，保留硬编码
-        cardPlans.add(planToMap("SMALL_MONTH_CARD", "小月卡", new BigDecimal("30"), 3000,
-                30, SubscriptionTier.SMALL_MONTH_CARD, "MONTHLY_CARD",
-                Arrays.asList("3000 积分基础", "每日签到额外 +100 积分", "基础模型支持", "专属折扣 9 折", "30 天有效")));
-        cardPlans.add(planToMap("LARGE_MONTH_CARD", "大月卡", new BigDecimal("68"), 8000,
-                30, SubscriptionTier.LARGE_MONTH_CARD, "MONTHLY_CARD",
-                Arrays.asList("8000 积分基础", "每日签到额外 +300 积分", "全模型支持", "专属折扣 8 折", "优先响应队列", "30 天有效")));
+        cardPlans.add(monthlyCard("SMALL_MONTH_CARD", "小月卡", smallDiscount,
+                rule.getPlanSmallMonthCardDailyBonus()));
+        cardPlans.add(monthlyCard("LARGE_MONTH_CARD", "大月卡", largeDiscount,
+                rule.getPlanLargeMonthCardDailyBonus()));
 
         Map<String, Object> data = new HashMap<>();
         data.put("plans", directPlans);
@@ -95,11 +89,57 @@ public class SubscriptionsController {
         data.put("allTierDiscount", rule.getAllTierDiscount());
         data.put("smallCardDiscount", rule.getSmallMonthCardDiscount());
         data.put("largeCardDiscount", rule.getLargeMonthCardDiscount());
+        // 双持每日加成 = 小 + 大（叠加），前端展示「+400」时直接用这个值
+        data.put("allTierDailyBonus", safeBonus(rule.getPlanSmallMonthCardDailyBonus())
+                + safeBonus(rule.getPlanLargeMonthCardDailyBonus()));
         data.put("groups", Arrays.asList(
                 groupMap("DIRECT", "直购积分", "按档购买，立即到账", directPlans),
-                groupMap("MONTHLY_CARD", "会员月卡", "30 天权益，超值更省", cardPlans)
+                groupMap("MONTHLY_CARD", "会员月卡", durationDays + " 天权益，超值更省", cardPlans)
         ));
         return ResponseEntity.ok(ApiResponse.success(data));
+    }
+
+    /** 一张直购积分卡：名称、价格、积分、权益全部读当前规则 */
+    private Map<String, Object> directPlan(String tierCode, String... extraFeatures) {
+        CreditRule rule = creditRuleService.getRule();
+        SubscriptionTier tier = SubscriptionTier.valueOf(tierCode);
+        BigDecimal price = subscriptionService.getPlanPrice(tier, rule);
+        Integer credit = subscriptionService.getPlanCredit(tier, rule);
+        List<String> features = new ArrayList<>();
+        features.add(credit + " 积分");
+        features.addAll(Arrays.asList(extraFeatures));
+        return planToMap(tierCode, "直购积分·" + credit, price, credit, rule.getPlanDurationDays(), tier, "DIRECT", features);
+    }
+
+    /** 一张月卡：权益里的积分数、每日签到加成、折扣全部读当前规则 */
+    private Map<String, Object> monthlyCard(String tierCode, String name, String discountText, Integer dailyBonus) {
+        CreditRule rule = creditRuleService.getRule();
+        SubscriptionTier tier = SubscriptionTier.valueOf(tierCode);
+        BigDecimal price = subscriptionService.getPlanPrice(tier, rule);
+        Integer credit = subscriptionService.getPlanCredit(tier, rule);
+        List<String> features = new ArrayList<>();
+        features.add(credit + " 积分基础");
+        features.add("每日签到额外 +" + safeBonus(dailyBonus) + " 积分");
+        if (SubscriptionTier.SMALL_MONTH_CARD.name().equals(tierCode)) features.add("基础模型支持");
+        else features.add("全模型支持");
+        features.add("专属折扣 " + discountText);
+        if (SubscriptionTier.LARGE_MONTH_CARD.name().equals(tierCode)) features.add("优先响应队列");
+        features.add(rule.getPlanDurationDays() + " 天有效");
+        return planToMap(tierCode, name, price, credit, rule.getPlanDurationDays(), tier, "MONTHLY_CARD", features);
+    }
+
+    /** 折扣数值 → 「9 折」这种文案；1.0 表示不打折 */
+    private static String discountLabel(Double discount) {
+        if (discount == null || discount >= 1.0) return "无折扣";
+        double zhe = discount * 10;
+        String text = (Math.abs(zhe - Math.round(zhe)) < 1e-9)
+                ? String.valueOf((long) Math.round(zhe))
+                : String.format("%.1f", zhe);
+        return text + " 折";
+    }
+
+    private static int safeBonus(Integer v) {
+        return v == null || v < 0 ? 0 : v;
     }
 
     private Map<String, Object> groupMap(String key, String title, String subtitle, List<Map<String, Object>> items) {

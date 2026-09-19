@@ -62,6 +62,43 @@ public class CreditRule {
     @Column(nullable = false)
     private Integer planDurationDays = 30;
 
+    // ==================== 会员月卡 / MEGA ====================
+    // 原先这几个数字硬编码在 SubscriptionsController / SubscriptionService / CreditService 里，
+    // 2026-09-19 起进表单可调。命名与客户端订阅页一致：小月卡 / 大月卡 / 直购积分·100000（MEGA）。
+    // 双持每日加成不单独配置：按「小月卡 + 大月卡」叠加算，避免出现"双持反而更少"的矛盾配置。
+
+    /** 小月卡价格（元） */
+    @Column(precision = 10, scale = 2)
+    private BigDecimal planSmallMonthCardPrice = new BigDecimal("30");
+
+    /** 小月卡赠送积分 */
+    @Column(nullable = false)
+    private Integer planSmallMonthCardCredit = 3000;
+
+    /** 小月卡每日签到额外积分 */
+    @Column(nullable = false)
+    private Integer planSmallMonthCardDailyBonus = 100;
+
+    /** 大月卡价格（元） */
+    @Column(precision = 10, scale = 2)
+    private BigDecimal planLargeMonthCardPrice = new BigDecimal("68");
+
+    /** 大月卡赠送积分 */
+    @Column(nullable = false)
+    private Integer planLargeMonthCardCredit = 8000;
+
+    /** 大月卡每日签到额外积分 */
+    @Column(nullable = false)
+    private Integer planLargeMonthCardDailyBonus = 300;
+
+    /** 直购积分·100000（MEGA）价格（元） */
+    @Column(precision = 10, scale = 2)
+    private BigDecimal planMegaPrice = new BigDecimal("648");
+
+    /** 直购积分·100000（MEGA）赠送积分 */
+    @Column(nullable = false)
+    private Integer planMegaCredit = 100000;
+
     // ====== 模型分级费率（JSON：{"default":1.0, "gpt-4":3.0, "qwen-7b":1.0}） ======
     @Column(length = 2000)
     private String modelRates = "{\"default\":1.0}";
@@ -195,6 +232,31 @@ public class CreditRule {
 
     public Integer getPlanDurationDays() { return planDurationDays; }
     public void setPlanDurationDays(Integer planDurationDays) { this.planDurationDays = planDurationDays; }
+
+    // ====== 会员月卡 / MEGA ======
+    public BigDecimal getPlanSmallMonthCardPrice() { return planSmallMonthCardPrice; }
+    public void setPlanSmallMonthCardPrice(BigDecimal v) { this.planSmallMonthCardPrice = v; }
+
+    public Integer getPlanSmallMonthCardCredit() { return planSmallMonthCardCredit; }
+    public void setPlanSmallMonthCardCredit(Integer v) { this.planSmallMonthCardCredit = v; }
+
+    public Integer getPlanSmallMonthCardDailyBonus() { return planSmallMonthCardDailyBonus; }
+    public void setPlanSmallMonthCardDailyBonus(Integer v) { this.planSmallMonthCardDailyBonus = v; }
+
+    public BigDecimal getPlanLargeMonthCardPrice() { return planLargeMonthCardPrice; }
+    public void setPlanLargeMonthCardPrice(BigDecimal v) { this.planLargeMonthCardPrice = v; }
+
+    public Integer getPlanLargeMonthCardCredit() { return planLargeMonthCardCredit; }
+    public void setPlanLargeMonthCardCredit(Integer v) { this.planLargeMonthCardCredit = v; }
+
+    public Integer getPlanLargeMonthCardDailyBonus() { return planLargeMonthCardDailyBonus; }
+    public void setPlanLargeMonthCardDailyBonus(Integer v) { this.planLargeMonthCardDailyBonus = v; }
+
+    public BigDecimal getPlanMegaPrice() { return planMegaPrice; }
+    public void setPlanMegaPrice(BigDecimal v) { this.planMegaPrice = v; }
+
+    public Integer getPlanMegaCredit() { return planMegaCredit; }
+    public void setPlanMegaCredit(Integer v) { this.planMegaCredit = v; }
 
     public String getModelRates() { return modelRates; }
     public void setModelRates(String modelRates) { this.modelRates = modelRates; }

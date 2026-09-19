@@ -34,7 +34,7 @@ await page.waitForTimeout(3500);
 await page.locator('text=规则配置').first().click();
 await page.waitForTimeout(2500);
 
-check('分节导航渲染', await page.locator('.rule-nav .nav-link').count() === 6,
+check('分节导航渲染（6 个计费分节 + 试算）', await page.locator('.rule-nav .nav-link').count() === 7,
   `${await page.locator('.rule-nav .nav-link').count()} 项`);
 check('基础奖励输入框有值', (await page.locator('#sec-base input').first().inputValue()) !== '');
 check('模型倍率行编辑器存在', await page.locator('#sec-ai .sub-card .kv-row').count() >= 1);
