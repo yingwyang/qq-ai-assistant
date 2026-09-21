@@ -49,7 +49,7 @@
 |------|------|------|
 | 0 | 支付步骤按钮化 + 订单状态文案单一事实来源（`frontend/src/config/orderStatus.js`）+ 订阅文档同步 + 验收脚本 | ✅ 已完成（`87bf3df`） |
 | A | 安全收口：二维码接口收权、响应体去 token、Cookie `secure` 配置化、降权递增 `tokenVersion`、`User` 敏感 getter 加 `@JsonIgnore` | ✅ 已完成（本轮，见下） |
-| B | 资金链路幂等与扣费顺序：`markPaid` 行锁、`grantPoints` 行锁、下单幂等键、AI/TTS 先扣后调 + 失败退费、签到冲突 `REQUIRES_NEW`、流水唯一约束 | ⬜ 待办 |
+| B | 资金链路幂等与扣费顺序：`markPaid` 行锁、`grantPoints` 行锁、下单幂等键、AI/TTS 先扣后调 + 失败退费、签到冲突 `REQUIRES_NEW`、流水唯一约束 | ✅ 已完成（本轮，见下） |
 | C | 异常与校验规范化：删宽 catch、Map 入参换 DTO + `@Valid`、分页上限统一、归属校验收口 Service | ⬜ 待办 |
 | D | 性能与静默异常：去 N+1、合并钱包页查询、消除 `catch { return null; }`、前端空 catch 补日志 | ⬜ 待办 |
 | E | 可观测与去重：Actuator + `/health` 探 DB/MQ、初始密码不落日志、限流器换 Caffeine、抽订单映射器、套餐名动态生成 | ⬜ 待办 |
@@ -71,6 +71,21 @@
 **为什么 `qrcode` 与 `qrcode-path` 也要收权**：原先它们只要求「已登录」，任何普通用户都能读到机器人二维码与服务器绝对路径；二维码本身即账号接管凭据，因此三者必须同一权限。
 **为什么状态接口保持公开**：`login-status`、`component-status` 只返回布尔量，且登录页在 Cookie 过期时仍需显示组件状态灯（见 `docs/development/architecture.md` 的白名单说明）。
 
+### 批次 B 交付明细（资金链路幂等与扣费顺序）
+
+| 项 | 改动 | 证据 |
+|----|------|------|
+| B.1 | 新增 `SubscriptionOrderRepository.findByOrderNoWithLock`（`SELECT … FOR UPDATE`）；`markPaid`、`refundOrderWithRatio`、`cancelOrder` 改为行锁取单 | 两线程并发确认同一订单：只成功 1 次、只有 1 条购买流水、积分只发一次 |
+| B.2 | `CreditService.grantPoints` 先锁账户行（新增私有 `lockOrCreateAccount`：存在则锁，不存在则先初始化再锁） | 6 线程并发各发 10 分：0 失败、余额精确 +60（原先抛 `OptimisticLockingFailureException` 丢更新） |
+| B.3 | `createOrder` 开头对该用户账户行加锁，把 60 秒幂等窗口的查询与写入收进同一把锁 | 3 线程并发下单：同一订单号、库里只有 1 单（原注释自认"极端并发可能仍生成两单"） |
+| B.4a | 新增 `CreditService.assertChatAffordable`：调用大模型**之前**做余额门禁（管理员免费 / 月度配额 / 每日封顶任一命中即放行，只有确定要付费且余额 < 1 才拒） | `AstrBotController` 在 `postForEntity` 前调用；单测覆盖 0 余额被拒、有余额放行、管理员免费 |
+| B.4b | TTS 扣费写入 `requestKey` 作为 `relatedId`，合成失败按该键精确退费（原实现 relatedId=null，`refundForTts` 永远找不到原流水） | `SystemController` 合成异常时调用 `refundForTts`；单测：扣费→退费余额回补、重复退费幂等 |
+| B.5 | `signInToday` 改为「先锁账户行 → 再判断今日是否已签到」；唯一约束冲突兜底不再在已中毒事务里查询（旧实现会抛 `UnexpectedRollbackException`） | 2 线程并发签到：1 成功 1 抛 `ALREADY_SIGNED_IN`，签到记录 1 条 |
+| B.6 | **驳回审计建议**：`credit_transaction(user_id,type,related_id)` 唯一约束在本项目**不可行** —— 真实数据已有 16 组重复（`AI_CHAT`/`AI_ANALYZE` 的 relatedId 是会话号/群号，天然可重复）。改用「订单行锁 + `refund:{orderNo}` 幂等键」保证退款幂等 | MySQL 实测 `GROUP BY user_id,type,related_id HAVING COUNT(*)>1` = 16 组 |
+
+**反向验证（证明测试能抓到缺陷）**：临时把 `markPaid` 换回无锁查询、`grantPoints` 换回 `ensureAccount` 后，两个并发用例**双双失败**（`Tests run: 2, Failures: 2`）；恢复行锁后全绿。新增 `MoneyPathConcurrencyTest` 8 项（并发确认收款 / 并发发放 / 并发签到 / 并发下单 / TTS 退费 / 余额门禁 / 退款幂等 / 取消与确认互斥）。
+**踩坑记录**：用 `Copy-Item` 从备份还原源码会保留旧时间戳，Maven 增量编译会因此**跳过重编**（全量测试实际跑的是变异后的字节码，出现 2 个假失败）→ 还原后必须 touch 源文件时间戳或 `mvn clean`。
+
 ## 四、验收基线（每轮必须全绿）
 
 | 命令 | 基线 |
@@ -82,6 +97,6 @@
 | `node scripts/check-admin-dark-theme.mjs <JWT>` | 14 页无问题 |
 | `node scripts/e2e-admin-export.mjs <JWT>` | 26/26 |
 | `node scripts/check-admin-last-admin.mjs <JWT>` | 14/14 |
-| `cd backend && mvn -B -ntp test` | **171** 项（批次 A 起；批次 B/C 会继续增长） |
+| `cd backend && mvn -B -ntp test` | **179** 项（批次 B 起；批次 C 起会继续增长） |
 
 > 环境：`CHROME_PATH='C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe'`；ADMIN JWT 见技能 `qqai-verify`。

@@ -1398,6 +1398,13 @@ public class AstrBotController {
             
             HttpEntity<Map<String, Object>> entity = new HttpEntity<>(body, headers);
             
+            // 调用大模型前的余额门禁：原实现是"先调用、先落库回复、最后扣费"，
+            // 0 余额用户虽然最后会收到扣费失败，但回复已经生成并入库（刷新就能看到），等于免费刷模型。
+            // 这里只拦截"确定要付费且连最低消费都不够"的请求；精确扣费仍在下方 spendForChat 完成。
+            if (userId != null) {
+                creditService.assertChatAffordable(userId, securityHelper.isAdmin());
+            }
+            
             // 使用 SimpleClientHttpRequestFactory 设置超时
             org.springframework.http.client.SimpleClientHttpRequestFactory factory = 
                 new org.springframework.http.client.SimpleClientHttpRequestFactory();

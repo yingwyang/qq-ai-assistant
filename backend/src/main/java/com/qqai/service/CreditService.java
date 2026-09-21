@@ -112,18 +112,33 @@ public class CreditService {
 
     /**
      * 发放积分（正数入账）：余额增加、累加 totalEarned，并写入 IN 方向流水。
-     * 事务边界：余额更新与流水写入同事务，保证一致；不含行锁，调用方需避免对同一用户并发发放的丢更新问题。
-     * 设计理由：发放场景无透支风险，使用乐观更新即可，避免与 spendPoints 共用悲观行锁。
+     * 事务边界：余额更新与流水写入同事务，保证一致。
+     * 并发安全：先对账户行加悲观锁（findByUserIdWithLock）再读改写，避免并发发放的丢更新
+     * （账户带 @Version 时表现为 OptimisticLockingFailureException，用户侧看到 500）。
      */
     @Transactional
     public CreditTransaction grantPoints(Long userId, int amount, CreditTransactionType type, String remark, String relatedId, Long adminUserId) {
         if (amount <= 0) {
             throw new BizException("发放积分必须大于0");
         }
-        UserCredit account = ensureAccount(userId);
+        UserCredit account = lockOrCreateAccount(userId);
         CreditTransaction tx = grantPointsInternal(account, amount, type, remark, relatedId, adminUserId);
         userCreditRepository.save(account);
         return tx;
+    }
+
+    /**
+     * 取账户并加行锁；账户不存在时先初始化（ensureAccount 幂等）再重新加锁读取。
+     * 说明：创建分支本身由 user_id 唯一约束兜底，极端并发创建失败会整体回滚，不会产生半成品账户。
+     */
+    private UserCredit lockOrCreateAccount(Long userId) {
+        Optional<UserCredit> locked = userCreditRepository.findByUserIdWithLock(userId);
+        if (locked.isPresent()) {
+            return locked.get();
+        }
+        ensureAccount(userId);
+        return userCreditRepository.findByUserIdWithLock(userId)
+                .orElseThrow(() -> new BizException("积分账户初始化失败，请重试"));
     }
 
     private CreditTransaction grantPointsInternal(UserCredit account, int amount, CreditTransactionType type, String remark, String relatedId, Long adminUserId) {
@@ -209,6 +224,38 @@ public class CreditService {
         public boolean isAdminFree() { return adminFree; }
         public boolean isQuotaFree() { return quotaFree; }
         public String getRemark() { return remark; }
+    }
+
+    /**
+     * 会话前置门禁（只读，不改余额）：在调用大模型之前判断「这次对话是否需要付费且余额不够」。
+     *
+     * 为什么需要：原实现是「先调 LLM、先落库回复、最后才扣费」，余额不足只在最后一步报错，
+     * 于是 0 余额用户可以反复发消息（回复已经生成并入库，前端报错但刷新就能看到），等于免费刷模型。
+     * 这里只做保守拦截：只要存在任何可能免费的通道（管理员免费 / 月度配额未用完 / 已达每日封顶）就放行，
+     * 只有确定要付费且当前余额连最低消费（1 积分）都不够时才提前拒绝；精确金额仍由 spendForChat 计算。
+     */
+    public void assertChatAffordable(Long userId, boolean isAdmin) {
+        if (userId == null) return;
+        CreditRule rule = creditRuleService.getRule();
+        UserCredit account = ensureAccount(userId);
+
+        if (isAdmin && Boolean.TRUE.equals(rule.getAdminFree())) return;
+
+        int monthlyQuota = safeVal(rule.getMonthlyFreeQuota(), 0);
+        if (monthlyQuota > 0) {
+            LocalDateTime monthStart = LocalDateTime.of(LocalDate.now().withDayOfMonth(1), LocalTime.MIN);
+            long monthlyCount = creditTransactionRepository
+                    .countByUserIdAndTypeAndCreatedAtAfter(userId, CreditTransactionType.AI_CHAT, monthStart);
+            if (monthlyCount < monthlyQuota) return;
+        }
+
+        if (checkDailyCapFree(userId, rule)) return;
+
+        int balance = account.getBalance();
+        if (balance < 1) {
+            throw new BizException(400, CreditErrorCode.INSUFFICIENT_CREDITS,
+                    "积分不足，当前余额: " + balance + "，请先充值或升级订阅后再发起对话");
+        }
     }
 
     /**
@@ -438,14 +485,14 @@ public class CreditService {
      * @param character  角色名（写入 remark）
      */
     @Transactional
-    public CreditCostResult spendForTts(Long userId, String text, String character, boolean isAdmin) {
+    public CreditCostResult spendForTts(Long userId, String text, String character, boolean isAdmin, String requestKey) {
         CreditRule rule = creditRuleService.getRule();
         UserCredit account = ensureAccount(userId);
 
         // 管理员免费
         if (isAdmin && Boolean.TRUE.equals(rule.getAdminFree())) {
             String remark = "tts:" + (character != null ? character : "default") + "/ADMIN_FREE";
-            writeZeroAmountTx(userId, CreditTransactionType.TTS_SYNTHESIS, remark, null, account.getBalance());
+            writeZeroAmountTx(userId, CreditTransactionType.TTS_SYNTHESIS, remark, requestKey, account.getBalance());
             return new CreditCostResult(0, account.getBalance(), true, false, remark);
         }
 
@@ -453,7 +500,7 @@ public class CreditService {
         boolean dailyCapFree = checkDailyCapFree(userId, rule);
         if (dailyCapFree) {
             String remark = "tts:" + (character != null ? character : "default") + "/DAILY_CAP_FREE";
-            writeZeroAmountTx(userId, CreditTransactionType.TTS_SYNTHESIS, remark, null, account.getBalance());
+            writeZeroAmountTx(userId, CreditTransactionType.TTS_SYNTHESIS, remark, requestKey, account.getBalance());
             return new CreditCostResult(0, account.getBalance(), false, true, remark);
         }
 
@@ -470,7 +517,7 @@ public class CreditService {
         int cost = Math.max(minCost, (int) Math.ceil(rawCost * tierDiscount * tieredDiscount));
 
         String remark = "tts:" + (character != null ? character : "default") + "/chars:" + charCount;
-        CreditTransaction tx = spendPoints(userId, cost, CreditTransactionType.TTS_SYNTHESIS, remark, null);
+        CreditTransaction tx = spendPoints(userId, cost, CreditTransactionType.TTS_SYNTHESIS, remark, requestKey);
         return new CreditCostResult(cost, tx.getBalanceAfter(), false, false, remark);
     }
 
@@ -736,17 +783,19 @@ public class CreditService {
      * 2026-09-16 起：持有有效月卡的用户，签到会同时发放月卡每日额外积分（小月卡 +100 / 大月卡 +300），
      * 即界面上的「每日签到积分」= 基础签到分 + 月卡加成；月卡加成走 grantMonthlyCardDailyBonus 幂等入口，
      * 同一天不会重复到账。
-     * 并发控制：依赖 SignInRecord 表的 UNIQUE(userId, signIn_date) 约束防重复签到，
-     * 并发重复插入会被数据库约束拦截，此时优雅返回已存在的今日记录。
+     * 并发控制：先对账户行加悲观锁（同一用户的签到被串行化），再判断今日是否已签到，
+     * 因此正常并发下不会走到唯一约束冲突；仍保留冲突兜底，但**不再在已中毒的事务里继续查询**
+     * （旧实现捕获约束冲突后仍在同一事务内查询，会抛 UnexpectedRollbackException）。
      * 事务边界：签到记录与积分流水在同一事务内落库。
      */
     @Transactional
     public SignInResult signInToday(Long userId) {
         LocalDate today = LocalDate.now();
+        // 先用账户行锁把同一用户的并发签到串行化，再做「今日是否已签到」判定
+        UserCredit account = lockOrCreateAccount(userId);
         if (signInRecordRepository.existsByUserIdAndSignInDate(userId, today)) {
             throw new BizException(400, CreditErrorCode.ALREADY_SIGNED_IN, "今日已签到");
         }
-        UserCredit account = ensureAccount(userId);
 
         int streakDays = calculateStreakDays(userId, today);
         int basePoints = safeSignInPoints();
@@ -761,12 +810,11 @@ public class CreditService {
         try {
             signInRecordRepository.save(record);
         } catch (DataIntegrityViolationException e) {
-            log.warn("用户{} 签到并发唯一约束冲突，返回已有记录", userId);
-            SignInRecord existing = signInRecordRepository.findByUserIdAndSignInDate(userId, today)
-                    .orElseThrow(() -> new BizException(400, CreditErrorCode.ALREADY_SIGNED_IN, "今日已签到"));
-            int existingBase = safeSignInPoints();
-            return new SignInResult(existing, existingBase,
-                    Math.max(0, (existing.getPoints() != null ? existing.getPoints() : existingBase) - existingBase));
+            // 兜底：账户行锁已把同一用户的并发签到串行化，走到这里说明存在绕过服务层的写入。
+            // 事务此刻已被标记 rollback-only，绝不能再查询（旧实现在这里继续查询会抛
+            // UnexpectedRollbackException，把真实的唯一约束冲突掩盖掉）。
+            log.warn("用户{} 签到唯一约束冲突（并发兜底），本次按已签到处理", userId);
+            throw new BizException(400, CreditErrorCode.ALREADY_SIGNED_IN, "今日已签到");
         }
 
         grantPointsInternal(account, basePoints, CreditTransactionType.SIGN_IN,

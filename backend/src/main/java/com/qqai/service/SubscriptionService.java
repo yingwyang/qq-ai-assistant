@@ -72,13 +72,15 @@ public class SubscriptionService {
 
     /**
      * 创建订阅订单：60 秒幂等窗口防重复下单。
-     * 幂等策略：在 (userId, planTier, IDEMPOTENCY_WINDOW_SECONDS) 窗口内若存在 PENDING/PAID 订单，
+     * 幂等策略：在 (userId, planTier, IDEMPOTENCY_WINDOW_SECONDS) 窗口内若存在 PENDING 订单，
      * 直接返回既有订单而非新建，避免用户重复点击或网络重试产生多单。
-     * 事务边界：订单写入单事务；幂等查询与写入不在同一锁范围，极端并发可能仍生成两单，由支付环节状态校验兜底。
+     * 并发安全：方法开始先对「该用户的积分账户行」加行锁，把幂等查询与下单写入收进同一把锁，
+     * 同一用户的并发下单被串行化，不会再出现同一档位两单。
      */
     @Transactional
     public SubscriptionOrder createOrder(Long userId, SubscriptionTier planTier, String clientIp, String userAgent) {
         validatePlanTier(planTier);
+        lockUserAccount(userId);
 
         LocalDateTime idempotencySince = LocalDateTime.now().minusSeconds(IDEMPOTENCY_WINDOW_SECONDS);
         List<SubscriptionOrder> recent = subscriptionOrderRepository.findRecentByUserAndPlan(userId, planTier, idempotencySince);
@@ -148,11 +150,13 @@ public class SubscriptionService {
      * 订单支付成功标记：单事务内完成 PENDING→PAID + 发放 SUBSCRIPTION_PURCHASE 流水 + 更新 tier/expiresAt。
      * 一致性：任一步骤失败整体回滚（支付状态、积分发放、订阅等级三者原子）。
      * 等级叠加：若当前订阅未过期，新套餐到期时间在原 expiresAt 基础上叠加，避免用户损失剩余时长。
-     * 幂等：仅 PENDING 订单可标记 PAID，重复回调抛 ORDER_STATUS_INVALID。
+     * 幂等：仅 PENDING 订单可标记 PAID，重复回调抛 ORDER_STATUS_INVALID；
+     * 并发：先用行锁取出订单（findByOrderNoWithLock），保证「读状态 → 改状态 → 发积分」在同一把锁下，
+     * 管理员重复点击确认收款或并发重试只会成功一次。
      */
     @Transactional
     public SubscriptionOrder markPaid(String orderNo, String paymentMethod, String paymentTransactionId) {
-        SubscriptionOrder order = subscriptionOrderRepository.findByOrderNo(orderNo)
+        SubscriptionOrder order = subscriptionOrderRepository.findByOrderNoWithLock(orderNo)
                 .orElseThrow(() -> new BizException(404, CreditErrorCode.ORDER_NOT_FOUND, "订单不存在: " + orderNo));
 
         if (order.getStatus() != OrderStatus.PENDING) {
@@ -224,11 +228,12 @@ public class SubscriptionService {
 
     @Transactional
     public SubscriptionOrder cancelOrder(String orderNo, Long adminUserId, String reason) {
-        SubscriptionOrder order = subscriptionOrderRepository.findByOrderNo(orderNo)
+        // 行锁取单：与「确认收款」互斥，避免管理员确认到账的同时用户把订单取消掉
+        SubscriptionOrder order = subscriptionOrderRepository.findByOrderNoWithLock(orderNo)
                 .orElseThrow(() -> new BizException(404, CreditErrorCode.ORDER_NOT_FOUND, "订单不存在: " + orderNo));
         if (order.getStatus() != OrderStatus.PENDING) {
             throw new BizException(400, CreditErrorCode.ORDER_STATUS_INVALID,
-                    "仅待支付订单可取消，当前状态: " + order.getStatus());
+                    "仅待确认收款订单可取消，当前状态: " + order.getStatus());
         }
         order.setStatus(OrderStatus.CANCELLED);
         if (reason != null && !reason.isBlank()) {
@@ -257,7 +262,8 @@ public class SubscriptionService {
      */
     @Transactional
     public SubscriptionOrder refundOrderWithRatio(String orderNo, String refundReason, Long adminUserId, double ratio) {
-        SubscriptionOrder order = subscriptionOrderRepository.findByOrderNo(orderNo)
+        // 退款要动钱：行锁取单，避免并发退款/重复审批造成两次扣回
+        SubscriptionOrder order = subscriptionOrderRepository.findByOrderNoWithLock(orderNo)
                 .orElseThrow(() -> new BizException(404, CreditErrorCode.ORDER_NOT_FOUND, "订单不存在: " + orderNo));
 
         if (order.getStatus() == OrderStatus.REFUNDED) {
@@ -691,6 +697,19 @@ public class SubscriptionService {
         if (tier == null || tier == SubscriptionTier.FREE) {
             throw new BizException(400, CreditErrorCode.PLAN_NOT_FOUND, "无效的套餐等级");
         }
+    }
+
+    /**
+     * 以「用户积分账户行锁」作为该用户资金操作的互斥锁。
+     * 账户不存在时先初始化（ensureAccount 幂等），再重新加锁读取。
+     * 用途：下单幂等窗口、确认收款时的订单状态判定等需要"同一用户的资金动作串行化"的场景。
+     */
+    private void lockUserAccount(Long userId) {
+        if (userCreditRepository.findByUserIdWithLock(userId).isPresent()) {
+            return;
+        }
+        creditService.ensureAccount(userId);
+        userCreditRepository.findByUserIdWithLock(userId);
     }
 
     private boolean isMonthlyCard(SubscriptionTier tier) {

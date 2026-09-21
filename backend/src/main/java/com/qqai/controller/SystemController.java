@@ -9,6 +9,8 @@ import com.qqai.service.CreditService;
 import com.qqai.service.NapCatService;
 import com.qqai.service.GptSovitsService;
 import com.qqai.service.MediaDownloadService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.UrlResource;
@@ -32,6 +34,8 @@ import java.util.Map;
 @RequestMapping("/api/system")
 public class SystemController {
 
+    private static final Logger log = LoggerFactory.getLogger(SystemController.class);
+
     @PostMapping("/tts")
     public ResponseEntity<ApiResponse<Map<String, Object>>> generateVoice(@RequestBody Map<String, Object> request) throws Exception {
         Object textObj = request.get("text");
@@ -51,9 +55,24 @@ public class SystemController {
 
         // 调用 TTS 前先扣费（余额不足会抛 BizException）
         boolean isAdmin = securityHelper.isAdmin();
-        CreditService.CreditCostResult ttsResult = creditService.spendForTts(userId, text, character, isAdmin);
+        // 本次合成的幂等键：既写入扣费流水的 relatedId，也用于合成失败时精确退费
+        String requestKey = "tts-" + java.util.UUID.randomUUID();
+        CreditService.CreditCostResult ttsResult = creditService.spendForTts(userId, text, character, isAdmin, requestKey);
 
-        String audioUrl = gptSovitsService.generateVoice(text, userId, character);
+        String audioUrl;
+        try {
+            audioUrl = gptSovitsService.generateVoice(text, userId, character);
+        } catch (RuntimeException e) {
+            // 合成失败必须把刚扣的积分退回去（按 requestKey 精确匹配、幂等），否则用户为没拿到的语音付费
+            if (userId != null && ttsResult != null && ttsResult.getCost() > 0) {
+                try {
+                    creditService.refundForTts(userId, requestKey, "TTS 合成失败");
+                } catch (Exception refundError) {
+                    log.error("TTS 失败退费失败 userId={} requestKey={}: {}", userId, requestKey, refundError.getMessage());
+                }
+            }
+            throw e;
+        }
         Map<String, Object> data = new HashMap<>();
         data.put("audioUrl", audioUrl);
         data.put("character", gptSovitsService.getUserCharacter(userId));

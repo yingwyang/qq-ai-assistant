@@ -3,10 +3,12 @@ package com.qqai.repository;
 import com.qqai.entity.SubscriptionOrder;
 import com.qqai.entity.enums.OrderStatus;
 import com.qqai.entity.enums.SubscriptionTier;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -20,6 +22,15 @@ import java.util.Optional;
 public interface SubscriptionOrderRepository extends JpaRepository<SubscriptionOrder, Long>, JpaSpecificationExecutor<SubscriptionOrder> {
 
     Optional<SubscriptionOrder> findByOrderNo(String orderNo);
+
+    /**
+     * 悲观行锁取单（SELECT ... FOR UPDATE）。
+     * 改状态且动钱的路径（确认收款、退款、作废）必须用它：否则并发下两个事务都读到 PENDING，
+     * 各自发放一次权益（管理员重复点「确认收款」、前端重试、多标签页都会触发）。
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT o FROM SubscriptionOrder o WHERE o.orderNo = :orderNo")
+    Optional<SubscriptionOrder> findByOrderNoWithLock(@Param("orderNo") String orderNo);
 
     boolean existsByOrderNo(String orderNo);
 
