@@ -7,6 +7,8 @@ import com.qqai.entity.Message;
 import com.qqai.service.AuditLogService;
 import com.qqai.service.FileStorageService;
 import com.qqai.service.MessageService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -28,6 +30,10 @@ import java.util.*;
 @RestController
 @RequestMapping("/api/messages")
 public class MessageController {
+
+    /** 未预期异常统一在此记录堆栈（对外只返回安全文案 + traceId，不回显内部异常文本） */
+    private static final Logger log = LoggerFactory.getLogger(MessageController.class);
+
     @Autowired
     private MessageService messageService;
 
@@ -143,9 +149,12 @@ public class MessageController {
             String personaConfig = astrBotPersonaService.resolveConfigName(userId, !imageUrls.isEmpty());
             summary = astrBotService.summarizeMessageStructured(
                     rendered, null, resolveGroupType(message.getGroupId()), imageUrls, personaConfig);
-        } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
-                    .body(ApiResponse.error(503, "AI 服务暂不可用：" + e.getMessage()));
+        } catch (com.qqai.exception.BizException biz) {
+                // 业务异常保持原有状态码与文案，交由 GlobalExceptionHandler 输出
+                throw biz;
+            } catch (Exception e) {
+            log.error("AI 服务调用失败", e);
+            throw new com.qqai.exception.BizException(503, "AI_SERVICE_UNAVAILABLE", "AI 服务暂不可用，请稍后重试");
         }
         if (summary == null || summary.isBlank()) {
             return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
@@ -456,8 +465,12 @@ public class MessageController {
             FileRecord.FileType type = FileRecord.FileType.valueOf(fileType.toUpperCase());
             FileRecord fileRecord = fileStorageService.uploadFile(file, type, securityHelper.getCurrentUserId());
             return ResponseEntity.ok(ApiResponse.success(fileRecord));
-        } catch (Exception e) {
-            return ResponseEntity.badRequest().body(ApiResponse.error(400, "上传失败: " + e.getMessage()));
+        } catch (com.qqai.exception.BizException biz) {
+                // 业务异常保持原有状态码与文案，交由 GlobalExceptionHandler 输出
+                throw biz;
+            } catch (Exception e) {
+            log.error("上传失败", e);
+            throw new com.qqai.exception.BizException(500, "FILE_UPLOAD_FAILED", "文件上传失败，请稍后重试");
         }
     }
 
@@ -512,8 +525,12 @@ public class MessageController {
 
             Message savedMessage = messageService.saveMessage(message);
             return ResponseEntity.ok(ApiResponse.success(savedMessage));
-        } catch (Exception e) {
-            return ResponseEntity.badRequest().body(ApiResponse.error(400, "发送失败: " + e.getMessage()));
+        } catch (com.qqai.exception.BizException biz) {
+                // 业务异常保持原有状态码与文案，交由 GlobalExceptionHandler 输出
+                throw biz;
+            } catch (Exception e) {
+            log.error("发送失败", e);
+            throw new com.qqai.exception.BizException(500, "MESSAGE_SEND_FAILED", "消息发送失败，请稍后重试");
         }
     }
 
@@ -658,8 +675,12 @@ public class MessageController {
 
             fileStorageService.deleteFile(fileId);
             return ResponseEntity.ok(ApiResponse.success());
-        } catch (Exception e) {
-            return ResponseEntity.badRequest().body(ApiResponse.error(400, "删除失败: " + e.getMessage()));
+        } catch (com.qqai.exception.BizException biz) {
+                // 业务异常保持原有状态码与文案，交由 GlobalExceptionHandler 输出
+                throw biz;
+            } catch (Exception e) {
+            log.error("删除失败", e);
+            throw new com.qqai.exception.BizException(500, "DELETE_FAILED", "删除失败，请稍后重试");
         }
     }
 
@@ -682,7 +703,7 @@ public class MessageController {
             }
 
             Message message = messageService.getMessageById(messageId)
-                    .orElseThrow(() -> new RuntimeException("消息不存在"));
+                    .orElseThrow(() -> new com.qqai.exception.BizException(404, "MESSAGE_NOT_FOUND", "消息不存在"));
 
             if (!userQqList.contains(message.getSelfQq())) {
                 return ResponseEntity.status(HttpStatus.FORBIDDEN)
@@ -691,10 +712,15 @@ public class MessageController {
 
             messageService.deleteMessage(messageId, userId, userQqList);
             return ResponseEntity.ok(ApiResponse.success());
+        } catch (com.qqai.exception.BizException biz) {
+            // 业务异常保持原有状态码与文案，交由 GlobalExceptionHandler 输出
+            throw biz;
         } catch (RuntimeException e) {
-            return ResponseEntity.badRequest().body(ApiResponse.error(400, e.getMessage()));
+            log.error("删除消息失败 messageId={}", messageId, e);
+            throw new com.qqai.exception.BizException(500, "MESSAGE_DELETE_FAILED", "删除消息失败，请稍后重试");
         } catch (Exception e) {
-            return ResponseEntity.badRequest().body(ApiResponse.error(400, "删除失败: " + e.getMessage()));
+            log.error("删除失败", e);
+            throw new com.qqai.exception.BizException(500, "DELETE_FAILED", "删除失败，请稍后重试");
         }
     }
 
@@ -749,10 +775,13 @@ public class MessageController {
                     "messages:" + messageIds.size(), "SUCCESS",
                     "批量删除 " + deletedCount + " 条消息" + (deleteMedia ? "（含媒体）" : "") + ", userId=" + userId);
             return ResponseEntity.ok(ApiResponse.success(data));
+        } catch (com.qqai.exception.BizException biz) {
+            throw biz;
         } catch (Exception e) {
             auditLogService.log(securityHelper.getCurrentUsername(), "MESSAGE_DELETE_BATCH",
                     "messages", "FAILURE", e.getMessage());
-            return ResponseEntity.badRequest().body(ApiResponse.error(400, "删除失败: " + e.getMessage()));
+            log.error("删除失败", e);
+            throw new com.qqai.exception.BizException(500, "DELETE_FAILED", "删除失败，请稍后重试");
         }
     }
 
@@ -814,10 +843,13 @@ public class MessageController {
                     "group:" + groupId, "SUCCESS",
                     "按类型删除 " + deletedCount + " 条消息, types=" + types + (deleteMedia ? "（含媒体）" : "") + ", userId=" + userId);
             return ResponseEntity.ok(ApiResponse.success(data));
+        } catch (com.qqai.exception.BizException biz) {
+            throw biz;
         } catch (Exception e) {
             auditLogService.log(securityHelper.getCurrentUsername(), "MESSAGE_DELETE_BY_TYPES",
                     "group:" + groupId, "FAILURE", e.getMessage());
-            return ResponseEntity.badRequest().body(ApiResponse.error(400, "删除失败: " + e.getMessage()));
+            log.error("删除失败", e);
+            throw new com.qqai.exception.BizException(500, "DELETE_FAILED", "删除失败，请稍后重试");
         }
     }
 
@@ -862,10 +894,13 @@ public class MessageController {
                     "group:" + groupId + ",ownerQq:" + ownerQq, "SUCCESS",
                     "删除群聊会话: " + result.get("message") + ", userId=" + userId);
             return ResponseEntity.ok(ApiResponse.success(result));
+        } catch (com.qqai.exception.BizException biz) {
+            throw biz;
         } catch (Exception e) {
             auditLogService.log(securityHelper.getCurrentUsername(), "GROUP_DELETE_CONVERSATION",
                     "group:" + groupId, "FAILURE", e.getMessage());
-            return ResponseEntity.badRequest().body(ApiResponse.error(400, "删除群聊失败: " + e.getMessage()));
+            log.error("删除群聊失败", e);
+            throw new com.qqai.exception.BizException(500, "GROUP_DELETE_FAILED", "删除群聊失败，请稍后重试");
         }
     }
 
@@ -908,8 +943,12 @@ public class MessageController {
             data.put("note", result.getNote() == null ? "" : result.getNote());
             data.put("message", "成功清理 " + result.getTotalDeleted() + " 个文件 (" + result.getFreedMB() + ")");
             return ResponseEntity.ok(ApiResponse.success(data));
-        } catch (Exception e) {
-            return ResponseEntity.badRequest().body(ApiResponse.error(400, "清理媒体失败: " + e.getMessage()));
+        } catch (com.qqai.exception.BizException biz) {
+                // 业务异常保持原有状态码与文案，交由 GlobalExceptionHandler 输出
+                throw biz;
+            } catch (Exception e) {
+            log.error("清理媒体失败", e);
+            throw new com.qqai.exception.BizException(500, "MEDIA_PURGE_FAILED", "清理媒体失败，请稍后重试");
         }
     }
 
@@ -941,7 +980,8 @@ public class MessageController {
                         .body(ApiResponse.error(401, "未登录"));
             }
 
-            Pageable pageable = PageRequest.of(page, size);
+            // 分页上限统一收口在 common/PageLimits
+            Pageable pageable = com.qqai.common.PageLimits.of(page, size);
             org.springframework.data.domain.Page<com.qqai.service.FilePurgeService.MediaFileDto> result =
                     filePurgeService.listMediaFiles(type, pageable, kw, parseDateOrNull(from), parseDateOrNull(to), sort);
 
@@ -953,8 +993,12 @@ public class MessageController {
             return ResponseEntity.ok(ApiResponse.success(data));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(ApiResponse.error(400, "无效的文件类型: " + type));
-        } catch (Exception e) {
-            return ResponseEntity.badRequest().body(ApiResponse.error(400, "查询媒体文件失败: " + e.getMessage()));
+        } catch (com.qqai.exception.BizException biz) {
+                // 业务异常保持原有状态码与文案，交由 GlobalExceptionHandler 输出
+                throw biz;
+            } catch (Exception e) {
+            log.error("查询媒体文件失败", e);
+            throw new com.qqai.exception.BizException(500, "MEDIA_QUERY_FAILED", "查询媒体文件失败，请稍后重试");
         }
     }
 
@@ -972,8 +1016,12 @@ public class MessageController {
             Map<String, Object> data = new HashMap<>();
             data.put("byType", filePurgeService.summarizeMediaFiles().getByType());
             return ResponseEntity.ok(ApiResponse.success(data));
-        } catch (Exception e) {
-            return ResponseEntity.badRequest().body(ApiResponse.error(400, "统计媒体文件失败: " + e.getMessage()));
+        } catch (com.qqai.exception.BizException biz) {
+                // 业务异常保持原有状态码与文案，交由 GlobalExceptionHandler 输出
+                throw biz;
+            } catch (Exception e) {
+            log.error("统计媒体文件失败", e);
+            throw new com.qqai.exception.BizException(500, "MEDIA_SUMMARY_FAILED", "统计媒体文件失败，请稍后重试");
         }
     }
 
@@ -1039,8 +1087,12 @@ public class MessageController {
                     ? "成功删除 " + result.getTotalDeleted() + " 个文件 (" + result.getFreedMB() + ")"
                     : result.getNote());
             return ResponseEntity.ok(ApiResponse.success(data));
-        } catch (Exception e) {
-            return ResponseEntity.badRequest().body(ApiResponse.error(400, "删除媒体文件失败: " + e.getMessage()));
+        } catch (com.qqai.exception.BizException biz) {
+                // 业务异常保持原有状态码与文案，交由 GlobalExceptionHandler 输出
+                throw biz;
+            } catch (Exception e) {
+            log.error("删除媒体文件失败", e);
+            throw new com.qqai.exception.BizException(500, "MEDIA_DELETE_FAILED", "删除媒体文件失败，请稍后重试");
         }
     }
 
@@ -1057,8 +1109,12 @@ public class MessageController {
 
             messageService.manualArchive(daysBefore);
             return ResponseEntity.ok(ApiResponse.success("归档任务已触发"));
-        } catch (Exception e) {
-            return ResponseEntity.badRequest().body(ApiResponse.error(400, "归档失败: " + e.getMessage()));
+        } catch (com.qqai.exception.BizException biz) {
+                // 业务异常保持原有状态码与文案，交由 GlobalExceptionHandler 输出
+                throw biz;
+            } catch (Exception e) {
+            log.error("归档失败", e);
+            throw new com.qqai.exception.BizException(500, "ARCHIVE_FAILED", "归档失败，请稍后重试");
         }
     }
 
@@ -1082,9 +1138,12 @@ public class MessageController {
 
             List<Map<String, Object>> groups = messageService.getRecentGroupsForUser(userId, userQqList);
             return ResponseEntity.ok(ApiResponse.success(groups));
-        } catch (Exception e) {
-            return ResponseEntity.badRequest()
-                    .body(ApiResponse.error(400, "获取最近对话失败: " + e.getMessage()));
+        } catch (com.qqai.exception.BizException biz) {
+                // 业务异常保持原有状态码与文案，交由 GlobalExceptionHandler 输出
+                throw biz;
+            } catch (Exception e) {
+            log.error("获取最近对话失败", e);
+            throw new com.qqai.exception.BizException(500, "RECENT_GROUPS_FAILED", "获取最近对话失败，请稍后重试");
         }
     }
 
@@ -1111,9 +1170,12 @@ public class MessageController {
             data.put("success", ok);
             data.put("groupId", groupId);
             return ResponseEntity.ok(ApiResponse.success(data));
-        } catch (Exception e) {
-            return ResponseEntity.badRequest()
-                    .body(ApiResponse.error(400, "标记已读失败: " + e.getMessage()));
+        } catch (com.qqai.exception.BizException biz) {
+                // 业务异常保持原有状态码与文案，交由 GlobalExceptionHandler 输出
+                throw biz;
+            } catch (Exception e) {
+            log.error("标记已读失败", e);
+            throw new com.qqai.exception.BizException(500, "MARK_READ_FAILED", "标记已读失败，请稍后重试");
         }
     }
 
@@ -1132,9 +1194,12 @@ public class MessageController {
             Map<String, Object> data = new HashMap<>();
             data.put("success", ok);
             return ResponseEntity.ok(ApiResponse.success(data));
-        } catch (Exception e) {
-            return ResponseEntity.badRequest()
-                    .body(ApiResponse.error(400, "全部标为已读失败: " + e.getMessage()));
+        } catch (com.qqai.exception.BizException biz) {
+                // 业务异常保持原有状态码与文案，交由 GlobalExceptionHandler 输出
+                throw biz;
+            } catch (Exception e) {
+            log.error("全部标为已读失败", e);
+            throw new com.qqai.exception.BizException(500, "MARK_ALL_READ_FAILED", "全部标为已读失败，请稍后重试");
         }
     }
 

@@ -61,7 +61,8 @@ public class AdminController {
             @RequestParam(required = false) Boolean active,
             @RequestParam(required = false) String sort,
             @RequestParam(required = false) String order) {
-        Pageable pageable = PageRequest.of(page, size);
+        // 分页上限统一收口在 common/PageLimits（防止 size=100000 全表回表）
+        Pageable pageable = com.qqai.common.PageLimits.of(page, size);
         Page<User> userPage = userService.queryUsers(keyword, role, active, sort, order, pageable);
 
         List<Map<String, Object>> content = new ArrayList<>();

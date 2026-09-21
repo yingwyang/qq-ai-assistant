@@ -122,11 +122,11 @@ public class SystemController {
             data.put("character", character);
             return ResponseEntity.ok(ApiResponse.success(data));
         } catch (IllegalArgumentException e) {
-            return ResponseEntity.badRequest()
-                    .body(ApiResponse.error(400, e.getMessage()));
+            // 参数类错误原样上抛：GlobalExceptionHandler 会映射为 400 BAD_ARGUMENT + 原始校验文案
+            throw e;
         } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(ApiResponse.error(500, "切换角色失败: " + e.getMessage()));
+            log.error("切换角色失败 userId={} character={}", userId, character, e);
+            throw new com.qqai.exception.BizException(500, "TTS_CHARACTER_SWITCH_FAILED", "切换角色失败，请稍后重试");
         }
     }
     @Autowired

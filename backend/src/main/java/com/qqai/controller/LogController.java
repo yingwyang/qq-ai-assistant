@@ -137,7 +137,9 @@ public class LogController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
 
-        PageRequest pageRequest = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "timestamp"));
+        // 分页上限统一收口在 common/PageLimits
+        PageRequest pageRequest = (PageRequest) com.qqai.common.PageLimits.of(page, size,
+                Sort.by(Sort.Direction.DESC, "timestamp"));
         Page<AuditLog> resultPage = auditLogService.getAuditLogs(
                 keyword, action, target, result, parseStart(from), parseEnd(to), pageRequest);
 

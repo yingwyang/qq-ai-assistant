@@ -124,7 +124,8 @@ public class AstrBotConversationService {
      * 获取群聊和用户的对话列表（分页）
      */
     public Page<AstrBotConversation> getConversations(String groupId, int page, int size) {
-        Pageable pageable = PageRequest.of(page, size);
+        // 分页上限统一收口在 common/PageLimits
+        Pageable pageable = com.qqai.common.PageLimits.of(page, size);
         return conversationRepository.findByGroupIdOrderByTimeUpdatedDesc(groupId, pageable);
     }
 
@@ -250,7 +251,8 @@ public class AstrBotConversationService {
      * 获取对话消息（分页）
      */
     public Page<AstrBotMessage> getConversationMessages(String conversationId, int page, int size) {
-        Pageable pageable = PageRequest.of(page, size);
+        // 分页上限统一收口在 common/PageLimits
+        Pageable pageable = com.qqai.common.PageLimits.of(page, size);
         return messageRepository.findByConversationIdOrderByTimeCreatedAsc(conversationId, pageable);
     }
 

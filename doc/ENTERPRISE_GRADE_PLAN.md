@@ -50,7 +50,7 @@
 | 0 | 支付步骤按钮化 + 订单状态文案单一事实来源（`frontend/src/config/orderStatus.js`）+ 订阅文档同步 + 验收脚本 | ✅ 已完成（`87bf3df`） |
 | A | 安全收口：二维码接口收权、响应体去 token、Cookie `secure` 配置化、降权递增 `tokenVersion`、`User` 敏感 getter 加 `@JsonIgnore` | ✅ 已完成（本轮，见下） |
 | B | 资金链路幂等与扣费顺序：`markPaid` 行锁、`grantPoints` 行锁、下单幂等键、AI/TTS 先扣后调 + 失败退费、签到冲突 `REQUIRES_NEW`、流水唯一约束 | ✅ 已完成（本轮，见下） |
-| C | 异常与校验规范化：删宽 catch、Map 入参换 DTO + `@Valid`、分页上限统一、归属校验收口 Service | ⬜ 待办 |
+| C | 异常与校验规范化：删宽 catch、Map 入参换 DTO + `@Valid`、分页上限统一、归属校验收口 Service | 🔄 进行中（C.1 异常回显收口、C.3 分页上限统一已完成；C.2 DTO 校验、C.4 归属校验收口待办） |
 | D | 性能与静默异常：去 N+1、合并钱包页查询、消除 `catch { return null; }`、前端空 catch 补日志 | ⬜ 待办 |
 | E | 可观测与去重：Actuator + `/health` 探 DB/MQ、初始密码不落日志、限流器换 Caffeine、抽订单映射器、套餐名动态生成 | ⬜ 待办 |
 | F | 前端一致性：清除原生弹窗、空/加载/错误态统一、大 chunk 代码分割、无障碍、暗色主题覆盖 | ⬜ 待办 |
@@ -85,6 +85,16 @@
 
 **反向验证（证明测试能抓到缺陷）**：临时把 `markPaid` 换回无锁查询、`grantPoints` 换回 `ensureAccount` 后，两个并发用例**双双失败**（`Tests run: 2, Failures: 2`）；恢复行锁后全绿。新增 `MoneyPathConcurrencyTest` 8 项（并发确认收款 / 并发发放 / 并发签到 / 并发下单 / TTS 退费 / 余额门禁 / 退款幂等 / 取消与确认互斥）。
 **踩坑记录**：用 `Copy-Item` 从备份还原源码会保留旧时间戳，Maven 增量编译会因此**跳过重编**（全量测试实际跑的是变异后的字节码，出现 2 个假失败）→ 还原后必须 touch 源文件时间戳或 `mvn clean`。
+
+### 批次 C 交付明细（进行中）
+
+| 项 | 改动 | 证据 |
+|----|------|------|
+| C.1a | `MessageController` 16 处「catch → 400/503 + `e.getMessage()`」全部改为：**业务异常（`BizException`）原样上抛** + 未预期异常 `log.error` 后抛安全文案的 `BizException`（不再把内部异常文本回显给客户端、不再把 500 伪装成 400） | `log.error("上传失败", e)` + `BizException(500, "FILE_UPLOAD_FAILED", "文件上传失败，请稍后重试")` |
+| C.1b | `PersonaController` 7 处 `return badRequest().body(Map.of("error", e.getMessage()))` 同样改造（并统一回 `ApiResponse` 信封）；AstrBot 上游异常改 502 | 残留 `Map.of("error", e.getMessage())` = 0 |
+| C.1c | `BackupController` 删除备份的 `FileNotFoundException/IllegalArgumentException/Exception` 三分支改为 404/400/500 的 `BizException`；`GroupController` 发送被拒改为「审计留痕 + 原样上抛」；`SystemController` 切换角色改为「日志 + 安全文案」 | 守卫测试全绿 |
+| C.1d | 新增**架构守卫测试** `ErrorLeakGuardTest`：源码扫描禁止（a）控制器回显 `e.getMessage()`（b）控制器把用户可控 size 直接交给 `PageRequest.of(page, size)`；并断言 `PageLimits` 边界 | 该测试首跑即抓出 `BackupController`/`GroupController`/`SystemController` 三个漏网文件，修完 3/3 通过 |
+| C.3 | 新增 `common/PageLimits`（`clampSize` 上界 200、`clampPage` 下界 0）并替换 5 处用户可控分页：`AdminController`（用户列表）、`LogController`（审计日志）、`MessageController`（媒体列表）、`AstrBotConversationService.getConversations/getConversationMessages` | 守卫测试规则二 |
 
 ## 四、验收基线（每轮必须全绿）
 

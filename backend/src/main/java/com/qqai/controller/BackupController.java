@@ -3,6 +3,8 @@ package com.qqai.controller;
 import com.qqai.common.SecurityHelper;
 import com.qqai.service.BackupService;
 import com.qqai.service.MessageArchiveService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.UrlResource;
@@ -20,6 +22,9 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/admin")
 public class BackupController {
+
+    /** 未预期异常在本控制器记录堆栈，对外只返回安全文案 */
+    private static final Logger log = LoggerFactory.getLogger(BackupController.class);
 
     @Autowired
     private BackupService backupService;
@@ -87,11 +92,14 @@ public class BackupController {
                     deleted, "SUCCESS", "删除备份文件");
             return ResponseEntity.ok(Map.of("message", "备份已删除", "fileName", deleted));
         } catch (java.io.FileNotFoundException e) {
-            return ResponseEntity.status(404).body(Map.of("error", e.getMessage()));
+            // 文件名不存在属于可预期业务情况：404 + 自有文案
+            throw new com.qqai.exception.BizException(404, "BACKUP_NOT_FOUND", "备份文件不存在");
         } catch (IllegalArgumentException e) {
-            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+            // 文件名白名单校验失败：400 + 校验文案（该文案由本项目代码编写，不含内部细节）
+            throw new com.qqai.exception.BizException(400, "INVALID_BACKUP_FILE_NAME", e.getMessage());
         } catch (Exception e) {
-            return ResponseEntity.internalServerError().body(Map.of("error", "删除备份失败: " + e.getMessage()));
+            log.error("删除备份失败 fileName={}", fileName, e);
+            throw new com.qqai.exception.BizException(500, "BACKUP_DELETE_FAILED", "删除备份失败，请稍后重试");
         }
     }
 

@@ -59,8 +59,12 @@ public class PersonaController {
                 personas.add(p);
             }
             return ResponseEntity.ok(personas);
+        } catch (com.qqai.exception.BizException biz) {
+            // 业务异常保持原有状态码与文案
+            throw biz;
         } catch (Exception e) {
-            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+            log.error("获取人格列表失败", e);
+            throw new com.qqai.exception.BizException(502, "ASTRBOT_PERSONA_UNAVAILABLE", "人格列表获取失败，请稍后重试");
         }
     }
 
@@ -87,8 +91,12 @@ public class PersonaController {
                 return ResponseEntity.ok(p);
             }
             return ResponseEntity.notFound().build();
+        } catch (com.qqai.exception.BizException biz) {
+            // 业务异常保持原有状态码与文案
+            throw biz;
         } catch (Exception e) {
-            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+            log.error("获取人格详情失败", e);
+            throw new com.qqai.exception.BizException(502, "ASTRBOT_PERSONA_UNAVAILABLE", "人格详情获取失败，请稍后重试");
         }
     }
 
@@ -125,8 +133,12 @@ public class PersonaController {
             ps.setString(10, now);
             ps.executeUpdate();
             return ResponseEntity.ok(Map.of("success", true, "message", "人格创建成功"));
+        } catch (com.qqai.exception.BizException biz) {
+            // 业务异常保持原有状态码与文案
+            throw biz;
         } catch (Exception e) {
-            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+            log.error("创建人格失败", e);
+            throw new com.qqai.exception.BizException(502, "ASTRBOT_PERSONA_UNAVAILABLE", "创建人格失败，请稍后重试");
         }
     }
 
@@ -157,8 +169,12 @@ public class PersonaController {
                 return ResponseEntity.ok(Map.of("success", true, "message", "人格更新成功"));
             }
             return ResponseEntity.notFound().build();
+        } catch (com.qqai.exception.BizException biz) {
+            // 业务异常保持原有状态码与文案
+            throw biz;
         } catch (Exception e) {
-            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+            log.error("更新人格失败", e);
+            throw new com.qqai.exception.BizException(502, "ASTRBOT_PERSONA_UNAVAILABLE", "更新人格失败，请稍后重试");
         }
     }
 
@@ -173,8 +189,12 @@ public class PersonaController {
                 return ResponseEntity.ok(Map.of("success", true, "message", "人格删除成功"));
             }
             return ResponseEntity.notFound().build();
+        } catch (com.qqai.exception.BizException biz) {
+            // 业务异常保持原有状态码与文案
+            throw biz;
         } catch (Exception e) {
-            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+            log.error("删除人格失败", e);
+            throw new com.qqai.exception.BizException(502, "ASTRBOT_PERSONA_UNAVAILABLE", "删除人格失败，请稍后重试");
         }
     }
 
@@ -206,8 +226,12 @@ public class PersonaController {
                     return ResponseEntity.badRequest().body(Map.of("error", "未找到指定的人格"));
                 }
             }
+        } catch (com.qqai.exception.BizException biz) {
+            // 业务异常保持原有状态码与文案
+            throw biz;
         } catch (Exception e) {
-            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+            log.error("设置默认人格失败", e);
+            throw new com.qqai.exception.BizException(502, "ASTRBOT_PERSONA_UNAVAILABLE", "设置默认人格失败，请稍后重试");
         }
     }
 
@@ -296,8 +320,12 @@ public class PersonaController {
                 }
                 return ResponseEntity.ok(Map.of("defaultPersonaId", null));
             }
+        } catch (com.qqai.exception.BizException biz) {
+            // 业务异常保持原有状态码与文案
+            throw biz;
         } catch (Exception e) {
-            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+            log.error("获取默认人格失败", e);
+            throw new com.qqai.exception.BizException(502, "ASTRBOT_PERSONA_UNAVAILABLE", "默认人格获取失败，请稍后重试");
         }
     }
 

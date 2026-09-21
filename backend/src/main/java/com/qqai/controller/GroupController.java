@@ -453,9 +453,9 @@ public class GroupController {
             replyMessageId = outboundMediaService.resolveReplyMessageId(groupId, replyToId);
             segments = outboundMediaService.buildTextSegments(replyMessageId, atQqs, text);
         } catch (BizException e) {
+            // 审计留痕后原样上抛：业务异常的状态码与文案由 GlobalExceptionHandler 统一输出
             auditLogService.log(username, "GROUP_SEND", "group:" + groupId, "FAIL", "发送被拒绝：" + e.getMessage());
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                    .body(ApiResponse.error(400, e.getMessage()));
+            throw e;
         }
         List<String> segmentTypes = outboundMediaService.segmentTypes(segments);
 
