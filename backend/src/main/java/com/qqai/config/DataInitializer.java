@@ -10,6 +10,9 @@ import org.springframework.boot.CommandLineRunner;
 import org.springframework.stereotype.Component;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.security.SecureRandom;
 
 /**
@@ -44,6 +47,7 @@ public class DataInitializer implements CommandLineRunner {
             return;
         }
 
+        boolean passwordFromEnv = adminInitPassword != null && adminInitPassword.length() >= 8;
         String password = resolveInitPassword();
         User admin = new User();
         admin.setUsername("admin");
@@ -54,9 +58,32 @@ public class DataInitializer implements CommandLineRunner {
         admin.setTokenVersion(0);
         userService.save(admin);
 
+        // 安全：初始密码不再写进日志（日志会被长期保留、被运维/排障人员读取）。
+        // 随机密码改为落一次性文件（backend/data/ 已在 .gitignore 中）；环境变量提供的密码则无需落盘。
+        Path passwordFile = null;
+        if (!passwordFromEnv) {
+            try {
+                Path dir = Paths.get("data");
+                Files.createDirectories(dir);
+                passwordFile = dir.resolve("initial-admin-password.txt");
+                Files.writeString(passwordFile,
+                        "初始管理员账号: admin\n初始密码: " + password
+                                + "\n请登录后立即修改密码，并删除本文件。\n");
+            } catch (Exception e) {
+                log.error("写入初始密码文件失败，请改用 ADMIN_INIT_PASSWORD 环境变量提供初始密码", e);
+            }
+        }
+
         log.warn("================================================================");
-        log.warn("【安全】已创建初始管理员账号 admin,初始密码: {}", password);
-        log.warn("【安全】请立即登录并在个人中心修改该密码。");
+        log.warn("【安全】已创建初始管理员账号 admin（初始密码未写入日志）。");
+        if (passwordFromEnv) {
+            log.warn("【安全】初始密码取自 ADMIN_INIT_PASSWORD 环境变量。");
+        } else if (passwordFile != null) {
+            log.warn("【安全】初始密码已写入文件：{}", passwordFile.toAbsolutePath());
+            log.warn("【安全】请登录后立即修改密码，并删除该文件。");
+        } else {
+            log.warn("【安全】无法写入密码文件，请设置 ADMIN_INIT_PASSWORD 环境变量后重启以重置密码。");
+        }
         log.warn("================================================================");
     }
 

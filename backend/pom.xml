@@ -141,6 +141,11 @@
             <artifactId>spring-dotenv</artifactId>
             <version>3.0.0</version>
         </dependency>
+        <!-- Actuator：/actuator/health 探 MySQL 与 RabbitMQ（仅 ADMIN 可读，见 SecurityConfig） -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
     </dependencies>
 
     <build>

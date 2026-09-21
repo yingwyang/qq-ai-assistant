@@ -153,6 +153,8 @@ public class SecurityConfig implements WebSocketConfigurer {
                 // 管理后台
                 .requestMatchers("/api/admin/**").hasRole("ADMIN")
                 .requestMatchers("/api/credits/admin/**").hasRole("ADMIN")
+                // Actuator：健康/指标含依赖详情（DB、RabbitMQ），只给管理员看
+                .requestMatchers("/actuator/**").hasRole("ADMIN")
                 // 组件启停/配置:统一收口为 ADMIN,避免逐接口枚举遗漏
                 .requestMatchers("/api/system/start-*", "/api/system/stop-*", "/api/system/restart-*").hasRole("ADMIN")
                 .requestMatchers("/api/system/napcat/auto-configure").hasRole("ADMIN")

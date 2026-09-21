@@ -60,6 +60,17 @@ archive:
   days-before: 90
   cron: "0 0 2 * * ?"
 
+# 测试用的 Actuator 配置：与生产一致地打开详情（该端点已收权为 ADMIN），
+# 便于 ActuatorHealthSecurityTest 断言 db 组件探测存在。
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: always
+
 logging:
   file:
     name: ./target/test-logs/application.log

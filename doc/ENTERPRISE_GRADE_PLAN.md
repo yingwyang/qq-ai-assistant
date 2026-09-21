@@ -52,7 +52,7 @@
 | B | 资金链路幂等与扣费顺序：`markPaid` 行锁、`grantPoints` 行锁、下单幂等键、AI/TTS 先扣后调 + 失败退费、签到冲突 `REQUIRES_NEW`、流水唯一约束 | ✅ 已完成（本轮，见下） |
 | C | 异常与校验规范化：删宽 catch、Map 入参换 DTO + `@Valid`、分页上限统一、归属校验收口 Service | ✅ 已完成（C.1/C.2/C.3/C.4，见下） |
 | D | 性能与静默异常：去 N+1、合并钱包页查询、消除 `catch { return null; }`、前端空 catch 补日志 | ✅ 已完成（见下） |
-| E | 可观测与去重：Actuator + `/health` 探 DB/MQ、初始密码不落日志、限流器换 Caffeine、抽订单映射器、套餐名动态生成 | ⬜ 待办 |
+| E | 可观测与去重：Actuator + `/health` 探 DB/MQ、初始密码不落日志、限流器换 Caffeine、抽订单映射器、套餐名动态生成 | ✅ 已完成（见下） |
 | F | 前端一致性：清除原生弹窗、空/加载/错误态统一、大 chunk 代码分割、无障碍、暗色主题覆盖 | ⬜ 待办 |
 | G | 文档与技能：`doc/` 与 `frontend/src/docs/` 全量对齐、运维坑写回技能 | ⬜ 待办 |
 
@@ -109,6 +109,22 @@
 | D.3a | 后端静默 catch 清零：`AdminOrdersController`/`AdminCreditsController` 的日期与枚举解析、`SubscriptionService.parseStatuses`、`CreditsController` 日期解析、`MessageController`（群类型/数字/日期解析）、`BackupService`、`FilePurgeService`、`MediaDownloadService`（含安全判定 fail-closed 改 WARN）、`AstrBotController` SSE 行解析、`SystemController` 端口探测（debug 级） | 全部补 `log.warn/debug` 带上下文；`MediaDownloadService` 安全判定失败按阻断处理并留 WARN |
 | D.3b | 守卫测试新增规则三：`controller`/`service` 包内禁止「catch 体里直接 return 或空 catch」 | `ErrorLeakGuardTest.noSilentCatchInControllerAndService`——该规则首跑即抓出 5 个文件 6 处漏网点 |
 | D.4 | 前端空 catch 清零：`services/api.js`（登出通知、错误体解析）、`UserCenter.vue`、`SubscriptionDashboard.vue`（头像解析/详情加载/用户信息刷新）改为 `console.warn`／`logger.warn`／`logger.debug` | 前端扫描 0 处残留 |
+
+### 批次 E 交付明细（可观测与去重）
+
+| 项 | 改动 | 证据 |
+|----|------|------|
+| E.1 | 引入 `spring-boot-starter-actuator`：`/actuator/health` 现在会探测 **MySQL（db）与 RabbitMQ**（原先 `/api/system/health` 只探 NapCat 端口，数据库挂了仍返回 ok）；`show-details=always` 便于排障；**该端点收权为 `ROLE_ADMIN`**（依赖详情不对外） | `pom.xml`、`application.yml`（含测试 yml）、`SecurityConfig`；`ActuatorHealthSecurityTest` 3 项：匿名 401 / 普通用户 403 / ADMIN 可见 `db` 组件明细 |
+| E.2 | 初始管理员密码**不再写入日志**：随机密码落一次性文件 `backend/data/initial-admin-password.txt`（该目录已在 .gitignore），日志只提示文件路径与"立即改密并删除"；由 `ADMIN_INIT_PASSWORD` 提供时无需落盘 | `config/DataInitializer.java` |
+| E.3 | 限流器重写为 Caffeine 固定窗口：旧实现 `ConcurrentHashMap<String, ArrayDeque<Instant>>` 的 `ArrayDeque` 非线程安全（并发清理/写入竞态可绕过限流）且空 key 清理不可靠会内存泄漏；新实现用原子计数 + `expireAfterWrite` 自动过期，不同窗口长度分桶 | `common/RateLimiterService.java`；`RateLimiterServiceTest` 4 项（含 8 线程 ×80 次请求恰好放行 50 次的精确性断言） |
+| E.4 | 新增 `SubscriptionOrderMapper`：把原先在 `SubscriptionsController` 与 `AdminOrdersController` 各写一份的 `orderToMap`/`planTierToName`/`refundStatusName`/`extractMeta` 收敛为单一实现，用户端 `toUserView`、管理端 `toAdminView`（多 clientIp/userAgent/disputeReason/metadata 派生字段） | `service/SubscriptionOrderMapper.java`；`SubscriptionOrderMapperTest` 4 项（用户端不泄漏管理员字段、管理端解析 metadata、退款状态文案） |
+| E.5 | 套餐名动态化：`直购积分·N` 不再硬编码，改读「规则配置」的 `plan*Credit`（与订阅页 `/subscriptions/plans` 的口径一致），规则读取失败时退回默认值 | 断言"改规则 → 展示名同步变化"（`直购积分·7777`） |
+
+> 说明：`txToMap` 仍在 3 个控制器各有一份（字段略有差异），本轮未合并，列入批次 F 的收尾项。
+
+**踩坑记录（已固化为守卫测试）**：`application.yml` 后半段有一个 `---` 分隔的 **dev profile 文档**，写在分隔符之后的配置只在 `--spring.profiles.active=dev` 时生效。本次把 `management:` 段误写在分隔符之后，默认 profile 下 `/actuator` 只暴露了 health 且没有依赖详情（启动日志显示 "Exposing 1 endpoint(s)"），排查花了几轮。修法：把 `management:` 移到第一个文档，并新增 `ApplicationYamlStructureTest` 断言「management 段与安全相关配置必须位于第一个 YAML 文档」。
+
+**E 批次最终验收**：`mvn -B -ntp test` **207/207**；实测 `/actuator/health` 匿名 401、普通用户 403、ADMIN 返回 `db`(MySQL) + `rabbit`(4.2.4) + `diskSpace` + 探针状态；`/actuator/metrics` 200。
 
 ## 四、验收基线（每轮必须全绿）
 

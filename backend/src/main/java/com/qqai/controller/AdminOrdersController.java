@@ -50,6 +50,10 @@ public class AdminOrdersController {
     @Autowired
     private SubscriptionService subscriptionService;
 
+    /** 订单出参映射（与用户端 SubscriptionsController 共用同一实现） */
+    @Autowired
+    private com.qqai.service.SubscriptionOrderMapper orderMapper;
+
     @Autowired
     private CreditService creditService;
 
@@ -355,86 +359,12 @@ public class AdminOrdersController {
         return ApiResponse.success(data);
     }
 
-    private Map<String, Object> orderToMap(SubscriptionOrder o) {
-        Map<String, Object> m = new HashMap<>();
-        m.put("id", o.getId());
-        m.put("orderNo", o.getOrderNo());
-        m.put("userId", o.getUserId());
-        m.put("planTier", o.getPlanTier() != null ? o.getPlanTier().name() : null);
-        m.put("planName", planTierToName(o.getPlanTier()));
-        m.put("price", o.getPrice());
-        m.put("amount", o.getPrice());
-        m.put("paidAmount", o.getPrice());
-        m.put("creditAmount", o.getCreditAmount());
-        m.put("credits", o.getCreditAmount());
-        m.put("durationDays", o.getDurationDays());
-        m.put("planDurationDays", o.getDurationDays());
-        m.put("status", o.getStatus() != null ? o.getStatus().name() : null);
-        m.put("paymentMethod", o.getPaymentMethod());
-        m.put("paymentTransactionId", o.getPaymentTransactionId());
-        m.put("paidAt", o.getPaidAt());
-        m.put("validFrom", o.getPaidAt());
-        m.put("expiresAt", o.getExpiresAt());
-        m.put("refundedAt", o.getRefundedAt());
-        m.put("refundAmount", o.getRefundAmount());
-        m.put("refundReason", o.getRefundReason());
-        m.put("disputeReason", o.getDisputeReason());
-        m.put("refundStatus", refundStatusName(o.getStatus()));
-        m.put("refundAdminUserId", o.getRefundAdminUserId());
-        // 从 metadata 解析申请时间等扩展字段
-        String meta = o.getMetadata();
-        if (meta != null && !meta.isEmpty()) {
-            m.put("refundRequestedAt", extractMeta(meta, "refundRequestedAt"));
-            m.put("disputedAt", extractMeta(meta, "disputedAt"));
-            m.put("refundRejectReason", extractMeta(meta, "refundRejectReason"));
-        }
-        m.put("metadata", o.getMetadata());
-        m.put("clientIp", o.getClientIp());
-        m.put("userAgent", o.getUserAgent());
-        m.put("createdAt", o.getCreatedAt());
-        m.put("updatedAt", o.getUpdatedAt());
-        m.put("autoRenew", false);
-        m.put("source", "WEB");
-        return m;
-    }
-
-    private String planTierToName(SubscriptionTier tier) {
-        if (tier == null) return "免费版";
-        return switch (tier) {
-            case FREE -> "免费版";
-            case LITE -> "直购积分·600";
-            case PRO -> "直购积分·3500";
-            case PROPLUS -> "直购积分·16000";
-            case ULTRA -> "直购积分·45000";
-            case MEGA -> "直购积分·100000";
-            case SMALL_MONTH_CARD -> "小月卡";
-            case LARGE_MONTH_CARD -> "大月卡";
-            case ALL -> "全功能版";
-        };
-    }
-
-    private String refundStatusName(OrderStatus status) {
-        if (status == null) return "";
-        return switch (status) {
-            case REFUNDED -> "已退款";
-            case PENDING_REFUND -> "退款审批中";
-            default -> "";
-        };
-    }
-
     /**
-     * 从 metadata 字符串（;分隔 key=value）中提取指定 key 的值。
-     * metadata 格式示例：refundRequestReason=xxx;refundRequestedAt=2026-08-14T18:00;refundRequestedBy=2
+     * 订单出参统一由 {@link com.qqai.service.SubscriptionOrderMapper} 生成（管理端视图），
+     * 与用户端共用同一实现，避免同名字段两边不一致。
      */
-    private String extractMeta(String metadata, String key) {
-        if (metadata == null || key == null) return null;
-        for (String part : metadata.split(";")) {
-            int eq = part.indexOf('=');
-            if (eq > 0 && part.substring(0, eq).equals(key)) {
-                return part.substring(eq + 1);
-            }
-        }
-        return null;
+    private Map<String, Object> orderToMap(SubscriptionOrder o) {
+        return orderMapper.toAdminView(o);
     }
 
     private Map<String, Object> txToMap(CreditTransaction tx) {

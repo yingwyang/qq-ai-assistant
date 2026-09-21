@@ -40,6 +40,10 @@ public class SubscriptionsController {
     @Autowired
     private SubscriptionService subscriptionService;
 
+    /** 订单出参映射（与 AdminOrdersController 共用同一实现，避免字段漂移） */
+    @Autowired
+    private com.qqai.service.SubscriptionOrderMapper orderMapper;
+
     @Autowired
     private CreditRuleService creditRuleService;
 
@@ -312,62 +316,12 @@ public class SubscriptionsController {
         return m;
     }
 
+    /**
+     * 订单出参统一由 {@link com.qqai.service.SubscriptionOrderMapper} 生成
+     * （原先本文件与 AdminOrdersController 各写一份近似复制，字段极易漂移）。
+     */
     private Map<String, Object> orderToMap(SubscriptionOrder o) {
-        Map<String, Object> m = new HashMap<>();
-        m.put("id", o.getId());
-        m.put("orderNo", o.getOrderNo());
-        m.put("userId", o.getUserId());
-        m.put("planTier", o.getPlanTier() != null ? o.getPlanTier().name() : null);
-        // 前端兼容字段
-        m.put("planName", planTierToName(o.getPlanTier()));
-        m.put("price", o.getPrice());
-        m.put("amount", o.getPrice());
-        m.put("paidAmount", o.getPrice());
-        m.put("creditAmount", o.getCreditAmount());
-        m.put("credits", o.getCreditAmount());
-        m.put("durationDays", o.getDurationDays());
-        m.put("planDurationDays", o.getDurationDays());
-        m.put("status", o.getStatus() != null ? o.getStatus().name() : null);
-        m.put("paymentMethod", o.getPaymentMethod());
-        m.put("paymentTransactionId", o.getPaymentTransactionId());
-        m.put("paidAt", o.getPaidAt());
-        m.put("validFrom", o.getPaidAt());
-        m.put("expiresAt", o.getExpiresAt());
-        m.put("refundedAt", o.getRefundedAt());
-        m.put("refundAmount", o.getRefundAmount());
-        m.put("refundReason", o.getRefundReason());
-        m.put("refundStatus", refundStatusName(o.getStatus()));
-        m.put("refundAdminUserId", o.getRefundAdminUserId());
-        m.put("metadata", o.getMetadata());
-        m.put("createdAt", o.getCreatedAt());
-        m.put("updatedAt", o.getUpdatedAt());
-        m.put("autoRenew", false);
-        m.put("source", "WEB");
-        return m;
-    }
-
-    private String planTierToName(SubscriptionTier tier) {
-        if (tier == null) return "免费版";
-        return switch (tier) {
-            case FREE -> "免费版";
-            case LITE -> "直购积分·600";
-            case PRO -> "直购积分·3500";
-            case PROPLUS -> "直购积分·16000";
-            case ULTRA -> "直购积分·45000";
-            case MEGA -> "直购积分·100000";
-            case SMALL_MONTH_CARD -> "小月卡";
-            case LARGE_MONTH_CARD -> "大月卡";
-            case ALL -> "全功能版";
-        };
-    }
-
-    private String refundStatusName(OrderStatus status) {
-        if (status == null) return "";
-        return switch (status) {
-            case REFUNDED -> "已退款";
-            case PENDING_REFUND -> "退款审批中";
-            default -> "";
-        };
+        return orderMapper.toUserView(o);
     }
 
     private String getClientIp(HttpServletRequest request) {

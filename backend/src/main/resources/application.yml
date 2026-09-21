@@ -48,6 +48,22 @@ server:
     include-message: never
     include-binding-errors: never
 
+# 可观测性：/actuator/health 探测 MySQL（db）与 RabbitMQ（rabbit）。
+# 注意：该配置必须留在本文件第一个文档里 —— 文件后半段（`---` 之后）是 dev profile 文档，
+# 写在那边只会在 --spring.profiles.active=dev 时生效（曾经踩过：端点只暴露了 health）。
+# 端点的访问权限在 SecurityConfig 中收口为仅 ADMIN。
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      # 详情含 db/rabbit 等组件状态；该端点仅管理员可访问，详情用于排障
+      show-details: always
+      probes:
+        enabled: true
+
 # AstrBot配置
 astrbot:
   api-url: ${ASTRBOT_API_URL:http://127.0.0.1:6185}
