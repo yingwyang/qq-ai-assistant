@@ -124,21 +124,17 @@ public class AdminCreditsController {
      * <p>积分不变（amount=0），只有现金列有值；可选关联到某个用户，便于在用户维度对账。</p>
      */
     @PostMapping("/cash")
-    public ResponseEntity<ApiResponse<Map<String, Object>>> createCashEntry(@RequestBody Map<String, Object> body) {
+    public ResponseEntity<ApiResponse<Map<String, Object>>> createCashEntry(
+            @RequestBody @jakarta.validation.Valid com.qqai.dto.admin.CashEntryRequest req) {
         securityHelper.requireAdmin();
-        String direction = String.valueOf(body.getOrDefault("direction", "IN")).toUpperCase();
-        if (!"IN".equals(direction) && !"OUT".equals(direction)) {
-            throw new BizException(400, "direction 只能是 IN 或 OUT");
-        }
-        BigDecimal amount = parseCashAmount(body.get("amount"));
-        if (amount.signum() <= 0) throw new BizException(400, "金额必须大于 0");
-        if (amount.compareTo(new BigDecimal("9999999")) > 0) throw new BizException(400, "金额过大");
+        String direction = req.direction() == null ? "IN" : req.direction().trim().toUpperCase();
+        BigDecimal amount = req.amount() == null ? null : req.amount().setScale(2, java.math.RoundingMode.HALF_UP);
+        if (amount == null || amount.signum() <= 0) throw new BizException(400, "金额必须大于 0");
 
-        String remark = body.get("remark") == null ? "" : String.valueOf(body.get("remark")).trim();
-        String category = body.get("category") == null ? com.qqai.service.CashLedgerService.CATEGORY_MANUAL
-                : String.valueOf(body.get("category")).trim().toUpperCase();
-        Long userId = body.get("userId") == null || String.valueOf(body.get("userId")).isBlank()
-                ? null : Long.valueOf(String.valueOf(body.get("userId")));
+        String remark = req.remark() == null ? "" : req.remark().trim();
+        String category = req.category() == null ? com.qqai.service.CashLedgerService.CATEGORY_MANUAL
+                : req.category().trim().toUpperCase();
+        Long userId = req.userId();
         if (userId != null && userRepository.findById(userId).isEmpty()) {
             throw new BizException(404, "用户不存在: " + userId);
         }
@@ -171,14 +167,8 @@ public class AdminCreditsController {
         return ResponseEntity.ok(ApiResponse.success(data));
     }
 
-    private static BigDecimal parseCashAmount(Object raw) {
-        if (raw == null) throw new BizException(400, "金额不能为空");
-        try {
-            return new BigDecimal(String.valueOf(raw)).setScale(2, java.math.RoundingMode.HALF_UP);
-        } catch (Exception e) {
-            throw new BizException(400, "金额格式不正确: " + raw);
-        }
-    }
+    // 金额解析已下沉到 CashEntryRequest 的 Bean Validation（@NotNull/@DecimalMin/@Digits），
+    // 不再需要手工 parseCashAmount（旧实现会把任意输入的原值回显到错误信息里）。
 
     @GetMapping("/rule")
     public ResponseEntity<ApiResponse<CreditRule>> getRule() {
@@ -354,15 +344,12 @@ public class AdminCreditsController {
      * 审计：成功后写 AuditLog（CREDIT_ADJUST），失败由 BizException 抛出不会进入审计分支。
      */
     @PostMapping("/adjust")
-    public ResponseEntity<ApiResponse<Map<String, Object>>> adjust(@RequestBody Map<String, Object> body) {
+    public ResponseEntity<ApiResponse<Map<String, Object>>> adjust(
+            @RequestBody @jakarta.validation.Valid com.qqai.dto.admin.CreditAdjustRequest req) {
         Long adminUserId = securityHelper.requireAdminUserId();
-        Number userIdNum = (Number) body.get("userId");
-        Number amountNum = (Number) body.get("amount");
-        String reason = (String) body.get("reason");
-        if (userIdNum == null) throw new BizException("userId不能为空");
-        if (amountNum == null) throw new BizException("amount不能为空");
-        Long userId = userIdNum.longValue();
-        int amount = amountNum.intValue();
+        Long userId = req.userId();
+        int amount = req.amount();
+        String reason = req.reason();
 
         if (!userRepository.existsById(userId)) {
             throw new BizException("目标用户不存在");

@@ -50,7 +50,7 @@
 | 0 | 支付步骤按钮化 + 订单状态文案单一事实来源（`frontend/src/config/orderStatus.js`）+ 订阅文档同步 + 验收脚本 | ✅ 已完成（`87bf3df`） |
 | A | 安全收口：二维码接口收权、响应体去 token、Cookie `secure` 配置化、降权递增 `tokenVersion`、`User` 敏感 getter 加 `@JsonIgnore` | ✅ 已完成（本轮，见下） |
 | B | 资金链路幂等与扣费顺序：`markPaid` 行锁、`grantPoints` 行锁、下单幂等键、AI/TTS 先扣后调 + 失败退费、签到冲突 `REQUIRES_NEW`、流水唯一约束 | ✅ 已完成（本轮，见下） |
-| C | 异常与校验规范化：删宽 catch、Map 入参换 DTO + `@Valid`、分页上限统一、归属校验收口 Service | 🔄 进行中（C.1 异常回显收口、C.3 分页上限统一已完成；C.2 DTO 校验、C.4 归属校验收口待办） |
+| C | 异常与校验规范化：删宽 catch、Map 入参换 DTO + `@Valid`、分页上限统一、归属校验收口 Service | ✅ 已完成（C.1/C.2/C.3/C.4，见下） |
 | D | 性能与静默异常：去 N+1、合并钱包页查询、消除 `catch { return null; }`、前端空 catch 补日志 | ⬜ 待办 |
 | E | 可观测与去重：Actuator + `/health` 探 DB/MQ、初始密码不落日志、限流器换 Caffeine、抽订单映射器、套餐名动态生成 | ⬜ 待办 |
 | F | 前端一致性：清除原生弹窗、空/加载/错误态统一、大 chunk 代码分割、无障碍、暗色主题覆盖 | ⬜ 待办 |
@@ -95,6 +95,8 @@
 | C.1c | `BackupController` 删除备份的 `FileNotFoundException/IllegalArgumentException/Exception` 三分支改为 404/400/500 的 `BizException`；`GroupController` 发送被拒改为「审计留痕 + 原样上抛」；`SystemController` 切换角色改为「日志 + 安全文案」 | 守卫测试全绿 |
 | C.1d | 新增**架构守卫测试** `ErrorLeakGuardTest`：源码扫描禁止（a）控制器回显 `e.getMessage()`（b）控制器把用户可控 size 直接交给 `PageRequest.of(page, size)`；并断言 `PageLimits` 边界 | 该测试首跑即抓出 `BackupController`/`GroupController`/`SystemController` 三个漏网文件，修完 3/3 通过 |
 | C.3 | 新增 `common/PageLimits`（`clampSize` 上界 200、`clampPage` 下界 0）并替换 5 处用户可控分页：`AdminController`（用户列表）、`LogController`（审计日志）、`MessageController`（媒体列表）、`AstrBotConversationService.getConversations/getConversationMessages` | 守卫测试规则二 |
+| C.2 | 新增三个管理端 DTO + `@Valid`：`ManualCreateOrderRequest`（补单：`pointsGranted` ≤ 1000 万、`durationDays` 1~3650、`priceCents` 0~100 万、字段长度上限）、`CreditAdjustRequest`（调账：`amount` ±1000 万）、`CashEntryRequest`（记账：金额 0.01~9999999、两位小数、direction 白名单）；三个端点不再吃 `Map<String,Object>`，历史 `*Override` 别名字段一并去掉（前端发的一直是规范字段名）；删除手工 `parseCashAmount`（旧实现会把原始输入回显到错误信息） | `dto/admin/*.java`；新增 `AdminInputValidationTest` 5 项（缺字段/超上限/负数/非法方向/统一信封） |
+| C.4 | 归属校验收口：新增 `SubscriptionService.getOrderForUser`（未登录或非本人一律 403 `FORBIDDEN_ORDER`，不区分"不存在/不是你的"以防探测订单号）、`cancelOrderAsUser`（行锁 + 严格归属 + 状态校验三合一，管理员路径 `cancelOrder` 复用同一内部方法）、私有 `requireOrderOwner` 统一 `requestRefund`/`disputeOrder` 的归属判定；`SubscriptionsController` 的详情/取消端点不再自行查找与比对 | 新增 `OrderOwnershipTest` 5 项（详情/取消/退款/申诉越权 + 未登录 + 订单不存在的 404 语义 + 越权后状态不变） |
 
 ## 四、验收基线（每轮必须全绿）
 

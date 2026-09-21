@@ -228,9 +228,29 @@ public class SubscriptionService {
 
     @Transactional
     public SubscriptionOrder cancelOrder(String orderNo, Long adminUserId, String reason) {
+        return cancelOrderInternal(orderNo, adminUserId, reason, null);
+    }
+
+    /**
+     * 用户自助取消订单：行锁取单 + **严格归属校验**。
+     * orderNo 是外部输入，接口层不再各写一遍「查找 + 比对 userId」，
+     * 归属判定统一收口到本服务，避免新增端点时漏判导致越权取消他人订单。
+     */
+    @Transactional
+    public SubscriptionOrder cancelOrderAsUser(String orderNo, Long userId, String reason) {
+        if (userId == null) {
+            throw new BizException(403, CreditErrorCode.FORBIDDEN_ORDER, "未登录，无法取消订单");
+        }
+        return cancelOrderInternal(orderNo, null, reason, userId);
+    }
+
+    private SubscriptionOrder cancelOrderInternal(String orderNo, Long adminUserId, String reason, Long requiredOwnerId) {
         // 行锁取单：与「确认收款」互斥，避免管理员确认到账的同时用户把订单取消掉
         SubscriptionOrder order = subscriptionOrderRepository.findByOrderNoWithLock(orderNo)
                 .orElseThrow(() -> new BizException(404, CreditErrorCode.ORDER_NOT_FOUND, "订单不存在: " + orderNo));
+        if (requiredOwnerId != null) {
+            requireOrderOwner(order, requiredOwnerId);
+        }
         if (order.getStatus() != OrderStatus.PENDING) {
             throw new BizException(400, CreditErrorCode.ORDER_STATUS_INVALID,
                     "仅待确认收款订单可取消，当前状态: " + order.getStatus());
@@ -242,8 +262,29 @@ public class SubscriptionService {
             order.setMetadata(metadata == null ? extra : metadata + ";" + extra);
         }
         SubscriptionOrder saved = subscriptionOrderRepository.save(order);
-        log.info("订单已取消 orderNo={} admin={}", orderNo, adminUserId);
+        log.info("订单已取消 orderNo={} admin={} owner={}", orderNo, adminUserId, requiredOwnerId);
         return saved;
+    }
+
+    /**
+     * 按订单号取订单并校验归属（用户端接口专用）。
+     * 非本人订单一律 403 FORBIDDEN_ORDER，不区分「不存在」与「不是你的」，避免探测他人订单号。
+     */
+    public SubscriptionOrder getOrderForUser(String orderNo, Long userId) {
+        if (userId == null) {
+            throw new BizException(403, CreditErrorCode.FORBIDDEN_ORDER, "未登录，无法访问订单");
+        }
+        SubscriptionOrder order = findByOrderNo(orderNo)
+                .orElseThrow(() -> new BizException(404, CreditErrorCode.ORDER_NOT_FOUND, "订单不存在: " + orderNo));
+        requireOrderOwner(order, userId);
+        return order;
+    }
+
+    /** 归属校验：userId 为空表示系统/管理员路径（跳过校验），否则必须是订单本人 */
+    private void requireOrderOwner(SubscriptionOrder order, Long userId) {
+        if (userId != null && !order.getUserId().equals(userId)) {
+            throw new BizException(403, CreditErrorCode.FORBIDDEN_ORDER, "无权访问该订单");
+        }
     }
 
     /**
@@ -575,14 +616,12 @@ public class SubscriptionService {
     public SubscriptionOrder requestRefund(String orderNo, String reason, Long userId) {
         SubscriptionOrder order = subscriptionOrderRepository.findByOrderNo(orderNo)
                 .orElseThrow(() -> new BizException(404, CreditErrorCode.ORDER_NOT_FOUND, "订单不存在: " + orderNo));
-        if (userId != null && !order.getUserId().equals(userId)) {
-            throw new BizException(403, CreditErrorCode.FORBIDDEN_ORDER, "无权操作该订单");
-        }
+        // 归属校验统一收口（userId 为空表示系统/管理员路径）
+        requireOrderOwner(order, userId);
         if (order.getStatus() != OrderStatus.PAID) {
             throw new BizException(400, CreditErrorCode.ORDER_STATUS_INVALID,
                     "订单状态" + order.getStatus() + "不可申请退款，仅已支付订单可申请退款");
-        }
-        order.setStatus(OrderStatus.PENDING_REFUND);
+        }        order.setStatus(OrderStatus.PENDING_REFUND);
         order.setRefundReason(reason);
         String meta = order.getMetadata() != null ? order.getMetadata() : "";
         order.setMetadata(meta + ";refundRequestReason=" + reason +
@@ -621,9 +660,8 @@ public class SubscriptionService {
     public SubscriptionOrder disputeOrder(String orderNo, String reason, Long userId) {
         SubscriptionOrder order = subscriptionOrderRepository.findByOrderNo(orderNo)
                 .orElseThrow(() -> new BizException(404, CreditErrorCode.ORDER_NOT_FOUND, "订单不存在: " + orderNo));
-        if (userId != null && !order.getUserId().equals(userId)) {
-            throw new BizException(403, CreditErrorCode.FORBIDDEN_ORDER, "无权操作该订单");
-        }
+        // 归属校验统一收口（userId 为空表示系统/管理员路径）
+        requireOrderOwner(order, userId);
         if (order.getStatus() != OrderStatus.PAID) {
             throw new BizException(400, CreditErrorCode.ORDER_STATUS_INVALID,
                     "订单状态" + order.getStatus() + "不可申诉，仅已支付订单可发起纠纷");

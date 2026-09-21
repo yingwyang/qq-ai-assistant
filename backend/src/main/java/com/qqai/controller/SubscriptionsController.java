@@ -209,11 +209,8 @@ public class SubscriptionsController {
     @GetMapping("/orders/{orderNo}")
     public ResponseEntity<ApiResponse<Map<String, Object>>> getOrder(@PathVariable String orderNo) {
         Long userId = securityHelper.requireCurrentUserId();
-        SubscriptionOrder order = subscriptionService.findByOrderNo(orderNo)
-                .orElseThrow(() -> new BizException(404, CreditErrorCode.ORDER_NOT_FOUND, "订单不存在: " + orderNo));
-        if (!order.getUserId().equals(userId)) {
-            throw new BizException(403, CreditErrorCode.FORBIDDEN_ORDER, "无权访问该订单");
-        }
+        // 归属校验收口在 Service（controller 不再各写一遍查找 + 比对）
+        SubscriptionOrder order = subscriptionService.getOrderForUser(orderNo, userId);
         Map<String, Object> data = orderToMap(order);
         List<CreditTransaction> related = creditService.findRelatedTransactions(orderNo);
         List<Map<String, Object>> relatedTxs = new ArrayList<>();
@@ -249,13 +246,9 @@ public class SubscriptionsController {
     public ResponseEntity<ApiResponse<Map<String, Object>>> cancelOrder(@PathVariable String orderNo,
                                                                         @RequestBody(required = false) Map<String, Object> body) {
         Long userId = securityHelper.requireCurrentUserId();
-        SubscriptionOrder order = subscriptionService.findByOrderNo(orderNo)
-                .orElseThrow(() -> new BizException(404, CreditErrorCode.ORDER_NOT_FOUND, "订单不存在: " + orderNo));
-        if (!order.getUserId().equals(userId)) {
-            throw new BizException(403, CreditErrorCode.FORBIDDEN_ORDER, "无权操作该订单");
-        }
         String reason = body != null ? (String) body.get("reason") : null;
-        SubscriptionOrder cancelled = subscriptionService.cancelOrder(orderNo, null, reason);
+        // 行锁 + 归属校验 + 状态校验全部在 Service 内完成
+        SubscriptionOrder cancelled = subscriptionService.cancelOrderAsUser(orderNo, userId, reason);
         Map<String, Object> data = new HashMap<>();
         data.put("orderNo", cancelled.getOrderNo());
         data.put("status", cancelled.getStatus() != null ? cancelled.getStatus().name() : null);

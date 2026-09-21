@@ -129,30 +129,22 @@ public class AdminOrdersController {
     }
 
     @PostMapping("/orders/manual-create")
-    public ApiResponse<Map<String, Object>> manualCreate(@RequestBody Map<String, Object> body) {
+    public ApiResponse<Map<String, Object>> manualCreate(
+            @RequestBody @jakarta.validation.Valid com.qqai.dto.admin.ManualCreateOrderRequest req) {
         Long adminUserId = securityHelper.requireAdminUserId();
-        Number userIdNum = (Number) body.get("userId");
-        String planCode = (String) body.get("planCode");
-        Number priceNum = body.get("priceCents") != null ? (Number) body.get("priceCents") : (Number) body.get("priceCentsOverride");
-        Number creditNum = body.get("pointsGranted") != null ? (Number) body.get("pointsGranted") : (Number) body.get("creditOverride");
-        Number durationNum = body.get("durationDays") != null ? (Number) body.get("durationDays") : (Number) body.get("durationOverride");
-        String orderNoOverride = (String) body.get("orderNo");
-        String remark = (String) body.get("remark");
 
-        if (userIdNum == null) throw new BizException("userId不能为空");
-        Long userId = userIdNum.longValue();
+        Long userId = req.userId();
         if (!userRepository.existsById(userId)) throw new BizException("目标用户不存在");
 
-        SubscriptionTier tier = subscriptionService.planCodeToTier(planCode);
-        BigDecimal priceOverride = null;
-        if (priceNum != null) {
-            priceOverride = new BigDecimal(priceNum.toString()).movePointLeft(2);
-        }
-        Integer creditOverride = creditNum != null ? creditNum.intValue() : null;
-        Integer durationOverride = durationNum != null ? durationNum.intValue() : null;
+        SubscriptionTier tier = subscriptionService.planCodeToTier(req.planCode());
+        BigDecimal priceOverride = req.priceCents() != null
+                ? new BigDecimal(req.priceCents().toString()).movePointLeft(2) : null;
+        Integer creditOverride = req.pointsGranted();
+        Integer durationOverride = req.durationDays();
 
         SubscriptionOrder order = subscriptionService.manualCreateOrder(
-                adminUserId, userId, tier, priceOverride, creditOverride, durationOverride, orderNoOverride, remark);
+                adminUserId, userId, tier, priceOverride, creditOverride, durationOverride,
+                req.orderNo(), req.remark());
 
         Map<String, Object> data = orderToMap(order);
         String adminUsername = securityHelper.getCurrentUsername();
