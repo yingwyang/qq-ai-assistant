@@ -53,7 +53,7 @@
 | C | 异常与校验规范化：删宽 catch、Map 入参换 DTO + `@Valid`、分页上限统一、归属校验收口 Service | ✅ 已完成（C.1/C.2/C.3/C.4，见下） |
 | D | 性能与静默异常：去 N+1、合并钱包页查询、消除 `catch { return null; }`、前端空 catch 补日志 | ✅ 已完成（见下） |
 | E | 可观测与去重：Actuator + `/health` 探 DB/MQ、初始密码不落日志、限流器换 Caffeine、抽订单映射器、套餐名动态生成 | ✅ 已完成（见下） |
-| F | 前端一致性：清除原生弹窗、空/加载/错误态统一、大 chunk 代码分割、无障碍、暗色主题覆盖 | 🔄 进行中（F.1 原生弹窗、F.3 代码分割、F.4 弹窗无障碍、`txToMap` 收尾已完成；F.2 空/加载/错误态统一待办） |
+| F | 前端一致性：清除原生弹窗、空/加载/错误态统一、大 chunk 代码分割、无障碍、暗色主题覆盖 | ✅ 已完成（F.1~F.4，见下） |
 | G | 文档与技能：`doc/` 与 `frontend/src/docs/` 全量对齐、运维坑写回技能 | ⬜ 待办 |
 
 ### 批次 A 交付明细（安全收口）
@@ -138,6 +138,9 @@
 
 | F.4 | 共享确认弹窗补齐无障碍与键盘操作：`role="alertdialog"` + `aria-modal` + `aria-labelledby/describedby`、打开后焦点进入弹窗（默认聚焦确认按钮）、关闭后焦点归还触发元素、Esc 关闭；新增 `scripts/check-dialog-a11y.mjs` 用真实浏览器断言上述 6 项 | `ConfirmDialog.vue`；脚本 8/8 通过（含"焦点归还到 btn-action delete"） |
 | F.2（部分） | `txToMap` 三个副本收敛为 `CreditTransactionMapper`：`toMap`（用户端/订单详情，10 字段契约）与 `toAdminCashView`（管理端资金流水，额外三列现金字段，无现金时显式 null 防前端列错位）；新增 `CreditTransactionMapperTest` 3 项固定出参契约 | 实测用户端与管理端流水接口字段齐全；`mvn test` **210/210** |
+| F.2（状态统一） | 新增 `components/common/StatePanel.vue`：**一个组件承载 loading / empty / error 三态**（错误态独立图标与警示色、可挂「重试」CTA、`compact` 供表格行内使用）。迁移 7 个管理列表页 + `AdminView` 抽屉 + 用户端订阅页共 **19 处**状态渲染，删除页面内散落的 `audit-loading`/`audit-empty`/`orders-*` 样式；**关键修复：原先错误态复用空态样式，接口失败显示"暂无数据"** | 新增守卫 `scripts/check-shared-states.mjs`（组件能力 + 9 个列表页必须引用 + 旧 class 零残留；首跑即抓出 `CreditsDashboard` 遗留选择器与 `admin-shared.css` 注释）；新增 `scripts/check-error-state.mjs`：拦截接口伪造 500 → 断言错误态与重试按钮 → 恢复接口点重试 → 列表恢复，**4/4 通过** |
+
+> F.2 范围说明：统一的是**列表页**状态（管理端列表 + 用户端订单列表）。聊天区（`ChatInterface`）的空/加载是占满整屏的占位布局、并带自定义图标，语义与列表行不同，保留原实现并在本文件记录，避免为"一致"而牺牲该处布局。
 
 ## 四、验收基线（每轮必须全绿）
 

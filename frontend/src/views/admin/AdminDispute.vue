@@ -32,8 +32,8 @@
           </tr>
         </thead>
         <tbody>
-          <tr v-if="ordersLoading"><td colspan="9" class="audit-loading">加载中...</td></tr>
-          <tr v-else-if="orders.length === 0"><td colspan="9" class="audit-empty">暂无待处理的纠纷</td></tr>
+          <tr v-if="ordersLoading"><td colspan="9"><StatePanel state="loading" compact /></td></tr>
+          <tr v-else-if="orders.length === 0"><td colspan="9"><StatePanel state="empty" title="暂无待处理的纠纷" compact /></td></tr>
           <tr v-for="o in orders" :key="o.orderNo">
             <td class="col-check">
               <input type="checkbox" :checked="selected.has(o.orderNo)" @change="toggleSelect(o.orderNo)" />
@@ -71,10 +71,11 @@ import Icon from '../../components/Icon.vue';
 import AdminPageHeader from '../../components/admin/AdminPageHeader.vue';
 import { adminOrdersApi } from '../../services/api';
 import { showConfirm } from '../../components/ConfirmDialog.vue';
+import StatePanel from '../../components/common/StatePanel.vue';
 
 export default {
   name: 'AdminDispute',
-  components: { Icon, AdminPageHeader },
+  components: { Icon, AdminPageHeader, StatePanel },
   setup() {
     const adminOrders = inject('adminOrders');
     const planTierText = inject('adminPlanTierText');

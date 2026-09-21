@@ -82,8 +82,8 @@
           </tr>
         </thead>
         <tbody>
-          <tr v-if="ordersLoading"><td colspan="10" class="audit-loading">加载中...</td></tr>
-          <tr v-else-if="orders.length === 0"><td colspan="10" class="audit-empty">暂无订单数据</td></tr>
+          <tr v-if="ordersLoading"><td colspan="10"><StatePanel state="loading" compact /></td></tr>
+          <tr v-else-if="orders.length === 0"><td colspan="10"><StatePanel state="empty" title="暂无订单数据" compact /></td></tr>
           <tr v-for="o in orders" :key="o.orderNo">
             <td class="col-check">
               <input
@@ -133,10 +133,11 @@ import Icon from '../../components/Icon.vue';
 import AdminPageHeader from '../../components/admin/AdminPageHeader.vue';
 import { adminOrdersApi } from '../../services/api';
 import { showConfirm } from '../../components/ConfirmDialog.vue';
+import StatePanel from '../../components/common/StatePanel.vue';
 
 export default {
   name: 'AdminOrders',
-  components: { Icon, AdminPageHeader },
+  components: { Icon, AdminPageHeader, StatePanel },
   setup() {
     const adminOrders = inject('adminOrders');
     const orderStatusOptions = inject('adminOrderStatusOptions');

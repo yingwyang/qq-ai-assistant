@@ -40,15 +40,17 @@
         </div>
       </div>
 
-      <div v-if="ordersLoading" class="orders-loading">
-        <div class="loading-spinner"></div><span>加载中...</span>
-      </div>
+      <!-- 列表状态统一走 StatePanel（与各管理列表页一致；错误态不再与空态同貌） -->
+      <StatePanel v-if="ordersLoading" state="loading" />
 
-      <div v-else-if="orders.length === 0" class="orders-empty">
-        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 12h6M9 16h4"/></svg>
-        <p>暂无订单记录</p>
-        <button class="btn-upgrade-sm" @click="openUpgradeDialog">去升级权益</button>
-      </div>
+      <StatePanel
+        v-else-if="orders.length === 0"
+        state="empty"
+        title="暂无订单记录"
+        hint="购买套餐或直购积分后，订单会显示在这里"
+        action-text="去升级权益"
+        @action="openUpgradeDialog"
+      />
 
       <template v-else>
         <table class="orders-table">
@@ -348,6 +350,7 @@ import { subscriptionApi, creditsApi, authApi } from '../../services/api';
 import { showToast } from '../Toast.vue';
 import { showConfirm } from '../ConfirmDialog.vue';
 import PaymentDialog from './PaymentDialog.vue';
+import StatePanel from '../common/StatePanel.vue';
 import { ORDER_STATUS_OPTIONS as orderStatusOptions, orderStatusText as orderStatusLabel } from '../../config/orderStatus';
 import logger from '../../utils/logger';
 
@@ -472,7 +475,7 @@ function normalizeRelatedTx(tx) {
 
 export default {
   name: 'SubscriptionDashboard',
-  components: { Icon, PaymentDialog },
+  components: { Icon, PaymentDialog, StatePanel },
   props: {
     autoOpenUpgrade: { type: Boolean, default: false }
   },
@@ -1090,8 +1093,9 @@ export default {
 .plan-mini-info { display: flex; gap: 16px; font-size: 12px; color: var(--text-muted, #888); }
 
 .order-filter select { padding: 6px 10px; border: 1px solid var(--border-color, #ddd); border-radius: 4px; font-size: 13px; }
-.orders-loading, .orders-empty { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 60px 20px; color: var(--text-muted, #888); }
-.orders-loading .loading-spinner, .loading-spinner { width: 24px; height: 24px; border: 3px solid #f3f3f3; border-top: 3px solid #3498db; border-radius: 50%; animation: spin 1s linear infinite; }
+/* 订单列表的加载/空态已统一到 components/common/StatePanel.vue（批次 F.2）；
+   .loading-spinner 仍被弹窗内的提交态使用，故保留。 */
+.loading-spinner { width: 24px; height: 24px; border: 3px solid #f3f3f3; border-top: 3px solid #3498db; border-radius: 50%; animation: spin 1s linear infinite; }
 @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
 
 .orders-table { width: 100%; border-collapse: collapse; font-size: 13px; }

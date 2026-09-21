@@ -97,10 +97,10 @@
           </tr>
         </thead>
         <tbody>
-          <tr v-if="userLoading"><td colspan="9" class="audit-loading">加载中...</td></tr>
-          <tr v-else-if="userError"><td colspan="9" class="audit-empty">{{ userError }}</td></tr>
+          <tr v-if="userLoading"><td colspan="9"><StatePanel state="loading" compact /></td></tr>
+          <tr v-else-if="userError"><td colspan="9"><StatePanel state="error" :title="userError" action-text="重试" @action="loadUsers" compact /></td></tr>
           <tr v-else-if="users.length === 0">
-            <td colspan="9" class="audit-empty">{{ userFilterActive ? '当前筛选没有用户' : '暂无用户数据' }}</td>
+            <td colspan="9"><StatePanel state="empty" :title="userFilterActive ? '当前筛选没有用户' : '暂无用户数据'" compact /></td>
           </tr>
           <tr v-for="user in users" :key="user.id">
             <td class="col-check">
@@ -167,10 +167,11 @@ import { inject } from 'vue';
 import Icon from '../../components/Icon.vue';
 import AdminPageHeader from '../../components/admin/AdminPageHeader.vue';
 import AdminResetPasswordModal from '../../components/admin/AdminResetPasswordModal.vue';
+import StatePanel from '../../components/common/StatePanel.vue';
 
 export default {
   name: 'AdminUsers',
-  components: { Icon, AdminPageHeader, AdminResetPasswordModal },
+  components: { Icon, AdminPageHeader, AdminResetPasswordModal, StatePanel },
   setup() {
     const userMgmt = inject('adminUserMgmt');
     const formatDate = inject('adminFormatDate');

@@ -384,12 +384,8 @@
 
 .audit-action-select { min-width: 140px; cursor: pointer; }
 
-.audit-loading,
-.audit-empty {
-  text-align: center;
-  color: var(--text-muted, #888);
-  padding: 30px 0;
-}
+/* 列表页的加载/空/错误状态已统一到 components/common/StatePanel.vue（批次 F.2），
+   原先这里的两个分散状态样式已随迁移删除，避免两套并存。 */
 
 .audit-target {
   font-family: 'Consolas', 'Monaco', monospace;

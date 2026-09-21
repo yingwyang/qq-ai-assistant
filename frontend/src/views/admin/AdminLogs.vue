@@ -109,8 +109,8 @@
             </tr>
           </thead>
           <tbody>
-            <tr v-if="auditLogsLoading"><td colspan="6" class="audit-loading">加载中...</td></tr>
-            <tr v-else-if="auditLogs.length === 0"><td colspan="6" class="audit-empty">暂无审计日志</td></tr>
+            <tr v-if="auditLogsLoading"><td colspan="6"><StatePanel state="loading" compact /></td></tr>
+            <tr v-else-if="auditLogs.length === 0"><td colspan="6"><StatePanel state="empty" title="暂无审计日志" compact /></td></tr>
             <tr v-for="log in auditLogs" :key="log.id">
               <td>{{ formatTimestamp(log.timestamp) }}</td>
               <td>{{ log.username || '-' }}</td>
@@ -137,10 +137,11 @@ import { inject, onMounted, onUnmounted } from 'vue';
 import Icon from '../../components/Icon.vue';
 import AdminPageHeader from '../../components/admin/AdminPageHeader.vue';
 import { APP_LOG_MAX_LINES } from '../../composables/useSystemLog';
+import StatePanel from '../../components/common/StatePanel.vue';
 
 export default {
   name: 'AdminLogs',
-  components: { Icon, AdminPageHeader },
+  components: { Icon, AdminPageHeader, StatePanel },
   setup() {
     const systemLog = inject('adminSystemLog');
 
@@ -260,7 +261,6 @@ export default {
 .audit-table th { padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-primary, #333); border-bottom: 1px solid var(--border-color, #e0e0e0); white-space: nowrap; }
 .audit-table td { padding: 8px 12px; border-bottom: 1px solid var(--border-color, #f0f0f0); color: var(--text-primary, #333); vertical-align: top; }
 .audit-table tbody tr:hover { background: var(--bg-tertiary, #fafbfc); }
-.audit-loading, .audit-empty { text-align: center; color: var(--text-muted, #888); padding: 30px 0; }
 .audit-action-tag { display: inline-block; padding: 2px 8px; background: #e3f2fd; color: #1976d2; border-radius: 10px; font-size: 12px; white-space: nowrap; }
 .theme-dark .audit-action-tag { background: rgba(25, 118, 210, 0.22); color: #64b5f6; }
 .audit-target { font-family: 'Consolas', 'Monaco', monospace; font-size: 12px; color: var(--text-secondary, #666); max-width: 200px; word-break: break-all; }

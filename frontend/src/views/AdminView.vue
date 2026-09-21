@@ -277,7 +277,7 @@
             <button class="drawer-close" @click="closeOrderDetail">×</button>
           </div>
           <div class="drawer-body">
-            <div v-if="detailDrawer.loading" class="audit-loading">加载中...</div>
+            <StatePanel v-if="detailDrawer.loading" state="loading" />
             <template v-else-if="detailDrawer.data">
               <div class="detail-section">
                 <h5>订单基础信息</h5>

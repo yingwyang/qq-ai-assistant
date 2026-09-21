@@ -135,8 +135,8 @@
           </tr>
         </thead>
         <tbody>
-          <tr v-if="txLoading"><td colspan="10" class="audit-loading">加载中...</td></tr>
-          <tr v-else-if="visibleTxList.length === 0"><td colspan="10" class="audit-empty">暂无流水数据</td></tr>
+          <tr v-if="txLoading"><td colspan="10"><StatePanel state="loading" compact /></td></tr>
+          <tr v-else-if="visibleTxList.length === 0"><td colspan="10"><StatePanel state="empty" title="暂无流水数据" compact /></td></tr>
           <tr v-for="tx in visibleTxList" :key="tx.id">
             <td>{{ tx.id }}</td>
             <td>{{ tx.userId || '全站' }}</td>
@@ -225,6 +225,7 @@ import { use } from 'echarts/core';
 import { CanvasRenderer } from 'echarts/renderers';
 import { BarChart, LineChart, PieChart } from 'echarts/charts';
 import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components';
+import StatePanel from '../../components/common/StatePanel.vue';
 
 use([CanvasRenderer, BarChart, LineChart, PieChart, GridComponent, LegendComponent, TooltipComponent]);
 
@@ -240,7 +241,7 @@ const PALETTE = ['#4caf50', '#f44336', '#2196f3', '#ff9800', '#9c27b0', '#00bcd4
 
 export default {
   name: 'AdminTransactions',
-  components: { Icon, AdminPageHeader, VChart },
+  components: { Icon, AdminPageHeader, VChart, StatePanel },
   setup() {
     const adminTx = inject('adminTx');
     const txTypeOptions = inject('adminTxTypeOptions');

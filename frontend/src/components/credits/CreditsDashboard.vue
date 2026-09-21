@@ -734,8 +734,7 @@ export default {
 
 .rewards-loading,
 .tx-loading,
-.trend-loading,
-.orders-loading {
+.trend-loading {
   text-align: center;
   padding: 32px;
   color: #7f8c8d;

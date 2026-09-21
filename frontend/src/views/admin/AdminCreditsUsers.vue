@@ -75,9 +75,9 @@
           </tr>
         </thead>
         <tbody>
-          <tr v-if="ucLoading"><td colspan="12" class="audit-loading">加载中...</td></tr>
-          <tr v-else-if="ucError"><td colspan="12" class="audit-empty">{{ ucError }}</td></tr>
-          <tr v-else-if="ucList.length === 0"><td colspan="12" class="audit-empty">{{ ucFilterActive ? '当前筛选没有用户' : '暂无用户数据' }}</td></tr>
+          <tr v-if="ucLoading"><td colspan="12"><StatePanel state="loading" compact /></td></tr>
+          <tr v-else-if="ucError"><td colspan="12"><StatePanel state="error" :title="ucError" action-text="重试" @action="loadUserCredits" compact /></td></tr>
+          <tr v-else-if="ucList.length === 0"><td colspan="12"><StatePanel state="empty" :title="ucFilterActive ? '当前筛选没有用户' : '暂无用户数据'" compact /></td></tr>
           <tr v-for="row in ucList" :key="row.userId">
             <td class="col-check"><input type="checkbox" :checked="isUserSelected(row.userId)" @change="toggleUserSelection(row.userId)" /></td>
             <td>{{ row.userId }}</td>
@@ -115,10 +115,11 @@
 import { inject } from 'vue';
 import Icon from '../../components/Icon.vue';
 import AdminPageHeader from '../../components/admin/AdminPageHeader.vue';
+import StatePanel from '../../components/common/StatePanel.vue';
 
 export default {
   name: 'AdminCreditsUsers',
-  components: { Icon, AdminPageHeader },
+  components: { Icon, AdminPageHeader, StatePanel },
   setup() {
     const adminUserCredits = inject('adminUserCredits');
     const formatDate = inject('adminFormatDate');
