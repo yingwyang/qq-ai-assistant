@@ -182,7 +182,7 @@ prefetch 是 `RabbitMQConfig` 里的常量，配置文件改不动；调并发�
 | `GET /api/avatar/**`、`/uploads/avatars/**` | 公开（头像展示） |
 | `POST`/`DELETE` `/api/avatar/**` | `ROLE_ADMIN` |
 | `/images/**`、`/uploads/**` | 放行（`<img>/<video>` 带不了 JWT Header，靠同源 Cookie 建立认证上下文） |
-| `/api/admin/**`、`/api/credits/admin/**` | `ROLE_ADMIN` |
+| `/api/admin/**`、`/api/credits/admin/**`、`/actuator/**` | `ROLE_ADMIN`（Actuator 的 health/metrics 含依赖详情，仅管理员可读） |
 | `/api/system/start-*`、`stop-*`、`restart-*`、`/api/system/napcat/auto-configure` | `ROLE_ADMIN` |
 | `/api/system/tts`、`/tts/**`、`/convert-voice` | 登录即可（积分在服务内扣减） |
 | `/api/system/napcat/qrcode`、`qrcode-path`、`qrcode-image` | `ROLE_ADMIN`（二维码＝机器人账号接管入口，普通用户不需要） |

@@ -55,9 +55,9 @@
 打开前端页面后，使用初始管理员账号登录：
 
 - 用户名：`admin`
-- 密码：首次启动日志中打印的随机密码（或你在 `.env` 中通过 `ADMIN_INIT_PASSWORD` 指定的密码）
+- 密码：随机初始密码写在 `backend/data/initial-admin-password.txt`（**不再打印到日志**），或你在 `.env` 中通过 `ADMIN_INIT_PASSWORD` 指定的密码
 
-> 首次登录后建议立即修改密码并绑定 QQ 号。
+> 首次登录后建议立即修改密码、删除该密码文件，并绑定 QQ 号。
 
 ---
 

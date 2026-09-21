@@ -117,7 +117,7 @@ java -jar target\qq-ai-assistant-1.0-SNAPSHOT.jar
 cd frontend && npm install && npm run dev    # http://localhost:5173
 ```
 
-启动成功标志：日志出现 `RabbitMQ 连接成功，所有 Exchange/Queue/Binding 已声明`；首次启动打印随机管理员密码 `【安全】已创建初始管理员账号 admin,初始密码: <随机密码>`。
+启动成功标志：日志出现 `RabbitMQ 连接成功，所有 Exchange/Queue/Binding 已声明`；首次启动创建管理员时不打印密码，改为写入 `backend/data/initial-admin-password.txt`（日志只提示路径）。健康检查：公开的 `GET /api/system/health` 只探 NapCat 端口；**依赖（MySQL/RabbitMQ）状态看 `GET /actuator/health`，该端点仅 ADMIN 可读**。
 
 > 三个外部组件也可由后端一键拉起：`POST /api/system/start-all`（ADMIN），内部顺序 **AstrBot → NapCat → GPT-SoVITS**，每步都有幂等检查（进程存活 / 端口已监听则跳过）。
 

@@ -54,7 +54,48 @@
 | D | 性能与静默异常：去 N+1、合并钱包页查询、消除 `catch { return null; }`、前端空 catch 补日志 | ✅ 已完成（见下） |
 | E | 可观测与去重：Actuator + `/health` 探 DB/MQ、初始密码不落日志、限流器换 Caffeine、抽订单映射器、套餐名动态生成 | ✅ 已完成（见下） |
 | F | 前端一致性：清除原生弹窗、空/加载/错误态统一、大 chunk 代码分割、无障碍、暗色主题覆盖 | ✅ 已完成（F.1~F.4，见下） |
-| G | 文档与技能：`doc/` 与 `frontend/src/docs/` 全量对齐、运维坑写回技能 | ⬜ 待办 |
+| G | 文档与技能：`doc/` 与 `frontend/src/docs/` 全量对齐、运维坑写回技能 | ✅ 已完成（见下） |
+
+## 四、验收基线（每轮必须全绿）
+
+| 命令 | 基线 |
+|------|------|
+| `cd frontend && npx vite build` | exit 0；入口 `index` 包 ≤ **51KB** |
+| `cd backend && mvn -B -ntp test` | **210** 项 |
+| `node scripts/check-security-hardening.mjs <ADMIN_JWT> <baseUrl> <USER_JWT>` | 10/10 |
+| `node scripts/check-payment-flow.mjs <JWT>` | 18/18 |
+| `node scripts/check-admin-shell.mjs <JWT>` | 18/18（首屏请求数 4） |
+| `node scripts/check-admin-dark-theme.mjs <JWT>` | 14 页无问题 |
+| `node scripts/e2e-admin-export.mjs <JWT>` | 26/26 |
+| `node scripts/check-admin-last-admin.mjs <JWT>` | 14/14 |
+| `node scripts/check-dashboard-charts.mjs <JWT>` | 6/6（用户中心 4 / 后台概览 3 / 资金流水 3 个 canvas） |
+| `node scripts/check-dialog-a11y.mjs <JWT>` | 8/8 |
+| `node scripts/check-error-state.mjs <JWT>` | 4/4 |
+| `node scripts/check-shared-states.mjs` / `check-no-native-dialogs.mjs` | 通过（源码扫描类守卫） |
+| `GET /actuator/health`（ADMIN cookie） | 200 且 `components.db`/`components.rabbit` 为 UP |
+
+> 环境：`CHROME_PATH='C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe'`；ADMIN JWT 见技能 `qqai-verify`（技能已同步本节全部脚本与坑）。
+
+## 五、程序收尾（批次 0~G 全部完成）
+
+| 维度 | 起点 | 终点 |
+|------|------|------|
+| 支付链路 | 点击购买弹浏览器原生 `confirm`，用户文档无按钮式流程 | `PaymentDialog` 按钮驱动（协议门禁 + 结果态），全程无二维码；订单状态文案由 `config/orderStatus.js` 单一来源 |
+| 安全 | 匿名可拉机器人登录二维码；JWT 明文回 body；降权不失效旧 token | 二维码三入口收权 ADMIN；响应体去 token；`tokenVersion` 递增；`User` 敏感 getter `@JsonIgnore`；Cookie `secure` 配置化 |
+| 资金正确性 | 先查后改、无锁发放、先调模型后扣费、TTS 退费失效 | 订单/账户行锁 + 下单幂等 + 扣费前置门禁 + TTS 失败精确退费；并发用例证明"撤掉锁就失败" |
+| 异常与校验 | 23 处回显内部异常文本；资金入口 `Map` 裸收；分页无上限 | 异常统一安全文案 + 正确状态码；管理端 DTO 边界校验；`PageLimits` 上限 200；归属校验收口 Service |
+| 性能与可观测 | 2×群数 次 SQL；钱包页 4 次查询；静默吞异常；无 Actuator | 批量聚合替代 N+1；合计合并为一条 SQL（带等价性断言）；静默 catch 清零；Actuator 探 DB/MQ；限流器换 Caffeine |
+| 前端一致性 | 原生弹窗、入口包 1141KB、错误态与空态同貌、弹窗无键盘支持 | 原生弹窗清零；入口包 51KB；`StatePanel` 三态 + 重试；弹窗 aria/Esc/焦点管理 |
+| 文档与可验证性 | 文档与实现多处不符；验收靠人眼看 | 文档全量同步；**11 个前端验收脚本 + 后端 210 项测试**，其中 4 个源码扫描守卫把约定固化成构建红灯 |
+
+### 批次 G 交付明细（文档与技能同步）
+
+| 项 | 改动 | 证据 |
+|----|------|------|
+| G.1 | 初始管理员密码的**输出方式**变更同步到全部文档（原文档写"控制台打印随机密码"）：`doc/README.md`（3 处，含示例日志块改为新格式）、`doc/user-manual.md`、`frontend/src/docs/getting-started/system-config.md`（2 处，并补 `APP_COOKIE_SECURE` 变量）、`frontend/src/docs/development/deployment.md` | 复查全仓库已无"密码见日志/打印随机"表述 |
+| G.2 | Actuator 进入文档：`api-reference`（新增 `/actuator/health`、`/actuator/metrics` 两行，并标注公开的 `/api/system/health` 只探 NapCat）、`architecture`（权限矩阵加 `/actuator/**` = ADMIN）、`system-config`（依赖健康核对表新增一行）、`troubleshooting-playbook`（新增依赖健康排查命令） | 4 个文档文件 |
+| G.3 | `doc/CODE_WIKI.md` 补齐本轮新增件：`StatePanel.vue`、`PaymentDialog.vue`、`ConfirmDialog` 能力说明，并新增「前端验收脚本」小节（11 个脚本及其校验内容） | CODE_WIKI 组件表 + 新小节 |
+| G.4 | 技能 `qqai-verify` 全量刷新：三层验收补全 11 个脚本与依赖健康检查、后端测试基线 163→**210**、新增 7 条实测坑（yml 多文档陷阱、Vite 掉线、沙箱 `Start-Process` EPERM、`Copy-Item` 还原导致 Maven 跳过重编、别盲探接口路径、`-Dtest` 用逗号、列表页三态与弹窗规范） | `~/.dsh/skills/qqai-verify/SKILL.md`（67 行） |
 
 ### 批次 A 交付明细（安全收口）
 

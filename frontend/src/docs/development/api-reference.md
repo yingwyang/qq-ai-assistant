@@ -165,7 +165,9 @@ HTTP 层（由 `SecurityConfig` 的 entry point / `GlobalExceptionHandler` 产�
 | GET | `/api/system/tts/characters` | 登录 | — | 音色列表（配置里的 `gpt-sovits.characters`） |
 | POST | `/api/system/tts/switch-character` | 登录 | `character` | 切换当前音色 |
 | POST | `/api/system/convert-voice` | 登录 | `path` | 按需把 `.amr/.silk` 转 MP3，返回 `audioUrl` |
-| GET | `/api/system/health` | 公开 | — | `status`、`timestamp`、`napcat` 可用性 |
+| GET | `/api/system/health` | 公开 | — | `status`、`timestamp`、`napcat` 可用性（**只探 NapCat 端口**，不代表数据库/队列可用） |
+| GET | `/actuator/health` | **ADMIN** | — | 依赖健康：`components.db`(MySQL)、`components.rabbit`(RabbitMQ)、`diskSpace`、探针状态；`show-details=always` |
+| GET | `/actuator/metrics` | **ADMIN** | `requiredMetricName`(可选) | Micrometer 指标列表/单指标明细（JVM、HTTP、连接池等） |
 | GET | `/api/system/component-status` | 公开 | — | `astrbot`/`napcat`/`gptsovits` 的 `running`、`status`（端口探测：6185/6100/8000） |
 | GET | `/api/system/napcat/login-status` | 公开 | — | `loggedIn`；⚠️ 已知在已登录时可能返回 `false`，真实状态请用 6100 的 `get_login_info` |
 | GET | `/api/system/napcat/qrcode` / `qrcode-path` / `qrcode-image` | **ADMIN** | — | 扫码登录机器人 QQ；⚠️ 扫码即等于接管机器人账号，已收权为仅管理员可读 |

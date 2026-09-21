@@ -495,7 +495,7 @@ finalCost = ceil(rawCost × modelRate × overtaxRate × tierDiscount × tieredDi
 
     脚本会自动创建数据库 `qq_chat` 并创建 **9 张基础表**（users / user_qq_bindings / chat_groups / file_records / messages / astrbot_conversations / astrbot_messages / user_settings / group_read_state），其余 **7 张表**（audit_log / credit_rule / credit_transaction / user_credit / sign_in_record / subscription_order / monthly_bonus_record）由 JPA 在首次启动时自动创建。SQL 中不再预置任何默认账号密码。
 
-    > 如果你选择不手动初始化数据库，也可以让 JPA 的 `ddl-auto: update` 自动建表；首次启动时 `DataInitializer` 会自动创建初始管理员（密码来自环境变量 `ADMIN_INIT_PASSWORD`，未设置时生成随机密码并打印到启动日志，请登录后立即修改）。
+    > 如果你选择不手动初始化数据库，也可以让 JPA 的 `ddl-auto: update` 自动建表；首次启动时 `DataInitializer` 会自动创建初始管理员（密码来自环境变量 `ADMIN_INIT_PASSWORD`；未设置时生成随机密码并写入 `backend/data/initial-admin-password.txt`，**不打印到日志**，请登录后立即修改并删除该文件）。
 
 ### 步骤二：部署 RabbitMQ 消息队列
 
@@ -616,13 +616,18 @@ java -jar target/qq-ai-assistant-1.0-SNAPSHOT.jar
 
 后端服务运行在：**http://localhost:8081**
 
-首次启动时，如果数据库中不存在任何 `ADMIN` 角色的用户，控制台会输出初始管理员账号与**随机生成的密码**（或你在 `.env` 中通过 `ADMIN_INIT_PASSWORD` 指定的密码）：
+首次启动时，如果数据库中不存在任何 `ADMIN` 角色的用户，系统会创建初始管理员 `admin`：
+
+- 若设置了环境变量 `ADMIN_INIT_PASSWORD`（≥8 位），用它作为初始密码；
+- 否则随机生成密码，并写入 **`backend/data/initial-admin-password.txt`**（该目录已在 `.gitignore` 中）。
+  **密码不再打印到日志**（日志会被长期保留、被排障人员读取），控制台只提示文件路径：
 
 ```
-===============================================================
-  【安全】已创建初始管理员账号 admin,初始密码: <随机密码>
-  【安全】请立即登录并在个人中心修改该密码。
-===============================================================
+================================================================
+【安全】已创建初始管理员账号 admin（初始密码未写入日志）。
+【安全】初始密码已写入文件：<仓库>/backend/data/initial-admin-password.txt
+【安全】请登录后立即修改密码，并删除该文件。
+================================================================
 ```
 
 ### 步骤六：启动前端
@@ -645,7 +650,7 @@ npm run build
 ### 步骤七：登录系统
 
 1. 打开浏览器，访问前端页面 `http://localhost:5173`。
-2. 使用初始管理员账号登录（账号 `admin`，密码见首次启动日志；或注册普通账号使用）。
+2. 使用初始管理员账号登录（账号 `admin`，密码见 `backend/data/initial-admin-password.txt`，或你设置的 `ADMIN_INIT_PASSWORD`；也可注册普通账号使用）。
 3. 管理员登录后：
     - 可进入 **管理员页面** — 查看系统统计、管理用户角色 / 启停账号。
     - 进入 **用户主页** — 绑定自己的QQ号，查看 NapCat 推送过来的消息。

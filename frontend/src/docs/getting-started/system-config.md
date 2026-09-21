@@ -56,7 +56,8 @@ Copy-Item .env.example backend\.env
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
 | `SERVER_PORT` | 8081 | 后端端口 |
-| `ADMIN_INIT_PASSWORD` | 随机生成并打印到启动日志 | 初始管理员 `admin` 的密码 |
+| `ADMIN_INIT_PASSWORD` | 随机生成并写入 `backend/data/initial-admin-password.txt`（不打印到日志） | 初始管理员 `admin` 的密码 |
+| `APP_COOKIE_SECURE` | `false` | `qqai_token` Cookie 是否仅走 HTTPS；**生产 HTTPS 部署必须设为 true** |
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:5173` 等 | 允许跨域的前端地址，多个用逗号分隔 |
 | `ASTRBOT_SUMMARY_MODEL` | 空（用 AstrBot 默认模型） | 摘要专用模型 |
 | `JWT_REMEMBER_ME_EXPIRATION` | `2592000000`（30 天） | 登录页勾选「记住我」后的有效期（毫秒） |
@@ -114,7 +115,7 @@ Copy-Item .env.example backend\.env
     npm run dev
     ```
 
-首次启动后端时，若数据库里没有 ADMIN 用户，控制台会打印初始管理员账号与随机密码，形如 `【安全】已创建初始管理员账号 admin,初始密码: xxxxxxxx`；请登录后立即修改。
+首次启动后端时，若数据库里没有 ADMIN 用户，系统会创建初始管理员：随机密码写入 `backend/data/initial-admin-password.txt`（**不打印到日志**，控制台只提示文件路径）；若设置了 `ADMIN_INIT_PASSWORD` 则用该值。请登录后立即修改密码并删除该文件。
 
 ## 配置 NapCat Webhook（最关键的一步）
 
@@ -149,7 +150,8 @@ NapCat 必须把消息**上报给后端 8081**，否则网页端永远没有消�
 |------|----------|----------|
 | MySQL | `mysql -h 127.0.0.1 -P 3306 -u <DB_USERNAME> -p -e "SELECT COUNT(*) FROM qq_chat.messages;"` | 能返回行数（新库为 0） |
 | RabbitMQ | 浏览器打开 `http://localhost:15672`（默认 `guest` / `<RABBITMQ_PASSWORD>`） | 能看到 4 个业务队列：`media.download.queue`、`voice.transcode.queue`、`ai.analysis.queue`、`broadcast.queue` |
-| 后端 | `Invoke-RestMethod http://localhost:8081/api/system/health` | 返回 `status: ok`、`timestamp`，以及 `napcat: available` |
+| 后端 | `Invoke-RestMethod http://localhost:8081/api/system/health` | 返回 `status: ok`、`timestamp`，以及 `napcat: available`（这只说明后端进程活着 + NapCat 端口可探） |
+| 依赖健康 | 带管理员 Cookie 访问 `http://localhost:8081/actuator/health` | 返回 `components.db`（MySQL）、`components.rabbit`（RabbitMQ）均为 `UP`；该端点仅 ADMIN 可读（匿名 401） |
 | 组件状态 | `Invoke-RestMethod http://localhost:8081/api/system/component-status` | 返回 `astrbot` / `napcat` / `gptsovits` 三个对象的 `running` 与 `status` |
 | NapCat | WebUI `http://127.0.0.1:6099` 显示已登录；OneBot 6100 端口可访问 | 机器人头像在线，能收到群消息 |
 | AstrBot | 浏览器打开 `http://localhost:6185` | 能进入 AstrBot 控制台 |

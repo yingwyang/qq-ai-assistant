@@ -109,7 +109,8 @@ data: {"type": "plain", "data": "成功", "streaming": false, ...}
 | 组件端口 | `Test-NetConnection localhost -Port 6100 -InformationLevel Quiet`（换 6185 / 8000 / 8081） |
 | 组件运行状态 | `curl.exe -s "http://localhost:8081/api/system/component-status"` |
 | NapCat 登录状态 | `curl.exe -s -X POST "http://127.0.0.1:6100/get_login_info" -H "Authorization: Bearer <NAPCAT_TOKEN>" -d '{}'` |
-| 后端健康检查 | `curl.exe -s "http://localhost:8081/api/system/health"` |
+| 后端健康检查 | `curl.exe -s "http://localhost:8081/api/system/health"`（只探 NapCat 端口） |
+| 依赖健康（DB/MQ） | `curl.exe -s -b cookie.txt "http://localhost:8081/actuator/health"`（cookie 需 ADMIN；返回 `components.db` / `components.rabbit`） |
 | 磁盘占用 | `curl.exe -s -b cookie.txt "http://localhost:8081/api/system/disk-usage"` |
 | 数据库连接数 | `mysql -u root -p -e "SHOW STATUS LIKE 'Threads_connected'; SHOW PROCESSLIST;"` |
 | 重启后端 | `Get-NetTCPConnection -LocalPort 8081 -State Listen \| Select -Expand OwningProcess -Unique \| % { Stop-Process -Id $_ -Force }` |
