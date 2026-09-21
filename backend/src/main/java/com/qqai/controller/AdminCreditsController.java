@@ -49,6 +49,10 @@ public class AdminCreditsController {
     @Autowired
     private SecurityHelper securityHelper;
 
+    /** 流水出参映射（与用户端积分页共用同一实现） */
+    @Autowired
+    private com.qqai.service.CreditTransactionMapper txMapper;
+
     @Autowired
     private CreditRuleService creditRuleService;
 
@@ -474,29 +478,9 @@ public class AdminCreditsController {
         objectMapper.writeValue(response.getOutputStream(), resp);
     }
 
+    /** 管理端资金流水视图统一由 {@link com.qqai.service.CreditTransactionMapper} 生成 */
     private Map<String, Object> txToMap(CreditTransaction tx, Map<String, Object> cashInfo) {
-        Map<String, Object> m = new HashMap<>();
-        m.put("id", tx.getId());
-        m.put("userId", tx.getUserId());
-        m.put("type", tx.getType() != null ? tx.getType().name() : null);
-        m.put("direction", tx.getDirection() != null ? tx.getDirection().name() : null);
-        m.put("amount", tx.getAmount());
-        m.put("balanceAfter", tx.getBalanceAfter());
-        m.put("remark", tx.getRemark());
-        m.put("relatedId", tx.getRelatedId());
-        m.put("adminUserId", tx.getAdminUserId());
-        m.put("createdAt", tx.getCreatedAt());
-        // 模拟现金：金额（元，带符号）+ 类别（前端表格/图表直接用）
-        if (cashInfo != null) {
-            m.put("cashAmount", cashInfo.get("cashAmount"));
-            m.put("cashCategory", cashInfo.get("cashCategory"));
-            m.put("cashCategoryLabel", cashInfo.get("cashCategoryLabel"));
-        } else {
-            m.put("cashAmount", null);
-            m.put("cashCategory", null);
-            m.put("cashCategoryLabel", null);
-        }
-        return m;
+        return txMapper.toAdminCashView(tx, cashInfo);
     }
 
     /** 兼容旧调用（导出等场景只需积分字段） */

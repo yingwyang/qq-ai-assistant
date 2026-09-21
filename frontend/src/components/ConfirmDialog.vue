@@ -1,14 +1,22 @@
 <template>
   <Teleport to="body">
     <Transition name="dialog">
-      <div v-if="visible" class="dialog-overlay" @click.self="handleCancel">
-        <div class="dialog-container">
+      <div v-if="visible" class="dialog-overlay" @click.self="handleCancel" @keydown.esc.stop.prevent="handleCancel">
+        <div
+          class="dialog-container"
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby="confirm-dialog-title"
+          aria-describedby="confirm-dialog-message"
+          ref="containerRef"
+          tabindex="-1"
+        >
           <div class="dialog-header">
-            <h3 class="dialog-title">{{ title }}</h3>
-            <button class="dialog-close" @click="handleCancel">×</button>
+            <h3 id="confirm-dialog-title" class="dialog-title">{{ title }}</h3>
+            <button class="dialog-close" type="button" aria-label="关闭" @click="handleCancel">×</button>
           </div>
           <div class="dialog-body">
-            <div class="dialog-icon" v-if="type">
+            <div class="dialog-icon" v-if="type" aria-hidden="true">
               <svg v-if="type === 'warning'" viewBox="0 0 24 24" fill="none" stroke="currentColor">
                 <path d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
               </svg>
@@ -21,11 +29,11 @@
                 <path d="M12 8v4m0 4h.01" stroke-width="2" stroke-linecap="round"/>
               </svg>
             </div>
-            <p class="dialog-message">{{ message }}</p>
+            <p id="confirm-dialog-message" class="dialog-message">{{ message }}</p>
           </div>
           <div class="dialog-footer">
-            <button class="btn btn-secondary" @click="handleCancel">{{ cancelText }}</button>
-            <button class="btn" :class="`btn-${type || 'primary'}`" @click="handleConfirm">{{ confirmText }}</button>
+            <button class="btn btn-secondary" type="button" @click="handleCancel">{{ cancelText }}</button>
+            <button class="btn" :class="`btn-${type || 'primary'}`" type="button" ref="confirmRef" @click="handleConfirm">{{ confirmText }}</button>
           </div>
         </div>
       </div>
@@ -34,7 +42,7 @@
 </template>
 
 <script>
-import { ref } from 'vue';
+import { ref, watch, nextTick } from 'vue';
 
 let resolvePromise = null;
 
@@ -44,11 +52,15 @@ const message = ref('');
 const type = ref('');
 const confirmText = ref('确定');
 const cancelText = ref('取消');
+/** 无障碍：打开时把焦点移到确认按钮，关闭后还原到触发元素 */
+const containerRef = ref(null);
+const confirmRef = ref(null);
+let lastFocused = null;
 
 export function showConfirm(options) {
   return new Promise((resolve) => {
     resolvePromise = resolve;
-    
+
     if (typeof options === 'string') {
       message.value = options;
       title.value = '提示';
@@ -62,10 +74,22 @@ export function showConfirm(options) {
       confirmText.value = options.confirmText || '确定';
       cancelText.value = options.cancelText || '取消';
     }
-    
+
     visible.value = true;
   });
 }
+
+// 打开：记录触发元素 → 聚焦确认按钮；关闭：焦点还原（键盘用户不会"丢失焦点位置"）
+watch(visible, async (open) => {
+  if (open) {
+    lastFocused = document.activeElement;
+    await nextTick();
+    (confirmRef.value || containerRef.value)?.focus?.();
+  } else if (lastFocused && typeof lastFocused.focus === 'function') {
+    lastFocused.focus();
+    lastFocused = null;
+  }
+});
 
 function handleConfirm() {
   visible.value = false;
@@ -93,6 +117,8 @@ export default {
       type,
       confirmText,
       cancelText,
+      containerRef,
+      confirmRef,
       handleConfirm,
       handleCancel
     };

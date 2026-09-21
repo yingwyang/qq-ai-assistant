@@ -53,7 +53,7 @@
 | C | 异常与校验规范化：删宽 catch、Map 入参换 DTO + `@Valid`、分页上限统一、归属校验收口 Service | ✅ 已完成（C.1/C.2/C.3/C.4，见下） |
 | D | 性能与静默异常：去 N+1、合并钱包页查询、消除 `catch { return null; }`、前端空 catch 补日志 | ✅ 已完成（见下） |
 | E | 可观测与去重：Actuator + `/health` 探 DB/MQ、初始密码不落日志、限流器换 Caffeine、抽订单映射器、套餐名动态生成 | ✅ 已完成（见下） |
-| F | 前端一致性：清除原生弹窗、空/加载/错误态统一、大 chunk 代码分割、无障碍、暗色主题覆盖 | 🔄 进行中（F.1 原生弹窗清零、F.3 代码分割已完成；F.2 状态统一、F.4 无障碍、`txToMap` 收尾待办） |
+| F | 前端一致性：清除原生弹窗、空/加载/错误态统一、大 chunk 代码分割、无障碍、暗色主题覆盖 | 🔄 进行中（F.1 原生弹窗、F.3 代码分割、F.4 弹窗无障碍、`txToMap` 收尾已完成；F.2 空/加载/错误态统一待办） |
 | G | 文档与技能：`doc/` 与 `frontend/src/docs/` 全量对齐、运维坑写回技能 | ⬜ 待办 |
 
 ### 批次 A 交付明细（安全收口）
@@ -134,7 +134,10 @@
 | F.3 | 代码分割：① `main.js` 不再全局注册 `<v-chart>`（原先 `import { VChart } from './config/echarts'` 把整个 echarts 打进入口），改由 `UserCenter`/`CreditsDashboard` 局部注册；② 路由**全量懒加载**（`LoginPage`/`HomeView`/`UserCenter` 之前是静态 import）；③ `vite.config.js` 用 rolldown 支持的**函数式** `manualChunks` 显式拆出 `echarts`(含 zrender/vue-demi) 与 `markdown`，警告上限调整到 700KB 并注明理由 | 入口包 **1141KB → 51KB**；产物：`echarts` 655KB、`DocView` 297KB、`HomeView` 192KB、`markdown` 126KB、`UserCenter` 99KB、`AdminView` 94KB |
 | F.3 验证 | 新增 `scripts/check-dashboard-charts.mjs`：预检两个 dashboard 接口 200，再断言三个图表页各自渲染出 canvas（用户中心 4、管理后台概览 3、资金流水 3），并过滤"后端瞬时不可用"噪音 | 6/6 通过（此脚本的价值：懒加载 echarts 后"页面白屏但没人发现"的风险被自动化兜住） |
 
-> 说明：`txToMap` 仍在 AdminCreditsController / AdminOrdersController / CreditsController 各一份，F.2 一并收尾。
+> 说明：`txToMap` 的三个副本已在本轮收尾（见下）。
+
+| F.4 | 共享确认弹窗补齐无障碍与键盘操作：`role="alertdialog"` + `aria-modal` + `aria-labelledby/describedby`、打开后焦点进入弹窗（默认聚焦确认按钮）、关闭后焦点归还触发元素、Esc 关闭；新增 `scripts/check-dialog-a11y.mjs` 用真实浏览器断言上述 6 项 | `ConfirmDialog.vue`；脚本 8/8 通过（含"焦点归还到 btn-action delete"） |
+| F.2（部分） | `txToMap` 三个副本收敛为 `CreditTransactionMapper`：`toMap`（用户端/订单详情，10 字段契约）与 `toAdminCashView`（管理端资金流水，额外三列现金字段，无现金时显式 null 防前端列错位）；新增 `CreditTransactionMapperTest` 3 项固定出参契约 | 实测用户端与管理端流水接口字段齐全；`mvn test` **210/210** |
 
 ## 四、验收基线（每轮必须全绿）
 

@@ -37,6 +37,10 @@ public class CreditsController {
     @Autowired
     private CreditService creditService;
 
+    /** 流水出参映射（与管理端共用同一实现） */
+    @Autowired
+    private com.qqai.service.CreditTransactionMapper txMapper;
+
     @Autowired
     private SecurityHelper securityHelper;
 
@@ -172,19 +176,9 @@ public class CreditsController {
         return ResponseEntity.ok(ApiResponse.success(items));
     }
 
+    /** 流水出参统一由 {@link com.qqai.service.CreditTransactionMapper} 生成 */
     private Map<String, Object> txToMap(CreditTransaction tx) {
-        Map<String, Object> m = new HashMap<>();
-        m.put("id", tx.getId());
-        m.put("userId", tx.getUserId());
-        m.put("type", tx.getType() != null ? tx.getType().name() : null);
-        m.put("direction", tx.getDirection() != null ? tx.getDirection().name() : null);
-        m.put("amount", tx.getAmount());
-        m.put("balanceAfter", tx.getBalanceAfter());
-        m.put("remark", tx.getRemark());
-        m.put("relatedId", tx.getRelatedId());
-        m.put("adminUserId", tx.getAdminUserId());
-        m.put("createdAt", tx.getCreatedAt());
-        return m;
+        return txMapper.toMap(tx);
     }
 
     private LocalDateTime parseStart(String s) {

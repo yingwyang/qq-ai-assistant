@@ -54,6 +54,10 @@ public class AdminOrdersController {
     @Autowired
     private com.qqai.service.SubscriptionOrderMapper orderMapper;
 
+    /** 流水出参映射（与积分页/资金流水共用同一实现） */
+    @Autowired
+    private com.qqai.service.CreditTransactionMapper txMapper;
+
     @Autowired
     private CreditService creditService;
 
@@ -367,19 +371,9 @@ public class AdminOrdersController {
         return orderMapper.toAdminView(o);
     }
 
+    /** 流水出参统一由 {@link com.qqai.service.CreditTransactionMapper} 生成（与积分页共用一份） */
     private Map<String, Object> txToMap(CreditTransaction tx) {
-        Map<String, Object> m = new HashMap<>();
-        m.put("id", tx.getId());
-        m.put("userId", tx.getUserId());
-        m.put("type", tx.getType() != null ? tx.getType().name() : null);
-        m.put("direction", tx.getDirection() != null ? tx.getDirection().name() : null);
-        m.put("amount", tx.getAmount());
-        m.put("balanceAfter", tx.getBalanceAfter());
-        m.put("remark", tx.getRemark());
-        m.put("relatedId", tx.getRelatedId());
-        m.put("adminUserId", tx.getAdminUserId());
-        m.put("createdAt", tx.getCreatedAt());
-        return m;
+        return txMapper.toMap(tx);
     }
 
     private LocalDateTime parseStart(String s) {
