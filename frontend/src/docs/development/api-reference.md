@@ -12,10 +12,10 @@ updated: 2026-09-16
 
 | 项 | 说明 |
 |----|------|
-| 主方式 | 登录成功后下发 **HttpOnly Cookie `qqai_token`**（`SameSite=Lax`、`path=/`、`maxAge` 与令牌同长），同源请求由浏览器自动携带 |
+| 主方式 | 登录成功后下发 **HttpOnly Cookie `qqai_token`**（`SameSite=Lax`、`path=/`、`maxAge` 与令牌同长），同源请求由浏览器自动携带。**响应体不再回传 JWT 明文**（`AuthResponse` 已移除 `token` 字段），前端不持有令牌 |
 | 兼容方式 | `Authorization: Bearer <token>`（过滤器优先读 Header，再读 Cookie），便于 curl / 第三方客户端调试 |
 | 有效期 | 默认 24h；登录体带 `"rememberMe": true` 时为 30 天（`JWT_REMEMBER_ME_EXPIRATION`） |
-| 失效条件 | 令牌过期 / `jti` 在黑名单（登出）/ 用户被禁用 / `tokenVersion` 不一致（改密码后自增） |
+| 失效条件 | 令牌过期 / `jti` 在黑名单（登出）/ 用户被禁用 / `tokenVersion` 不一致（改密码、**管理员改角色**、禁用后自增） |
 
 ```bash
 # 登录并用 cookie 文件保存登录态（后续接口 -b cookie.txt）
@@ -168,7 +168,7 @@ HTTP 层（由 `SecurityConfig` 的 entry point / `GlobalExceptionHandler` 产�
 | GET | `/api/system/health` | 公开 | — | `status`、`timestamp`、`napcat` 可用性 |
 | GET | `/api/system/component-status` | 公开 | — | `astrbot`/`napcat`/`gptsovits` 的 `running`、`status`（端口探测：6185/6100/8000） |
 | GET | `/api/system/napcat/login-status` | 公开 | — | `loggedIn`；⚠️ 已知在已登录时可能返回 `false`，真实状态请用 6100 的 `get_login_info` |
-| GET | `/api/system/napcat/qrcode` / `qrcode-path` / `qrcode-image` | 公开 | — | 扫码登录 |
+| GET | `/api/system/napcat/qrcode` / `qrcode-path` / `qrcode-image` | **ADMIN** | — | 扫码登录机器人 QQ；⚠️ 扫码即等于接管机器人账号，已收权为仅管理员可读 |
 | POST | `/api/system/start-all` / `stop-all` | **ADMIN** | — | 一键启停，顺序为 AstrBot → NapCat → GPT-SoVITS |
 | POST | `/api/system/start-astrbot` / `stop-astrbot` | **ADMIN** | — | 单组件控制（另有 `start-napcat`、`stop-napcat`、`start-gptsovits`、`stop-gptsovits`） |
 | POST | `/api/system/napcat/auto-configure` | **ADMIN** | — | 检测新 QQ 并自动写 Webhook 配置 |

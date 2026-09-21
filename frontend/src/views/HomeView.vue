@@ -165,9 +165,10 @@
       @login-success="handleLoginSuccess" 
     />
     
-    <!-- 系统控制模态框（NapCat登录） -->
+    <!-- 系统控制模态框（NapCat登录）；二维码与组件启停仅管理员可用 -->
     <LoginModal 
       v-model:visible="showSystemModal" 
+      :is-admin="userInfo?.role === 'ADMIN'"
       @login-status-changed="handleNapCatStatusChanged" 
     />
     

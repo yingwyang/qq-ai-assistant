@@ -68,6 +68,8 @@ public class User {
     public String getAvatar() { return avatar; }
     public void setAvatar(String avatar) { this.avatar = avatar; }
     
+    // 敏感字段：即便某处直接把 User 实体当响应体返回，也不能把密码哈希与令牌序列化出去
+    @com.fasterxml.jackson.annotation.JsonIgnore
     public String getToken() { return token; }
     public void setToken(String token) { this.token = token; }
     
@@ -80,6 +82,7 @@ public class User {
     public boolean isActive() { return active; }
     public void setActive(boolean active) { this.active = active; }
     
+    @com.fasterxml.jackson.annotation.JsonIgnore
     public String getPassword() { return password; }
     public void setPassword(String password) { this.password = password; }
     

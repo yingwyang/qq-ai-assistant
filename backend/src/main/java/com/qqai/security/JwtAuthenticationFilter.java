@@ -33,7 +33,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             "/api/auth/register",
             "/api/auth/logout",
             "/api/system/health",
-            "/api/system/napcat/qrcode-image",
+            // 注意:/api/system/napcat/qrcode-image 已从白名单移除(二维码=机器人账号接管入口,仅 ADMIN)。
+            // 保留下面两个纯状态接口:登录页要在「Cookie 已过期」时仍能显示组件状态灯。
             "/api/system/napcat/login-status",
             "/api/system/component-status",
             "/",

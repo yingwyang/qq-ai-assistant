@@ -2,6 +2,7 @@ package com.qqai.controller;
 
 import com.qqai.common.AvatarResolver;
 import com.qqai.common.RateLimiterService;
+import com.qqai.config.AppCookieProperties;
 import com.qqai.config.AppRegistrationProperties;
 import com.qqai.dto.auth.AuthResponse;
 import com.qqai.dto.auth.ChangePasswordRequest;
@@ -56,6 +57,9 @@ public class AuthController {
 
     @Autowired
     private UserService userService;
+
+    @Autowired
+    private AppCookieProperties cookieProperties;
 
     @Autowired
     private UserRepository userRepository;
@@ -127,9 +131,10 @@ public class AuthController {
         String token = jwtUtil.generateToken(user.getId(), user.getUsername(), user.getRole(), tv, tokenExpiration);
 
         // 设置 HttpOnly Cookie(前端同源请求自动携带,不再需要 localStorage 存 token)
+        // secure 由 app.cookie.secure 控制:生产 HTTPS 必须为 true(APP_COOKIE_SECURE=true)
         ResponseCookie cookie = ResponseCookie.from(COOKIE_NAME, token)
                 .httpOnly(true)
-                .secure(false) // 生产走 HTTPS 时应配置为 true
+                .secure(cookieProperties.isSecure())
                 .sameSite("Lax")
                 .path("/")
                 .maxAge(Duration.ofMillis(tokenExpiration))
@@ -144,9 +149,9 @@ public class AuthController {
 
         DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
+        // 响应体不再回传 JWT(只走 HttpOnly Cookie),见 AuthResponse 的注释
         AuthResponse authResponse = new AuthResponse(
                 user.getId(),
-                token,
                 user.getUsername(),
                 user.getNickname(),
                 user.getRole(),

@@ -6,6 +6,13 @@
         <button class="close-btn" @click="closeModal">×</button>
       </div>
       <div class="modal-body">
+        <!-- 机器人登录二维码 + 组件启停均为管理员操作（后端已收权为 ADMIN-only），非管理员只给指路 -->
+        <div v-if="!canManage" class="admin-only-notice">
+          <h3>仅管理员可操作</h3>
+          <p>启动 / 停止组件、查看机器人登录二维码属于管理员操作，请前往
+            <b>系统管理中心 → 组件控制</b>。</p>
+        </div>
+        <template v-else>
         <!-- 系统控制模块 -->
         <div class="system-control-section">
           <h3>系统控制</h3>
@@ -89,13 +96,14 @@
             </div>
           </div>
         </div>
+        </template>
       </div>
     </div>
   </div>
 </template>
 
 <script>
-import { ref, onMounted, onUnmounted, watch } from 'vue';
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { systemApi } from '../services/api';
 import logger from '../utils/logger';
 
@@ -105,10 +113,17 @@ export default {
     visible: {
       type: Boolean,
       default: false
+    },
+    /** 父组件已知角色时直接传入；未传时回退到登录时缓存的 user_role（与 ChatInterface 一致） */
+    isAdmin: {
+      type: Boolean,
+      default: false
     }
   },
   emits: ['update:visible', 'login-status-changed'],
   setup(props, { emit }) {
+    // 二维码与组件启停仅管理员可用：非管理员不渲染这些控件，避免出现 403 的破图与点不动的按钮
+    const canManage = computed(() => props.isAdmin || (localStorage.getItem('user_role') || '') === 'ADMIN');
     const qrCode = ref('');
     const isLoggedIn = ref(false);
     const serviceAvailable = ref(false);
@@ -385,6 +400,7 @@ export default {
     });
 
     return {
+      canManage,
       qrCode,
       isLoggedIn,
       serviceAvailable,
@@ -476,6 +492,26 @@ export default {
 
 .modal-body {
   padding: 20px;
+}
+
+/* 非管理员的指路提示：不再渲染二维码与组件启停按钮，避免 403 破图与无效操作 */
+.admin-only-notice {
+  padding: 24px 20px;
+  text-align: center;
+  color: var(--text-secondary, #666);
+}
+.admin-only-notice h3 {
+  margin: 0 0 10px;
+  font-size: 15px;
+  color: var(--text-primary, #333);
+}
+.admin-only-notice p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.7;
+}
+.admin-only-notice b {
+  color: var(--accent-color, #3498db);
 }
 
 .system-control-section,

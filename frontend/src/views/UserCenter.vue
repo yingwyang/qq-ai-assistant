@@ -1010,10 +1010,18 @@ export default {
     onMounted(() => {
       parseInitialUrlParams();
 
-      componentCtrl.startPolling();
-      componentCtrl.loadNapCatWebUiUrl();
-      componentCtrl.refreshQrCode();
-      if (componentCtrl.autoLogin.value) componentCtrl.checkNapCatLogin();
+      // 组件控制（状态轮询 / 机器人登录二维码 / WebUI 地址）只在管理员身份下有意义：
+      // 二维码接口已收权为 ADMIN-only，普通用户请求只会拿到 403 并在控制台刷错误；
+      // 用户中心模板本身也不渲染这些数据（系统控制统一在「系统管理中心 → 组件控制」）。
+      const cachedRole = (() => {
+        try { return JSON.parse(localStorage.getItem('user_info') || '{}').role || ''; } catch (e) { return ''; }
+      })();
+      if (cachedRole === 'ADMIN') {
+        componentCtrl.startPolling();
+        componentCtrl.loadNapCatWebUiUrl();
+        componentCtrl.refreshQrCode();
+        if (componentCtrl.autoLogin.value) componentCtrl.checkNapCatLogin();
+      }
       window.addEventListener('keydown', media.onPreviewKeydown);
 
       loadUserInfo();

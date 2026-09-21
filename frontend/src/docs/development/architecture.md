@@ -157,7 +157,7 @@ prefetch 是 `RabbitMQConfig` 里的常量，配置文件改不动；调并发�
 
 | 项 | 事实 |
 |----|------|
-| Cookie | `qqai_token`：`HttpOnly=true`、`SameSite=Lax`、`path=/`、`maxAge` 与令牌同长；`secure=false`（生产 HTTPS 应改 `true`） |
+| Cookie | `qqai_token`：`HttpOnly=true`、`SameSite=Lax`、`path=/`、`maxAge` 与令牌同长；`secure` 由 `app.cookie.secure` 控制（默认 false 供本地 HTTP 开发，**生产 HTTPS 必须设 `APP_COOKIE_SECURE=true`**）。登录响应体**不再回传 JWT 明文**（只走这个 Cookie，避免 XSS/插件直接读走令牌） |
 | JWT Claims | `sub`=username、`uid`、`tv`(tokenVersion)、`role`、`jti`、`iat`、`exp` |
 | 有效期 | 默认 24h（`jwt.expiration=86400000`）；「记住我」30 天（`jwt.remember-me-expiration`） |
 | 兼容 | 仍接受 `Authorization: Bearer <token>`（过滤器先读 Header，再读 Cookie） |
@@ -185,14 +185,17 @@ prefetch 是 `RabbitMQConfig` 里的常量，配置文件改不动；调并发�
 | `/api/admin/**`、`/api/credits/admin/**` | `ROLE_ADMIN` |
 | `/api/system/start-*`、`stop-*`、`restart-*`、`/api/system/napcat/auto-configure` | `ROLE_ADMIN` |
 | `/api/system/tts`、`/tts/**`、`/convert-voice` | 登录即可（积分在服务内扣减） |
-| `/api/system/napcat/qrcode-image`、`login-status`、`component-status` | 公开（登录页状态灯） |
+| `/api/system/napcat/qrcode`、`qrcode-path`、`qrcode-image` | `ROLE_ADMIN`（二维码＝机器人账号接管入口，普通用户不需要） |
+| `/api/system/napcat/login-status`、`/api/system/component-status` | 公开（登录页状态灯，只暴露布尔量） |
 | 其余 | `authenticated()` |
 
 方法级另有 `@EnableMethodSecurity` + `@PreAuthorize("hasRole('ADMIN')")`（如 `POST /api/messages/process`、`PersonaController` 写接口），服务层再由 `SecurityHelper.requireAdmin()` 兜底。
 
 ### 公开接口白名单
 
-`JwtAuthenticationFilter.PUBLIC_PATHS` 中的路径会**完全跳过过滤器**（连 Cookie 都不解析）：`/api/auth/{login,register,logout}`、`/api/system/health`、`/api/system/napcat/{qrcode-image,login-status}`、`/api/system/component-status`、`/`、`/webhook`、`/api/napcat`、`/api/napcat/**`、`/ws`、`/ws/**`、`/uploads/avatars/**`。原因很实际：带着**过期** Cookie 打开登录页时若仍走过滤器会被判 401，导致「无法重新登录」。
+`JwtAuthenticationFilter.PUBLIC_PATHS` 中的路径会**完全跳过过滤器**（连 Cookie 都不解析）：`/api/auth/{login,register,logout}`、`/api/system/health`、`/api/system/napcat/login-status`、`/api/system/component-status`、`/`、`/webhook`、`/api/napcat`、`/api/napcat/**`、`/ws`、`/ws/**`、`/uploads/avatars/**`。原因很实际：带着**过期** Cookie 打开登录页时若仍走过滤器会被判 401，导致「无法重新登录」。
+
+> 安全收口（2026-09-21）：`/api/system/napcat/qrcode-image` 已从这个白名单**移除**。此前它被 `permitAll`，任何人无需登录即可拉取 QQ 机器人登录二维码图片（扫码即等于接管机器人账号），并可通过 `qrcode-path` 读到服务器绝对路径。现在三个二维码入口统一为 `ROLE_ADMIN`；纯状态接口（`login-status`、`component-status`）按上面的登录页原因继续公开。
 
 ## 模块分层
 

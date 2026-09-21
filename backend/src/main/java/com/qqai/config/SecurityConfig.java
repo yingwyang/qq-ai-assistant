@@ -158,7 +158,12 @@ public class SecurityConfig implements WebSocketConfigurer {
                 .requestMatchers("/api/system/napcat/auto-configure").hasRole("ADMIN")
                 // TTS 等资源消耗接口:登录即可用(积分在服务内扣减)
                 .requestMatchers("/api/system/tts", "/api/system/tts/**", "/api/system/convert-voice").authenticated()
-                .requestMatchers("/api/system/napcat/qrcode-image", "/api/system/napcat/login-status", "/api/system/component-status").permitAll()
+                // 机器人登录二维码:扫码即等于接管 QQ 机器人账号,必须仅 ADMIN 可见(安全收口)。
+                // 三个入口(qrcode / qrcode-path / qrcode-image)统一收权,避免只拦图片、漏掉 JSON 与服务器路径。
+                .requestMatchers("/api/system/napcat/qrcode", "/api/system/napcat/qrcode-path",
+                        "/api/system/napcat/qrcode-image").hasRole("ADMIN")
+                // 登录页状态灯:只暴露「运行中 / 已登录」这类布尔量,不含二维码与服务器路径,故保持公开
+                .requestMatchers("/api/system/napcat/login-status", "/api/system/component-status").permitAll()
                 .anyRequest().authenticated()
             )
             .addFilterBefore(requestLoggingFilter(), org.springframework.security.web.context.SecurityContextHolderFilter.class)

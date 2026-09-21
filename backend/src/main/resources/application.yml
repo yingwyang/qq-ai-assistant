@@ -158,6 +158,10 @@ app:
     # 逗号分隔的跨域白名单；可用环境变量 CORS_ALLOWED_ORIGINS 覆盖（不设时用下面这份本地默认值）。
     # 该值在 CorsConfig 里按逗号拆分，所以默认值里的逗号不会引起绑定问题。
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174,http://localhost:5175,http://127.0.0.1:5175,http://localhost:5176,http://127.0.0.1:5176}
+  cookie:
+    # qqai_token Cookie 是否只在 HTTPS 下传输。本地 HTTP 开发保持 false；
+    # **生产 HTTPS 部署必须设为 true**（环境变量 APP_COOKIE_SECURE=true），否则令牌会在明文 HTTP 上传输。
+    secure: ${APP_COOKIE_SECURE:false}
 
 # AI 摘要（阶段 1 单条按需 / 阶段 2 批量 / 阶段 3 群日报）
 ai:

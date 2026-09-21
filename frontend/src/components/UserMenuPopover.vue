@@ -60,36 +60,39 @@
             <span class="menu-label">系统管理</span>
           </div>
 
-          <div class="menu-item has-submenu" @click="toggleSubmenu($event, 'qq-login')">
-            <Icon name="message-circle" :size="18" />
-            <span class="menu-label">QQ登录</span>
-            <span class="menu-arrow" :class="{ expanded: activeSubmenu === 'qq-login' }">›</span>
-          </div>
-          <div v-show="activeSubmenu === 'qq-login'" class="submenu qq-login-submenu">
-            <div class="qq-login-content">
-              <div v-if="componentStatus.napcat?.running" class="qq-qr-section">
-                <div class="qq-qr-header">
-                  <span class="qq-qr-title">NapCat 扫码登录</span>
-                  <span class="qq-qr-refresh" @click.stop="refreshQrCode" title="刷新二维码">
-                    <Icon name="refresh" :size="14" />
-                  </span>
-                </div>
-                <div class="qq-qr-wrapper">
-                  <img v-if="qrCode" :src="qrCode" class="qq-qr-image" alt="QQ登录二维码" />
-                  <div v-else class="qq-qr-loading">
-                    <Icon name="loader" :size="24" class="spin" />
-                    <span>加载中...</span>
+          <!-- 机器人登录二维码仅管理员可见：扫码即等于接管 QQ 机器人账号，后端已收权为 ADMIN-only -->
+          <template v-if="userInfo?.role === 'ADMIN'">
+            <div class="menu-item has-submenu" @click="toggleSubmenu($event, 'qq-login')">
+              <Icon name="message-circle" :size="18" />
+              <span class="menu-label">QQ登录</span>
+              <span class="menu-arrow" :class="{ expanded: activeSubmenu === 'qq-login' }">›</span>
+            </div>
+            <div v-show="activeSubmenu === 'qq-login'" class="submenu qq-login-submenu">
+              <div class="qq-login-content">
+                <div v-if="componentStatus.napcat?.running" class="qq-qr-section">
+                  <div class="qq-qr-header">
+                    <span class="qq-qr-title">NapCat 扫码登录</span>
+                    <span class="qq-qr-refresh" @click.stop="refreshQrCode" title="刷新二维码">
+                      <Icon name="refresh" :size="14" />
+                    </span>
                   </div>
+                  <div class="qq-qr-wrapper">
+                    <img v-if="qrCode" :src="qrCode" class="qq-qr-image" alt="QQ登录二维码" />
+                    <div v-else class="qq-qr-loading">
+                      <Icon name="loader" :size="24" class="spin" />
+                      <span>加载中...</span>
+                    </div>
+                  </div>
+                  <div class="qq-qr-tip">请使用手机 QQ 扫描二维码登录（仅管理员可见）</div>
                 </div>
-                <div class="qq-qr-tip">请使用手机 QQ 扫描二维码登录</div>
-              </div>
-              <div v-else class="qq-qr-empty">
-                <Icon name="alert-circle" :size="32" />
-                <div>NapCat 未启动</div>
-                <div class="qq-qr-hint">请先启动 NapCat 服务</div>
+                <div v-else class="qq-qr-empty">
+                  <Icon name="alert-circle" :size="32" />
+                  <div>NapCat 未启动</div>
+                  <div class="qq-qr-hint">请先启动 NapCat 服务</div>
+                </div>
               </div>
             </div>
-          </div>
+          </template>
 
           <!-- 主题切换（原来这个按钮被删掉了，这里实装回来） -->
           <div class="menu-item" @click="toggleTheme">

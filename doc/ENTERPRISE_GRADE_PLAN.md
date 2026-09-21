@@ -47,8 +47,8 @@
 
 | 批次 | 范围 | 状态 |
 |------|------|------|
-| 0 | 支付步骤按钮化 + 订单状态文案单一事实来源（`frontend/src/config/orderStatus.js`）+ 订阅文档同步 + 验收脚本 | ✅ 已完成 |
-| A | 安全收口：二维码接口收权、响应体去 token、Cookie `secure` 配置化、降权递增 `tokenVersion`、`User` 敏感 getter 加 `@JsonIgnore` | ⬜ 待办 |
+| 0 | 支付步骤按钮化 + 订单状态文案单一事实来源（`frontend/src/config/orderStatus.js`）+ 订阅文档同步 + 验收脚本 | ✅ 已完成（`87bf3df`） |
+| A | 安全收口：二维码接口收权、响应体去 token、Cookie `secure` 配置化、降权递增 `tokenVersion`、`User` 敏感 getter 加 `@JsonIgnore` | ✅ 已完成（本轮，见下） |
 | B | 资金链路幂等与扣费顺序：`markPaid` 行锁、`grantPoints` 行锁、下单幂等键、AI/TTS 先扣后调 + 失败退费、签到冲突 `REQUIRES_NEW`、流水唯一约束 | ⬜ 待办 |
 | C | 异常与校验规范化：删宽 catch、Map 入参换 DTO + `@Valid`、分页上限统一、归属校验收口 Service | ⬜ 待办 |
 | D | 性能与静默异常：去 N+1、合并钱包页查询、消除 `catch { return null; }`、前端空 catch 补日志 | ⬜ 待办 |
@@ -56,16 +56,32 @@
 | F | 前端一致性：清除原生弹窗、空/加载/错误态统一、大 chunk 代码分割、无障碍、暗色主题覆盖 | ⬜ 待办 |
 | G | 文档与技能：`doc/` 与 `frontend/src/docs/` 全量对齐、运维坑写回技能 | ⬜ 待办 |
 
+### 批次 A 交付明细（安全收口）
+
+| 项 | 改动 | 证据 |
+|----|------|------|
+| A.1 | 三个二维码入口（`/api/system/napcat/qrcode`、`qrcode-path`、`qrcode-image`）从 `permitAll` 收为 `ROLE_ADMIN`；`qrcode-image` 从 `JwtAuthenticationFilter.PUBLIC_PATHS` 移除 | `config/SecurityConfig.java`、`security/JwtAuthenticationFilter.java`；实测匿名 401 / 普通用户 403 / ADMIN 200 |
+| A.2 | `AuthResponse` 移除 `token` 字段，JWT 只走 HttpOnly Cookie | `dto/auth/AuthResponse.java`、`controller/AuthController.java`；单测断言记录组件与 JSON 均无 token |
+| A.3 | Cookie `secure` 由 `app.cookie.secure`（`APP_COOKIE_SECURE`）控制，生产置 true | `config/AppCookieProperties.java`、`application.yml` |
+| A.4 | 角色变更递增 `tokenVersion`，被降权者的旧令牌立即失效 | `service/UserService.updateUserRole`；单测断言 0→1→2 |
+| A.5 | `User.getPassword()/getToken()` 加 `@JsonIgnore`，防实体出参泄漏 | `entity/User.java`；单测断言序列化不含密钥 |
+| A.6 | 前端同步收口：用户菜单二维码仅管理员可见、`LoginModal` 非管理员只给指路、用户中心不再为普通用户请求二维码 | `components/UserMenuPopover.vue`、`components/LoginModal.vue`、`views/UserCenter.vue` |
+| A.7 | 新增可复用安全回归脚本 `frontend/scripts/check-security-hardening.mjs`（10 项） | 本轮实测 10/10 |
+
+**为什么 `qrcode` 与 `qrcode-path` 也要收权**：原先它们只要求「已登录」，任何普通用户都能读到机器人二维码与服务器绝对路径；二维码本身即账号接管凭据，因此三者必须同一权限。
+**为什么状态接口保持公开**：`login-status`、`component-status` 只返回布尔量，且登录页在 Cookie 过期时仍需显示组件状态灯（见 `docs/development/architecture.md` 的白名单说明）。
+
 ## 四、验收基线（每轮必须全绿）
 
 | 命令 | 基线 |
 |------|------|
 | `cd frontend && npx vite build` | exit 0 |
+| `node scripts/check-security-hardening.mjs <ADMIN_JWT> <baseUrl> <USER_JWT>` | 10/10（批次 A 起） |
 | `node scripts/check-payment-flow.mjs <JWT>` | 18/18 |
 | `node scripts/check-admin-shell.mjs <JWT>` | 18/18 |
 | `node scripts/check-admin-dark-theme.mjs <JWT>` | 14 页无问题 |
 | `node scripts/e2e-admin-export.mjs <JWT>` | 26/26 |
 | `node scripts/check-admin-last-admin.mjs <JWT>` | 14/14 |
-| `cd backend && mvn -B -ntp test` | 163 项（批次 B/C 起会增长） |
+| `cd backend && mvn -B -ntp test` | **171** 项（批次 A 起；批次 B/C 会继续增长） |
 
 > 环境：`CHROME_PATH='C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe'`；ADMIN JWT 见技能 `qqai-verify`。

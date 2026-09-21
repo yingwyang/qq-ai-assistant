@@ -384,6 +384,10 @@ public class UserService {
         if (userOpt.isPresent()) {
             User user = userOpt.get();
             user.setRole(role);
+            // 角色变更必须让已签发的令牌立即失效：JWT 里带着 role 声明，
+            // 若只改库不递增 tokenVersion，被降权的管理员用旧 token 仍能继续调管理端接口。
+            Integer currentTv = user.getTokenVersion() != null ? user.getTokenVersion() : 0;
+            user.setTokenVersion(currentTv + 1);
             userRepository.save(user);
         }
         return userOpt;
