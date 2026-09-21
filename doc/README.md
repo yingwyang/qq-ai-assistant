@@ -139,6 +139,7 @@ qq-ai-assistant/
 │   │   ├── router/                    # 路由配置
 │   │   ├── services/                  # API 服务层（统一 fetch 封装）
 │   │   ├── utils/                     # 工具函数（消息过滤）
+│   │   ├── config/                    # 共享配置（图表主题色、订单状态文案单一事实来源 orderStatus.js）
 │   │   ├── App.vue                    # 根组件（三栏布局）
 │   │   ├── main.js                    # 入口文件
 │   │   └── style.css                  # 全局样式
@@ -149,7 +150,7 @@ qq-ai-assistant/
 ├── .env.example                       # 环境变量模板
 ├── .gitignore
 ├── docker-compose.yml                 # Docker 一键部署（MySQL + RabbitMQ）
-├── doc/                               # 项目文档（Wiki / README / 用户手册）
+├── doc/                               # 项目文档（Wiki / README / 用户手册 / 企业级化计划）
 └── README.md
 ```
 

@@ -35,13 +35,7 @@
         <div class="order-filter">
           <select v-model="orderStatusFilter" @change="loadOrders(0)">
             <option value="">全部状态</option>
-            <option value="PAID">已支付</option>
-            <option value="PENDING">待支付</option>
-            <option value="PENDING_REFUND">退款审批中</option>
-            <option value="DISPUTED">纠纷中</option>
-            <option value="REFUNDED">已退款</option>
-            <option value="CANCELLED">已取消</option>
-            <option value="EXPIRED">已过期</option>
+            <option v-for="opt in orderStatusOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
           </select>
         </div>
       </div>
@@ -141,7 +135,7 @@
                 <button
                   class="plan-card-btn"
                   :disabled="purchasingPlan === plan.planCode || isCurrentPlan(plan.planCode)"
-                  @click="purchasePlan(plan)"
+                  @click="openPayment(plan)"
                 >
                   <span v-if="purchasingPlan === plan.planCode">购买中...</span>
                   <span v-else-if="isCurrentPlan(plan.planCode)">已购买</span>
@@ -169,7 +163,7 @@
                 <button
                   class="plan-card-btn"
                   :disabled="purchasingPlan === plan.planCode || isCurrentPlan(plan.planCode)"
-                  @click="purchasePlan(plan)"
+                  @click="openPayment(plan)"
                 >
                   <span v-if="purchasingPlan === plan.planCode">购买中...</span>
                   <span v-else-if="isCurrentPlan(plan.planCode)">已购买</span>
@@ -331,6 +325,18 @@
         </div>
       </div>
     </Transition>
+
+    <!-- 支付链路唯一入口：按钮驱动的确认订单弹窗（无二维码/扫码） -->
+    <PaymentDialog
+      v-model:visible="showPaymentDialog"
+      :plan="paymentPlan"
+      :submitting="!!paymentPlan && purchasingPlan === paymentPlan.planCode"
+      :result="paymentResult"
+      @confirm="submitPayment"
+      @view-order="viewPaymentOrder"
+      @finish="finishPayment"
+      @close="onPaymentDialogClose"
+    />
   </div>
 </template>
 
@@ -341,6 +347,8 @@ import Icon from '../Icon.vue';
 import { subscriptionApi, creditsApi, authApi } from '../../services/api';
 import { showToast } from '../Toast.vue';
 import { showConfirm } from '../ConfirmDialog.vue';
+import PaymentDialog from './PaymentDialog.vue';
+import { ORDER_STATUS_OPTIONS as orderStatusOptions, orderStatusText as orderStatusLabel } from '../../config/orderStatus';
 import logger from '../../utils/logger';
 
 // 后端 SubscriptionTier 枚举与 planCode 映射
@@ -464,7 +472,7 @@ function normalizeRelatedTx(tx) {
 
 export default {
   name: 'SubscriptionDashboard',
-  components: { Icon },
+  components: { Icon, PaymentDialog },
   props: {
     autoOpenUpgrade: { type: Boolean, default: false }
   },
@@ -480,6 +488,10 @@ export default {
     const remainingDays = ref(0);
 
     const showUpgradeDialog = ref(false);
+    // 支付链路：确认订单弹窗（按钮驱动，无二维码）
+    const showPaymentDialog = ref(false);
+    const paymentPlan = ref(null);
+    const paymentResult = ref(null);
     const plans = ref([]);
     // 折扣真值（来自 credit_rule，随套餐接口下发）：用于双持权益文案，避免写死折数
     const allTierDiscount = ref(null);
@@ -757,33 +769,92 @@ export default {
       return currentTier && currentTier === plan.tier && currentTier !== 'FREE';
     }
 
-    async function purchasePlan(plan) {
-      const price = Number(plan.price || 0).toFixed(2);
-      const isMonthCard = (plan.category || 'DIRECT') === 'MONTHLY_CARD';
-      const confirmMsg = isMonthCard
-        ? `确认购买 ${plan.planName}？\n¥${price} / ${plan.durationDays}天，获得 ${plan.credits} 积分`
-        : `确认购买 ${plan.planName}？\n¥${price}，获得 ${plan.credits} 积分`;
-      if (!window.confirm(confirmMsg)) return;
+    /**
+     * 支付链路（唯一功能约定）：支付用「按钮」而不是二维码/扫码。
+     * 点击「立即购买」→ 打开确认订单弹窗（套餐/金额/支付方式/协议勾选）
+     * → 点「确认支付」提交订单 → 弹窗进入第二步展示订单号与待确认收款状态。
+     */
+    function openPayment(plan) {
+      paymentPlan.value = plan;
+      paymentResult.value = null;
+      showPaymentDialog.value = true;
+    }
+
+    function resetPaymentState() {
+      paymentResult.value = null;
+      paymentPlan.value = null;
+    }
+
+    /** 弹窗关闭（含右上角 ×）：订单已在列表中，刷新一次保证状态最新 */
+    function onPaymentDialogClose() {
+      const submitted = !!paymentResult.value?.orderNo;
+      resetPaymentState();
+      if (submitted) loadOrders(0);
+    }
+
+    /** 第二步点「完成」：收起支付与套餐弹窗，回到订单列表并高亮新订单 */
+    function finishPayment() {
+      const orderNo = paymentResult.value?.orderNo;
+      resetPaymentState();
+      showPaymentDialog.value = false;
+      showUpgradeDialog.value = false;
+      if (orderNo) {
+        highlightOrderNo.value = orderNo;
+        setTimeout(() => { highlightOrderNo.value = null; }, 8000);
+        loadOrders(0);
+      }
+    }
+
+    /** 第二步点「查看订单详情」：直接打开订单抽屉 */
+    async function viewPaymentOrder() {
+      const orderNo = paymentResult.value?.orderNo;
+      const plan = paymentPlan.value;
+      const result = paymentResult.value;
+      resetPaymentState();
+      showPaymentDialog.value = false;
+      showUpgradeDialog.value = false;
+      if (!orderNo) return;
+      await openOrderDetail({
+        orderNo,
+        planCode: plan?.tier || plan?.planCode,
+        planName: plan?.planName,
+        amount: result?.amount ?? plan?.price,
+        credits: result?.credits ?? plan?.credits,
+        status: result?.status || 'PENDING',
+        createdAt: new Date().toISOString(),
+      });
+    }
+
+    /** 弹窗「确认支付」：提交订单（后端仍为人工确认收款，下单即 PENDING） */
+    async function submitPayment() {
+      const plan = paymentPlan.value;
+      if (!plan || purchasingPlan.value) return;
       purchasingPlan.value = plan.planCode;
       try {
         const res = await subscriptionApi.purchase({ planCode: plan.tier || plan.planCode, paymentMethod: 'MANUAL' });
-        const orderNo = res?.orderNo;
-        const isPending = res?.status === 'PENDING';
+        const orderNo = res?.orderNo || '';
+        const status = res?.status || 'PENDING';
+        const isPending = status === 'PENDING';
+        const gained = res?.pointsGranted ?? res?.credits ?? plan.credits;
+
+        paymentResult.value = {
+          orderNo,
+          status,
+          message: res?.message || '',
+          credits: gained,
+          amount: res?.amount ?? plan.price,
+        };
+        if (orderNo) {
+          highlightOrderNo.value = orderNo;
+          setTimeout(() => { highlightOrderNo.value = null; }, 8000);
+        }
 
         if (isPending) {
-          showToast(res?.message || '订单已创建，待管理员确认到账后发放权益', 'success');
-          // PENDING 订单不改变余额/tier（未到账），直接刷新订单列表即可
-          showUpgradeDialog.value = false;
-          if (orderNo) highlightOrderNo.value = orderNo;
-          setTimeout(() => {
-            loadOrders(0);
-          }, 300);
-          if (orderNo) setTimeout(() => highlightOrderNo.value = null, 6000);
+          // PENDING 订单不改变余额/tier（未到账），刷新订单列表即可
+          showToast(res?.message || '订单已提交，等待管理员确认收款', 'success');
+          loadOrders(0);
         } else {
-          const gained = res?.pointsGranted ?? res?.credits ?? plan.credits;
           showToast(`购买成功，获得 ${gained} 积分！${orderNo ? `（订单号 ${orderNo}）` : ''}`, 'success');
-          showUpgradeDialog.value = false;
-          if (orderNo) highlightOrderNo.value = orderNo;
           creditsBalance.value = (typeof res?.newBalance === 'number') ? res.newBalance : (creditsBalance.value + gained);
           currentPlan.value = {
             planCode: tierToPlanCode(res?.subscriptionTier || plan.tier),
@@ -796,7 +867,6 @@ export default {
             loadOrders(0);
             emit('refreshCredits');
           }, 300);
-          if (orderNo) setTimeout(() => highlightOrderNo.value = null, 6000);
         }
       } catch (err) {
         let msg = err.message || '购买失败';
@@ -925,9 +995,8 @@ export default {
       else window.location.href = `/user-center?tab=credits&relatedId=${orderNo}`;
     }
 
-    function statusText(s) {
-      return { PAID: '已支付', PENDING: '待确认', PENDING_REFUND: '退款审批中', DISPUTED: '纠纷中', REFUNDED: '已退款', CANCELLED: '已取消', EXPIRED: '已过期' }[s] || s || '-';
-    }
+    // 状态文案统一取自 config/orderStatus.js：与筛选下拉、管理后台、文档同一套叫法
+    const statusText = orderStatusLabel;
     function txTypeText(t) {
       return { SUBSCRIPTION_PURCHASE: '订阅购买', REFUND: '退款', ADMIN_ADJUST: '管理员补偿', ADMIN_ADJUSTMENT: '管理员调整', SIGN_IN: '签到奖励', DAILY_SIGN_IN: '每日签到', AI_CHAT: 'AI消耗', NEW_USER_BONUS: '新人福利', MONTHLY_LOGIN_BONUS: '每月登录赠送', LOYALTY_BONUS: '老用户福利', MONTHLY_CARD_DAILY: '月卡每日奖励' }[t] || t || '-';
     }
@@ -960,7 +1029,9 @@ export default {
     return {
       userInfo, userAvatarUrl, creditsBalance, currentPlan, recentSpent, remainingDays,
       planBadgeClass, planBenefitsText, expiryText,
-      showUpgradeDialog, plans, monthlyCardPlans, directPurchasePlans, purchasingPlan, isCurrentPlan, openUpgradeDialog, purchasePlan, goToCredits,
+      showUpgradeDialog, plans, monthlyCardPlans, directPurchasePlans, purchasingPlan, isCurrentPlan, openUpgradeDialog, goToCredits,
+      showPaymentDialog, paymentPlan, paymentResult, openPayment, submitPayment, viewPaymentOrder, finishPayment, onPaymentDialogClose,
+      orderStatusOptions,
       orders, ordersLoading, orderPage, totalOrderPages, orderStatusFilter,
       loadOrders, cancelOrder, openRefundDialog, openOrderDetail, highlightOrderNo,
       showOrderDrawer, detail, relatedTransactions, timelineEvents,

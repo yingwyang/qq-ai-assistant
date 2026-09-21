@@ -46,7 +46,7 @@
 
     <div class="data-toolbar">
       <span class="data-toolbar-info">
-        共 {{ ordersTotalElements }} 笔订单<template v-if="pendingSelectedCount">，其中 {{ pendingSelectedCount }} 笔待支付可选</template>
+        共 {{ ordersTotalElements }} 笔订单<template v-if="pendingSelectedCount">，其中 {{ pendingSelectedCount }} 笔待确认收款可选</template>
       </span>
       <div class="data-toolbar-actions">
         <button
@@ -90,7 +90,7 @@
                 type="checkbox"
                 :checked="selected.has(o.orderNo)"
                 :disabled="o.status !== 'PENDING'"
-                :title="o.status === 'PENDING' ? '' : '只有「待支付」订单可以批量确认收款'"
+                :title="o.status === 'PENDING' ? '' : '只有「待确认收款」订单可以批量确认收款'"
                 @change="toggleSelect(o.orderNo)"
               />
             </td>
@@ -151,7 +151,7 @@ export default {
     const setOrdersSize = adminOrders.setOrdersSize;
     const setOrdersRange = adminOrders.setOrdersRange;
 
-    // 批量确认收款：只有「待支付」订单可勾选，避免误把已支付/已退款订单再点一遍
+    // 批量确认收款：只有「待确认收款」订单可勾选，避免误把已支付/已退款订单再点一遍
     const selected = ref(new Set());
     const batchRunning = ref(false);
     const selectedCount = computed(() => selected.value.size);

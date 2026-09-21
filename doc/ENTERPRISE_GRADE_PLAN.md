@@ -1,0 +1,71 @@
+# 全项目企业级化计划（Enterprise Grade Plan）
+
+> 本文档是**受版本管理的唯一计划源**，每轮交付后更新状态。
+> 需求背景：**支付链路只做一处功能改动——把"支付用的二维码"换成按钮；其余内容全部对齐企业项目水准。**
+> 详细 spec / tasks / checklist（更细的场景与行号证据）另存于 `.trae/specs/enterprise-grade/`（该目录不入库，仅本地参考）。
+
+## 一、支付链路约定（唯一功能改动）
+
+排查结论：本项目**不存在任何支付二维码**（前端源码、`dist`、后端静态资源、`public/` 资源、git 历史全量检索，仅有 NapCat 登录二维码）。原支付链路为：
+
+```
+点击「立即购买」→ 浏览器原生 window.confirm → POST /api/subscriptions/purchase(MANUAL)
+→ 订单 PENDING → 管理员后台「确认收款」→ PAID，发放积分与权益
+```
+
+本轮把"支付步骤"改为**按钮驱动**，其余业务语义不变（仍由管理员确认收款）：
+
+| 步骤 | 实现 |
+|------|------|
+| 1 打开确认订单 | `PaymentDialog.vue`：套餐信息、金额明细（商品金额/优惠/应付）、支付方式按钮组、服务须知、协议勾选 |
+| 2 提交订单 | 主按钮「确认支付 ¥金额」；未勾选协议时禁用；只提交一次 `paymentMethod=MANUAL` |
+| 3 完成付款 | 弹窗第二步：订单号（可复制）、状态「待确认收款」、「查看订单详情」/「完成」 |
+
+**硬约束**：支付界面不得出现二维码、收款码或扫码支付元素；未接入的在线支付通道置灰并标注「未开通」。
+
+## 二、企业级差距（审计结论摘要，含证据）
+
+后端只读审计（7 维度）+ 前端实测，评分：异常 3 / 校验 2 / 安全 3 / 事务并发 2 / 可观测 2 / 可维护 2 / 性能 2。
+
+| 级别 | 问题 | 证据 |
+|------|------|------|
+| blocker | QQ 登录二维码图片接口公开（未登录可取，扫码=接管机器人账号），且 `qrcode-path` 泄漏服务器绝对路径 | `backend/.../config/SecurityConfig.java:161`、`security/JwtAuthenticationFilter.java:36`、`controller/SystemController.java:254,262` |
+| high | JWT 明文随响应体回传，抵消 HttpOnly 防 XSS 价值 | `controller/AuthController.java:147-159` |
+| high | 管理员降权不递增 `tokenVersion`，旧 token 最长 30 天仍可调调账/退款 | `controller/AdminController.java:155-188`、`common/SecurityHelper.java:102` |
+| high | 先调 LLM 并落库回复、最后才扣费；0 余额可反复刷 | `controller/AstrBotController.java:1486-1503` |
+| high | 15+ 处 `catch (Exception e) { return 400, e.getMessage() }`：500 降级为 400 且回显内部文本 | `controller/MessageController.java` 多处 |
+| high | `grantPoints` 读-改-写无锁（`spendPoints` 有悲观锁）；`markPaid` 先查后改无幂等 | `service/CreditService.java:118-144`、`service/SubscriptionService.java:153-161` |
+| high | 用户仪表盘 N+1（循环内两次查库） | `service/UserDashboardService.java:214-238` |
+| medium | 33 个 `@RequestBody Map<String,Object>` 零校验（含可覆盖 `priceCents/pointsGranted` 的补单入口） | `controller/AdminOrdersController.java:132-165` 等 |
+| medium | 分页无上限、钱包页一次 4 次查询、订单出参映射三处复制、套餐名硬编码 | `AdminController.java:64`、`CreditsController.java:127-149`、`SubscriptionsController.java:356-369` |
+| medium | 无 Actuator、`/health` 不探 DB/MQ、初始管理员密码明文进日志、限流器非线程安全 | `pom.xml`、`SystemController.java:276`、`DataInitializer.java:57`、`RateLimiterService.java:15-38` |
+| 前端 | 订单状态同一状态多种叫法（文档自己注明"文案略有差异"） | `docs/guide/subscription.md:98`（本轮已消除） |
+| 前端 | 原生弹窗残留：`window.confirm`（消息删除、解绑 QQ）、`window.prompt`（复制回退） | `ChatInterface.vue:1557,1563`、`views/UserCenter.vue:926`、`SubscriptionDashboard.vue:965` |
+| 工程 | 默认配置含开发者本机绝对路径与用户名；`index` chunk 1.16MB 未分割 | `backend/src/main/resources/application.yml`、`vite build` 警告 |
+
+## 三、批次与状态
+
+| 批次 | 范围 | 状态 |
+|------|------|------|
+| 0 | 支付步骤按钮化 + 订单状态文案单一事实来源（`frontend/src/config/orderStatus.js`）+ 订阅文档同步 + 验收脚本 | ✅ 已完成 |
+| A | 安全收口：二维码接口收权、响应体去 token、Cookie `secure` 配置化、降权递增 `tokenVersion`、`User` 敏感 getter 加 `@JsonIgnore` | ⬜ 待办 |
+| B | 资金链路幂等与扣费顺序：`markPaid` 行锁、`grantPoints` 行锁、下单幂等键、AI/TTS 先扣后调 + 失败退费、签到冲突 `REQUIRES_NEW`、流水唯一约束 | ⬜ 待办 |
+| C | 异常与校验规范化：删宽 catch、Map 入参换 DTO + `@Valid`、分页上限统一、归属校验收口 Service | ⬜ 待办 |
+| D | 性能与静默异常：去 N+1、合并钱包页查询、消除 `catch { return null; }`、前端空 catch 补日志 | ⬜ 待办 |
+| E | 可观测与去重：Actuator + `/health` 探 DB/MQ、初始密码不落日志、限流器换 Caffeine、抽订单映射器、套餐名动态生成 | ⬜ 待办 |
+| F | 前端一致性：清除原生弹窗、空/加载/错误态统一、大 chunk 代码分割、无障碍、暗色主题覆盖 | ⬜ 待办 |
+| G | 文档与技能：`doc/` 与 `frontend/src/docs/` 全量对齐、运维坑写回技能 | ⬜ 待办 |
+
+## 四、验收基线（每轮必须全绿）
+
+| 命令 | 基线 |
+|------|------|
+| `cd frontend && npx vite build` | exit 0 |
+| `node scripts/check-payment-flow.mjs <JWT>` | 18/18 |
+| `node scripts/check-admin-shell.mjs <JWT>` | 18/18 |
+| `node scripts/check-admin-dark-theme.mjs <JWT>` | 14 页无问题 |
+| `node scripts/e2e-admin-export.mjs <JWT>` | 26/26 |
+| `node scripts/check-admin-last-admin.mjs <JWT>` | 14/14 |
+| `cd backend && mvn -B -ntp test` | 163 项（批次 B/C 起会增长） |
+
+> 环境：`CHROME_PATH='C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe'`；ADMIN JWT 见技能 `qqai-verify`。

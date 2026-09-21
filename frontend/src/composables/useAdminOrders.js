@@ -1,19 +1,12 @@
 import { ref, reactive, computed } from 'vue';
 import { adminOrdersApi } from '../services/api';
+import { ORDER_STATUS_OPTIONS, orderStatusText as orderStatusLabel } from '../config/orderStatus';
 
 // 订单管理 Tab：筛选 + 分页 + 补单 + 取消/退款 + 详情抽屉 + 导出
-// 后端 OrderStatus: PENDING, PAID, PENDING_REFUND, DISPUTED, REFUNDED, CANCELLED, EXPIRED
+// 后端 OrderStatus 枚举与文案统一由 config/orderStatus.js 提供（与用户端、文档同源）
 // 后端 SubscriptionTier: FREE, LITE, PRO, PROPLUS, ULTRA, MEGA, SMALL_MONTH_CARD, LARGE_MONTH_CARD
 // manualCreate planCode 接受: LITE / PRO / PROPLUS / ULTRA / MEGA / SMALL_MONTH_CARD / LARGE_MONTH_CARD
-export const ORDER_STATUS_OPTIONS = [
-  { value: 'PENDING', label: '待支付' },
-  { value: 'PAID', label: '已支付' },
-  { value: 'PENDING_REFUND', label: '退款审批中' },
-  { value: 'DISPUTED', label: '纠纷中' },
-  { value: 'REFUNDED', label: '已退款' },
-  { value: 'CANCELLED', label: '已取消' },
-  { value: 'EXPIRED', label: '已过期' },
-];
+export { ORDER_STATUS_OPTIONS };
 
 export const ORDER_PLAN_OPTIONS = [
   { value: 'LITE', label: '直购积分·600' },
@@ -26,8 +19,7 @@ export const ORDER_PLAN_OPTIONS = [
 ];
 
 export function orderStatusText(s) {
-  const found = ORDER_STATUS_OPTIONS.find((o) => o.value === s);
-  return found ? found.label : (s || '-');
+  return orderStatusLabel(s);
 }
 
 export function planTierText(t) {
