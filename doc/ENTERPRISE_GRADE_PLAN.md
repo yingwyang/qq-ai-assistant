@@ -53,7 +53,7 @@
 | C | 异常与校验规范化：删宽 catch、Map 入参换 DTO + `@Valid`、分页上限统一、归属校验收口 Service | ✅ 已完成（C.1/C.2/C.3/C.4，见下） |
 | D | 性能与静默异常：去 N+1、合并钱包页查询、消除 `catch { return null; }`、前端空 catch 补日志 | ✅ 已完成（见下） |
 | E | 可观测与去重：Actuator + `/health` 探 DB/MQ、初始密码不落日志、限流器换 Caffeine、抽订单映射器、套餐名动态生成 | ✅ 已完成（见下） |
-| F | 前端一致性：清除原生弹窗、空/加载/错误态统一、大 chunk 代码分割、无障碍、暗色主题覆盖 | ⬜ 待办 |
+| F | 前端一致性：清除原生弹窗、空/加载/错误态统一、大 chunk 代码分割、无障碍、暗色主题覆盖 | 🔄 进行中（F.1 原生弹窗清零、F.3 代码分割已完成；F.2 状态统一、F.4 无障碍、`txToMap` 收尾待办） |
 | G | 文档与技能：`doc/` 与 `frontend/src/docs/` 全量对齐、运维坑写回技能 | ⬜ 待办 |
 
 ### 批次 A 交付明细（安全收口）
@@ -125,6 +125,16 @@
 **踩坑记录（已固化为守卫测试）**：`application.yml` 后半段有一个 `---` 分隔的 **dev profile 文档**，写在分隔符之后的配置只在 `--spring.profiles.active=dev` 时生效。本次把 `management:` 段误写在分隔符之后，默认 profile 下 `/actuator` 只暴露了 health 且没有依赖详情（启动日志显示 "Exposing 1 endpoint(s)"），排查花了几轮。修法：把 `management:` 移到第一个文档，并新增 `ApplicationYamlStructureTest` 断言「management 段与安全相关配置必须位于第一个 YAML 文档」。
 
 **E 批次最终验收**：`mvn -B -ntp test` **207/207**；实测 `/actuator/health` 匿名 401、普通用户 403、ADMIN 返回 `db`(MySQL) + `rabbit`(4.2.4) + `diskSpace` + 探针状态；`/actuator/metrics` 200。
+
+### 批次 F 交付明细（前端一致性，进行中）
+
+| 项 | 改动 | 证据 |
+|----|------|------|
+| F.1 | 原生弹窗清零：`ChatInterface` 删除消息的两步确认改 `ConfirmDialog`（第一步"下一步"、第二步"同时删除媒体 / 仅删除消息"）；`UserCenter` 解绑 QQ 改 `ConfirmDialog`（带确认按钮文案）；`SubscriptionDashboard` 复制回退去掉 `window.prompt`，改为提示手动记录 | 新增守卫脚本 `scripts/check-no-native-dialogs.mjs`（去注释后扫描，`window.confirm/alert/prompt` 计数为 0，失败即退出 1） |
+| F.3 | 代码分割：① `main.js` 不再全局注册 `<v-chart>`（原先 `import { VChart } from './config/echarts'` 把整个 echarts 打进入口），改由 `UserCenter`/`CreditsDashboard` 局部注册；② 路由**全量懒加载**（`LoginPage`/`HomeView`/`UserCenter` 之前是静态 import）；③ `vite.config.js` 用 rolldown 支持的**函数式** `manualChunks` 显式拆出 `echarts`(含 zrender/vue-demi) 与 `markdown`，警告上限调整到 700KB 并注明理由 | 入口包 **1141KB → 51KB**；产物：`echarts` 655KB、`DocView` 297KB、`HomeView` 192KB、`markdown` 126KB、`UserCenter` 99KB、`AdminView` 94KB |
+| F.3 验证 | 新增 `scripts/check-dashboard-charts.mjs`：预检两个 dashboard 接口 200，再断言三个图表页各自渲染出 canvas（用户中心 4、管理后台概览 3、资金流水 3），并过滤"后端瞬时不可用"噪音 | 6/6 通过（此脚本的价值：懒加载 echarts 后"页面白屏但没人发现"的风险被自动化兜住） |
+
+> 说明：`txToMap` 仍在 AdminCreditsController / AdminOrdersController / CreditsController 各一份，F.2 一并收尾。
 
 ## 四、验收基线（每轮必须全绿）
 

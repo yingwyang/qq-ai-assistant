@@ -598,11 +598,14 @@ import { useMediaManager } from '../composables/useMediaManager';
 import { useUserDashboardData } from '../composables/useUserDashboardData';
 import { useUserCreditsStore } from '../composables/useUserCreditsStore';
 import { useImagePreview } from '../composables/useImagePreview';
+import { showConfirm } from '../components/ConfirmDialog.vue';
+// 图表组件改为局部注册（入口不再全局注册 VChart），echarts 只随本页分包加载
+import { VChart } from '../config/echarts';
 import logger from '../utils/logger';
 
 export default {
   name: 'UserCenter',
-  components: { Icon, CreditsDashboard, SubscriptionDashboard },
+  components: { Icon, CreditsDashboard, SubscriptionDashboard, VChart },
   setup() {
     const router = useRouter();
     const route = useRoute();
@@ -923,7 +926,14 @@ export default {
     };
 
     const handleUnbind = async (binding) => {
-      if (!window.confirm(`确定解绑QQ ${binding.qqNumber} 吗？`)) return;
+      // 统一走项目内的确认弹窗（不再使用原生 window.confirm，交互与视觉与其他破坏性操作一致）
+      const ok = await showConfirm({
+        title: '解绑 QQ',
+        message: `确定解绑 QQ ${binding.qqNumber} 吗？解绑后该账号下的聊天记录将不再展示，可重新绑定恢复。`,
+        type: 'warning',
+        confirmText: '确认解绑',
+      });
+      if (!ok) return;
       try {
         await userApi.unbindQq(binding.id);
         showSystemMsg('解绑成功');

@@ -462,6 +462,7 @@ import Icon from './Icon.vue';
 import { messageApi } from '../services/api';
 import MessageContent from './MessageContent.vue';
 import { showToast } from './Toast.vue';
+import { showConfirm } from './ConfirmDialog.vue';
 import { useMessageWebSocket } from '../composables/useMessageWebSocket';
 import { extractForwardXmlTitles, extractForwardMessages, extractImageUrl } from '../utils/messageParser';
 import { formatMessageTime } from '../utils/formatTime';
@@ -1550,17 +1551,27 @@ export default {
           || (m.content && String(m.content).startsWith('/images/'));
       });
 
-      let confirmText = `确定要删除选中的 ${selectedMessages.value.length} 条消息吗？`;
-      if (hasMedia) {
-        confirmText += '\n（点击"确认"仅软删除消息；点击"确认+删除媒体"同时删除图片/视频/语音文件）';
-      }
-      const confirmed = window.confirm(confirmText);
-      if (!confirmed) return;
+      // 两步确认改为项目内统一弹窗（不再使用原生 window.confirm）
+      const first = await showConfirm({
+        title: '删除消息',
+        message: hasMedia
+          ? `确定要删除选中的 ${selectedMessages.value.length} 条消息吗？删除后无法恢复。`
+          : `确定要删除选中的 ${selectedMessages.value.length} 条消息吗？`,
+        type: 'warning',
+        confirmText: '下一步',
+      });
+      if (!first) return;
 
       // 只有当包含媒体时，再询问是否删除媒体文件（两步确认）
       let deleteMedia = false;
       if (hasMedia) {
-        deleteMedia = window.confirm('是否同时删除关联的图片/视频/语音文件？\n（点击"确认"同步删除磁盘文件；"取消"仅软删除消息记录）');
+        deleteMedia = await showConfirm({
+          title: '同时删除媒体文件？',
+          message: '选中的消息里包含图片/视频/语音。\n确认：同时删除磁盘上的媒体文件（不可恢复）；\n取消：仅软删除消息记录，媒体文件保留。',
+          type: 'warning',
+          confirmText: '同时删除媒体',
+          cancelText: '仅删除消息',
+        });
       }
 
       try {

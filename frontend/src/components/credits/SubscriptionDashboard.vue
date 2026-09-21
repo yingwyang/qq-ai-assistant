@@ -974,8 +974,9 @@ export default {
         document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta);
         showToast(successMsg || '已复制', 'success');
       } catch (e) {
-        const val = window.prompt('请手动复制：', text);
-        if (val != null) showToast(successMsg || '已复制', 'success');
+        // 两条复制途径都不可用（非 HTTPS + execCommand 被禁用，极少见）：
+        // 提示用户手动记录，不再使用原生 window.prompt（已按企业级约定清除原生弹窗）
+        showToast(`复制失败，请手动记录：${text}`, 'error');
       }
     }
 

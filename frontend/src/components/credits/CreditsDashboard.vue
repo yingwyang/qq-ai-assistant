@@ -252,10 +252,12 @@
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue';
 import Icon from '../Icon.vue';
 import { TX_TYPE_OPTIONS, useCreditsDashboard } from '../../composables/useCreditsDashboard';
+// 图表组件局部注册（入口不再全局注册 VChart），echarts 只随需要图表的页面加载
+import { VChart } from '../../config/echarts';
 
 export default {
   name: 'CreditsDashboard',
-  components: { Icon },
+  components: { Icon, VChart },
   emits: ['openUpgrade', 'switchTab'],
   props: {
     autoFocusSignIn: { type: Boolean, default: false },

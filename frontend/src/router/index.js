@@ -1,25 +1,26 @@
 import { createRouter, createWebHistory } from 'vue-router';
-import LoginPage from '../views/LoginPage.vue';
-import HomeView from '../views/HomeView.vue';
-import UserCenter from '../views/UserCenter.vue';
 
+// 所有顶层路由一律按需加载（懒加载）：
+// 之前 LoginPage/HomeView/UserCenter 是静态 import，导致它们依赖的重型库（echarts ~1MB、
+// AstrBotChat、CreditsDashboard 等）全部被打进入口包，首屏白屏时间偏长。
+// 现在入口只保留 vue/vue-router/App 外壳，各页面按访问路径分包加载。
 const routes = [
   {
     path: '/login',
     name: 'Login',
-    component: LoginPage,
+    component: () => import('../views/LoginPage.vue'),
     meta: { public: true }
   },
   {
     path: '/',
     name: 'Home',
-    component: HomeView,
+    component: () => import('../views/HomeView.vue'),
     meta: { requiresAuth: true }
   },
   {
     path: '/user-center',
     name: 'UserCenter',
-    component: UserCenter,
+    component: () => import('../views/UserCenter.vue'),
     meta: { requiresAuth: true }
   },
   {
