@@ -38,6 +38,19 @@ class ErrorLeakGuardTest {
     private static final Pattern RAW_PAGE_REQUEST =
             Pattern.compile("PageRequest\\.of\\(\\s*page\\s*,\\s*size\\s*\\)");
 
+    /** 静默吞异常：catch 体里直接 return null/false/0 或完全空，没有任何日志/注释/上抛 */
+    private static final Pattern SILENT_CATCH = Pattern.compile(
+            "catch\\s*\\([^)]*\\)\\s*\\{\\s*(?:return\\s+(?:null|false|true|0|0L|Collections\\.emptyList\\(\\));)?\\s*\\}");
+
+    private List<Path> sourcesIn(String packageDir) throws IOException {
+        Path dir = Paths.get("src", "main", "java", "com", "qqai", packageDir);
+        assertTrue(Files.isDirectory(dir),
+                "找不到源码目录：" + dir.toAbsolutePath() + "（测试工作目录应为 backend/）");
+        try (Stream<Path> stream = Files.list(dir)) {
+            return stream.filter(p -> p.toString().endsWith(".java")).toList();
+        }
+    }
+
     private List<Path> controllerSources() throws IOException {
         assertTrue(Files.isDirectory(CONTROLLER_DIR),
                 "找不到控制器源码目录：" + CONTROLLER_DIR.toAbsolutePath() + "（测试工作目录应为 backend/）");
@@ -74,6 +87,23 @@ class ErrorLeakGuardTest {
         assertTrue(offenders.isEmpty(),
                 "以下控制器仍把用户传入的 size 直接交给 PageRequest，应改用 common/PageLimits.of(page, size)："
                         + offenders);
+    }
+
+    @Test
+    @DisplayName("控制器/服务不得静默吞异常（catch 体必须记日志或有注释说明）")
+    void noSilentCatchInControllerAndService() throws IOException {
+        List<String> offenders = new ArrayList<>();
+        for (String pkg : new String[]{"controller", "service"}) {
+            for (Path file : sourcesIn(pkg)) {
+                String src = Files.readString(file);
+                if (SILENT_CATCH.matcher(src).find()) {
+                    offenders.add(pkg + "/" + file.getFileName());
+                }
+            }
+        }
+        assertTrue(offenders.isEmpty(),
+                "以下文件存在静默吞异常（catch 体里直接 return，没有任何日志/注释），"
+                        + "请至少 log.warn/debug 带上上下文： " + offenders);
     }
 
     @Test

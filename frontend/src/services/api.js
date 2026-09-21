@@ -14,7 +14,10 @@ function handleUnauthorized() {
   fetch('/api/auth/logout', {
     method: 'POST',
     keepalive: true,
-  }).catch(() => {});
+  }).catch((e) => {
+    // 登出通知失败不影响本地清理流程，但要留痕（原先静默吞掉）
+    console.warn('[api] 通知后端登出失败（本地登录态已清理）:', e);
+  });
 
   // 只清理 localStorage 中的非敏感缓存（auth_token 已不再使用 HttpOnly Cookie 方案）
   localStorage.removeItem('user_role');
@@ -162,7 +165,10 @@ async function downloadWithAuth(endpoint, fallbackName = 'download.json') {
       const text = await response.text();
       const parsed = text ? JSON.parse(text) : null;
       msg = parsed?.error || parsed?.message || msg;
-    } catch {}
+    } catch (e) {
+      // 错误体不是 JSON（网关 HTML 等）时保留原始 HTTP 文案，仅记调试日志
+      console.debug('[api] 解析错误响应体失败，使用默认文案:', e);
+    }
     throw new Error(msg);
   }
   const blob = await response.blob();

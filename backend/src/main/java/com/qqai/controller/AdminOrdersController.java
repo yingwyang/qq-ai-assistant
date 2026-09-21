@@ -457,7 +457,11 @@ public class AdminOrdersController {
         try {
             if (s.length() <= 10) return LocalDate.parse(s, DateTimeFormatter.ISO_LOCAL_DATE).atStartOfDay();
             return LocalDateTime.parse(s, DateTimeFormatter.ISO_LOCAL_DATE_TIME);
-        } catch (Exception e) { return null; }
+        } catch (Exception e) {
+            // 解析失败按"无起始时间"处理，但要留下线索（原先静默吞掉，排查时无从下手）
+            log.warn("订单查询起始时间解析失败，按不限制处理: value={}", s);
+            return null;
+        }
     }
 
     private LocalDateTime parseEnd(String s) {
@@ -465,6 +469,9 @@ public class AdminOrdersController {
         try {
             if (s.length() <= 10) return LocalDate.parse(s, DateTimeFormatter.ISO_LOCAL_DATE).atTime(LocalTime.MAX);
             return LocalDateTime.parse(s, DateTimeFormatter.ISO_LOCAL_DATE_TIME);
-        } catch (Exception e) { return null; }
+        } catch (Exception e) {
+            log.warn("订单查询结束时间解析失败，按不限制处理: value={}", s);
+            return null;
+        }
     }
 }

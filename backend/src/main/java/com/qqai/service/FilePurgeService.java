@@ -218,6 +218,8 @@ public class FilePurgeService {
             return relative.equals("avatars") || relative.startsWith("avatars/")
                     || relative.equals("images/avatars") || relative.startsWith("images/avatars/");
         } catch (Exception e) {
+            // 相对路径计算失败时按"不是头像路径"处理（交给清理逻辑判断），但要留痕
+            log.warn("判断头像路径失败，按非头像路径处理: path={}, err={}", p, e.toString());
             return false;
         }
     }

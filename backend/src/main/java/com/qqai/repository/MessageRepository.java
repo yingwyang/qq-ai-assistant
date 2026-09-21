@@ -115,6 +115,14 @@ public interface MessageRepository extends JpaRepository<Message, Long>, JpaSpec
     Long countActiveMessagesByGroupId(@Param("groupId") String groupId);
 
     /**
+     * 一次聚合取「多群的有效消息数」（不按 QQ 过滤），返回若干行 {groupId, count}。
+     * 用于替代管理端仪表盘对 Top-N 群逐个 COUNT 的 N+1。过滤条件与单群版本一致。
+     */
+    @Query("SELECT m.groupId, COUNT(m) FROM Message m WHERE m.groupId IN :groupIds "
+            + "AND m.archived = false AND m.deleted = false GROUP BY m.groupId")
+    List<Object[]> countActiveMessagesByGroupIdsOnly(@Param("groupIds") List<String> groupIds);
+
+    /**
      * 分页查询消息（未归档&未被用户删除）
      */
     @Query("SELECT m FROM Message m WHERE m.groupId = :groupId AND m.archived = false AND m.deleted = false ORDER BY m.serverRecvMs DESC, m.id DESC")
@@ -172,6 +180,17 @@ public interface MessageRepository extends JpaRepository<Message, Long>, JpaSpec
      */
     @Query("SELECT COUNT(m) FROM Message m WHERE m.groupId = :groupId AND m.selfQq IN :selfQqList AND m.archived = false AND m.deleted = false")
     Long countActiveMessagesByGroupIdAndSelfQqIn(@Param("groupId") String groupId, @Param("selfQqList") List<String> selfQqList);
+
+    /**
+     * 一次聚合取「多群的有效消息数」，返回若干行 {groupId, count}。
+     * 用于替代逐群调用 countActiveMessagesByGroupIdAndSelfQqIn 造成的 N+1
+     * （用户群多时，仪表盘原本要按 群数 × 2 次查库）。过滤条件与单群版本完全一致。
+     */
+    @Query("SELECT m.groupId, COUNT(m) FROM Message m WHERE m.groupId IN :groupIds "
+            + "AND m.selfQq IN :selfQqList AND m.archived = false AND m.deleted = false "
+            + "GROUP BY m.groupId")
+    List<Object[]> countActiveMessagesByGroupIds(@Param("groupIds") List<String> groupIds,
+                                                 @Param("selfQqList") List<String> selfQqList);
 
     /**
      * 根据消息ID判断消息是否存在

@@ -507,13 +507,20 @@ public class AdminCreditsController {
     private CreditTransactionType parseTxType(String type) {
         if (type == null || type.isBlank()) return null;
         try { return CreditTransactionType.valueOf(type); }
-        catch (Exception ignore) { return null; }
+        catch (Exception ignore) {
+            // 非法类型按"不过滤"处理会放大结果集，必须留下告警（前端若拼错枚举值这里能立刻看到）
+            log.warn("流水类型非法，已按不限制处理: type={}", type);
+            return null;
+        }
     }
 
     private CreditDirection parseDirection(String direction) {
         if (direction == null || direction.isBlank()) return null;
         try { return CreditDirection.valueOf(direction); }
-        catch (Exception ignore) { return null; }
+        catch (Exception ignore) {
+            log.warn("流水方向非法，已按不限制处理: direction={}", direction);
+            return null;
+        }
     }
 
     private LocalDateTime parseStart(String s) {
@@ -521,7 +528,10 @@ public class AdminCreditsController {
         try {
             if (s.length() <= 10) return LocalDate.parse(s, DateTimeFormatter.ISO_LOCAL_DATE).atStartOfDay();
             return LocalDateTime.parse(s, DateTimeFormatter.ISO_LOCAL_DATE_TIME);
-        } catch (Exception e) { return null; }
+        } catch (Exception e) {
+            log.warn("流水查询起始时间解析失败，按不限制处理: value={}", s);
+            return null;
+        }
     }
 
     private LocalDateTime parseEnd(String s) {
@@ -529,6 +539,9 @@ public class AdminCreditsController {
         try {
             if (s.length() <= 10) return LocalDate.parse(s, DateTimeFormatter.ISO_LOCAL_DATE).atTime(LocalTime.MAX);
             return LocalDateTime.parse(s, DateTimeFormatter.ISO_LOCAL_DATE_TIME);
-        } catch (Exception e) { return null; }
+        } catch (Exception e) {
+            log.warn("流水查询结束时间解析失败，按不限制处理: value={}", s);
+            return null;
+        }
     }
 }

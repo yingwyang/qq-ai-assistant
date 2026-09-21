@@ -192,48 +192,55 @@ public class UserDashboardService {
         return trend;
     }
 
+    /**
+     * 群聊消息排行（Top 5）。
+     *
+     * 性能：原先对每个群各做一次「统计消息数」+ 一次「查群名」，群多时是 2×群数 次 SQL（N+1）。
+     * 现在改为两次批量查询：一次 GROUP BY 聚合出各群消息数，一次 IN 批量取群名，再在内存里合并排序。
+     * 失败时记录 WARN 并返回空排行（不再静默吞异常，便于排查）。
+     */
     public List<Map<String, Object>> getGroupRanking() {
         List<Map<String, Object>> ranking = new ArrayList<>();
 
+        List<String> selfQqList = securityHelper.getCurrentUserQqBindings();
+        if (selfQqList == null || selfQqList.isEmpty()) {
+            return ranking;
+        }
+
+        List<String> groupIds = messageRepository.safeFindGroupIdsBySelfQqIn(selfQqList);
+        if (groupIds == null || groupIds.isEmpty()) {
+            return ranking;
+        }
+
         try {
-            List<String> selfQqList = securityHelper.getCurrentUserQqBindings();
-            if (selfQqList == null || selfQqList.isEmpty()) {
-                return ranking;
+            // 1) 一次聚合：各群有效消息数
+            Map<String, Long> countByGroup = new HashMap<>();
+            List<Object[]> rows = messageRepository.countActiveMessagesByGroupIds(groupIds, selfQqList);
+            if (rows != null) {
+                for (Object[] row : rows) {
+                    if (row == null || row.length < 2 || row[0] == null) continue;
+                    String gid = String.valueOf(row[0]);
+                    long cnt = row[1] instanceof Number n ? n.longValue() : 0L;
+                    countByGroup.put(gid, cnt);
+                }
             }
 
-            List<String> groupIds;
-            try {
-                groupIds = messageRepository.findGroupIdsBySelfQqIn(selfQqList);
-            } catch (Exception e) {
-                return ranking;
-            }
-            if (groupIds == null || groupIds.isEmpty()) {
-                return ranking;
+            // 2) 一次批量：群名（同一群号可能多行，取第一条有名字的）
+            Map<String, String> nameByGroup = new HashMap<>();
+            List<Group> groups = groupRepository.findByGroupIdIn(groupIds);
+            if (groups != null) {
+                for (Group g : groups) {
+                    if (g == null || g.getGroupId() == null || g.getGroupName() == null) continue;
+                    nameByGroup.putIfAbsent(g.getGroupId(), g.getGroupName());
+                }
             }
 
+            // 3) 内存合并
             for (String groupId : groupIds) {
-                Long count = 0L;
-                try {
-                    Long c = messageRepository.countActiveMessagesByGroupIdAndSelfQqIn(groupId, selfQqList);
-                    count = c != null ? c : 0L;
-                } catch (Exception e) {
-                    count = 0L;
-                }
-
-                String groupName = "群聊 " + groupId;
-                try {
-                    List<Group> groups = groupRepository.findByGroupId(groupId);
-                    if (groups != null && !groups.isEmpty() && groups.get(0).getGroupName() != null) {
-                        groupName = groups.get(0).getGroupName();
-                    }
-                } catch (Exception e) {
-                    groupName = "群聊 " + groupId;
-                }
-
                 Map<String, Object> groupData = new HashMap<>();
                 groupData.put("groupId", groupId);
-                groupData.put("groupName", groupName);
-                groupData.put("messageCount", count);
+                groupData.put("groupName", nameByGroup.getOrDefault(groupId, "群聊 " + groupId));
+                groupData.put("messageCount", countByGroup.getOrDefault(groupId, 0L));
                 ranking.add(groupData);
             }
 
@@ -247,7 +254,8 @@ public class UserDashboardService {
                 return ranking.subList(0, 5);
             }
         } catch (Exception e) {
-            return ranking;
+            log.warn("群聊排行聚合失败（userQq={} 群数={}）：{}", selfQqList, groupIds.size(), e.toString());
+            return new ArrayList<>();
         }
 
         return ranking;

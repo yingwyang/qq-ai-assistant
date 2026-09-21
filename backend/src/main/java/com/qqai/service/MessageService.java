@@ -323,14 +323,19 @@ public class MessageService {
             return allGroups;
         }
 
-        // 1. 找到用户所有绑定 QQ 号下的群聊
-        List<Group> groups = new ArrayList<>();
-        for (String qq : ownerQqList) {
-            List<Group> qqGroups = groupRepository.findByOwnerQqAndActiveTrue(qq);
-            if (qqGroups != null) {
-                groups.addAll(qqGroups);
+        // 1. 找到用户所有绑定 QQ 号下的群聊（一次 IN 批量查询，替代逐 QQ 查询的 N+1）
+        List<Group> groups = groupRepository.findByOwnerQqInAndActiveTrue(ownerQqList);
+        if (groups == null) {
+            groups = new ArrayList<>();
+        }
+        // 同一群号可能因多个绑定 QQ 重复出现，按 groupId 去重
+        Map<String, Group> uniqueGroups = new LinkedHashMap<>();
+        for (Group g : groups) {
+            if (g != null && g.getGroupId() != null) {
+                uniqueGroups.putIfAbsent(g.getGroupId(), g);
             }
         }
+        groups = new ArrayList<>(uniqueGroups.values());
         if (groups.isEmpty()) {
             return allGroups;
         }

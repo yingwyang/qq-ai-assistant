@@ -506,6 +506,8 @@ public class SystemController {
             socket.connect(new java.net.InetSocketAddress(host, port), 2000);
             return true;
         } catch (IOException e) {
+            // 端口未开/连接被拒是"组件未运行"的正常信号，用 debug 级别留痕（不污染 INFO 日志）
+            log.debug("端口探测失败（按未运行处理） {}:{} - {}", host, port, e.toString());
             return false;
         }
     }

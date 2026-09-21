@@ -123,12 +123,14 @@ public class CreditsController {
         LocalDateTime startDt = parseStart(start);
         LocalDateTime endDt = parseEnd(end);
 
-        Pageable pageable = PageRequest.of(page, Math.min(size, 200));
+        Pageable pageable = com.qqai.common.PageLimits.of(page, size);
         Page<CreditTransaction> txPage = creditService.pageTransactions(
                 userId, txType, dir, startDt, endDt, relatedId, pageable);
 
-        long incomeTotal = creditService.sumIncome(userId, txType, dir, startDt, endDt, relatedId);
-        long spendTotal = creditService.sumSpend(userId, txType, dir, startDt, endDt, relatedId);
+        // 收入/支出合计合并为一条聚合 SQL（原先两次同条件扫描）
+        long[] totals = creditService.sumIncomeAndSpend(userId, txType, dir, startDt, endDt, relatedId);
+        long incomeTotal = totals[0];
+        long spendTotal = totals[1];
 
         List<Map<String, Object>> content = new ArrayList<>();
         for (CreditTransaction tx : txPage.getContent()) {
@@ -191,6 +193,7 @@ public class CreditsController {
             if (s.length() <= 10) return LocalDate.parse(s, DateTimeFormatter.ISO_LOCAL_DATE).atStartOfDay();
             return LocalDateTime.parse(s, DateTimeFormatter.ISO_LOCAL_DATE_TIME);
         } catch (Exception e) {
+            log.warn("积分流水起始时间解析失败，按不限制处理: value={}", s);
             return null;
         }
     }
@@ -201,6 +204,7 @@ public class CreditsController {
             if (s.length() <= 10) return LocalDate.parse(s, DateTimeFormatter.ISO_LOCAL_DATE).atTime(LocalTime.MAX);
             return LocalDateTime.parse(s, DateTimeFormatter.ISO_LOCAL_DATE_TIME);
         } catch (Exception e) {
+            log.warn("积分流水结束时间解析失败，按不限制处理: value={}", s);
             return null;
         }
     }

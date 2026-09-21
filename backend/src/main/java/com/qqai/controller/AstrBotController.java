@@ -881,7 +881,9 @@ public class AstrBotController {
                                     }
                                 }
                             }
-                        } catch (Exception ignored) {
+                        } catch (Exception e) {
+                            // 单行 SSE 数据解析失败不影响其余分片，跳过该行但要留调试线索
+                            log.debug("SSE 数据行解析失败，已跳过: {}", e.toString());
                         }
                     }
                 }

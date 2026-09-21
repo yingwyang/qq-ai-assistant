@@ -255,6 +255,22 @@ class MoneyPathConcurrencyTest {
     }
 
     @Test
+    @DisplayName("钱包页收入/支出合计：合并查询与原有两条聚合口径完全一致")
+    void combinedIncomeSpendSumMatchesLegacyQueries() {
+        creditService.grantPoints(userId, 100, CreditTransactionType.ADMIN_GRANT, "测试发放", null, null);
+        creditService.spendPoints(userId, 30, CreditTransactionType.AI_CHAT, "测试消耗", "conv-sum-test");
+
+        long[] combined = creditService.sumIncomeAndSpend(userId, null, null, null, null, null);
+        long legacyIncome = creditService.sumIncome(userId, null, null, null, null, null);
+        long legacySpend = creditService.sumSpend(userId, null, null, null, null, null);
+
+        assertEquals(legacyIncome, combined[0], "合并后的收入合计必须与旧查询一致");
+        assertEquals(legacySpend, combined[1], "合并后的支出合计必须与旧查询一致");
+        assertTrue(combined[0] >= 100, "收入合计应包含本次发放");
+        assertTrue(combined[1] >= 30, "支出合计应包含本次消耗");
+    }
+
+    @Test
     @DisplayName("取消订单与确认收款互斥：先取消则确认失败")
     void cancelThenMarkPaidIsRejected() {
         SubscriptionOrder order = subscriptionService.createOrder(userId, SubscriptionTier.PRO, null, null);

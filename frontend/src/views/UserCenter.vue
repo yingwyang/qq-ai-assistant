@@ -1053,7 +1053,10 @@ export default {
           localStorage.setItem('user_info', JSON.stringify(newInfo));
           userInfo.value = newInfo;
         }
-      }).catch(() => {});
+      }).catch((e) => {
+        // 拉取最新用户信息失败时继续用缓存展示，但要留日志（原先静默吞掉）
+        console.warn('[user-center] 刷新用户信息失败:', e);
+      });
     });
 
     onUnmounted(() => {

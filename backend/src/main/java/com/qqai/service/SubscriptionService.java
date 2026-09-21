@@ -704,15 +704,23 @@ public class SubscriptionService {
 
     public List<OrderStatus> parseStatuses(String statusCsv) {
         if (statusCsv == null || statusCsv.isBlank()) return null;
-        return Arrays.stream(statusCsv.split(","))
+        List<OrderStatus> parsed = Arrays.stream(statusCsv.split(","))
                 .map(String::trim)
                 .filter(s -> !s.isEmpty())
                 .map(s -> {
-                    try { return OrderStatus.valueOf(s); }
-                    catch (Exception ignore) { return null; }
+                    try {
+                        return OrderStatus.valueOf(s);
+                    } catch (Exception ignore) {
+                        // 原先静默丢弃：非法状态会让过滤条件悄悄消失（管理员以为筛了，其实看的是全量）
+                        log.warn("订单状态过滤值非法，已忽略该值: value={}", s);
+                        return null;
+                    }
                 })
                 .filter(java.util.Objects::nonNull)
-                .collect(Collectors.toList());
+                .distinct()
+                .toList();
+        // 全部非法时返回 null（不过滤），但上面的 WARN 已留下线索
+        return parsed.isEmpty() ? null : parsed;
     }
 
     public SubscriptionTier planCodeToTier(String planCode) {

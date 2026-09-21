@@ -180,6 +180,8 @@ public class MessageController {
         try {
             return messageService.getGroupTypeByGroupId(groupId);
         } catch (Exception e) {
+            // 群类型取不到时按"未知类型"继续渲染提示词，但记录原因（原先静默返回 null）
+            log.warn("读取群类型失败，按未知类型处理: groupId={}, err={}", groupId, e.toString());
             return null;
         }
     }
@@ -434,6 +436,7 @@ public class MessageController {
         try {
             return (int) Double.parseDouble(s);
         } catch (Exception e) {
+            log.warn("请求参数不是合法数字，按未传处理: key={}, value={}", key, s);
             return null;
         }
     }
@@ -632,7 +635,9 @@ public class MessageController {
             if (probed != null) {
                 contentType = probed;
             }
-        } catch (IOException ignored) {
+        } catch (IOException e) {
+            // 探测不出 MIME 时回退 application/octet-stream（浏览器仍能下载），记调试日志
+            log.debug("探测文件 MIME 失败，回退 octet-stream: file={}, err={}", file.getName(), e.toString());
         }
 
         String safeFilename = file.getName().replaceAll("[\\r\\n\"]", "_");
@@ -1032,6 +1037,7 @@ public class MessageController {
             String trimmed = value.trim();
             return java.time.LocalDate.parse(trimmed.length() > 10 ? trimmed.substring(0, 10) : trimmed);
         } catch (Exception e) {
+            log.warn("日期参数解析失败，按未传处理: value={}", value);
             return null;
         }
     }

@@ -645,7 +645,10 @@ export default {
             const a = userInfo.value.avatar;
             userAvatarUrl.value = a.startsWith('http') ? a : `http://localhost:8081${a.startsWith('/') ? a : '/' + a}`;
           }
-        } catch (e) {}
+        } catch (e) {
+          // 头像只是展示增强，失败不阻塞订阅页；但留下日志便于排查（原先静默吞掉）
+          logger.warn('解析用户头像地址失败:', e);
+        }
       }
       authApi.getCurrentUser().then(data => {
         if (data) {
@@ -655,7 +658,10 @@ export default {
             userAvatarUrl.value = a.startsWith('http') ? a : `http://localhost:8081${a.startsWith('/') ? a : '/' + a}`;
           }
         }
-      }).catch(() => {});
+      }).catch((e) => {
+        // 当前用户信息刷新失败不影响已缓存展示，留日志便于排查登录态问题
+        logger.warn('刷新当前用户信息失败:', e);
+      });
       // 套餐列表先加载，再加载余额（便于 features 查找）
       subscriptionApi.getPlans().then(data => {
         applyDiscounts(data);
@@ -945,7 +951,10 @@ export default {
             relatedTransactions.value = d.relatedTransactions.map(normalizeRelatedTx);
           }
         }
-      } catch (e) {}
+      } catch (e) {
+        // 详情接口失败时抽屉仍展示列表里的基础信息；记录原因便于排查（原先静默吞掉）
+        logger.warn('加载订单详情失败:', e);
+      }
     }
 
     async function copyText(text, successMsg) {
@@ -955,7 +964,10 @@ export default {
           showToast(successMsg || '已复制', 'success');
           return;
         }
-      } catch (e) {}
+      } catch (e) {
+        // clipboard API 不可用（非 HTTPS / 权限不足）时回退到 execCommand，这里只记调试日志
+        logger.debug('clipboard API 复制失败，回退 execCommand:', e);
+      }
       try {
         const ta = document.createElement('textarea');
         ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';

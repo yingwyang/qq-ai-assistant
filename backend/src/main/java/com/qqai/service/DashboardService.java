@@ -229,12 +229,32 @@ public class DashboardService {
             recentGroups = messageRepository.findRecentGroups();
         }
 
+        // 非区间口径需要逐群补算消息数：原先在循环里逐个 COUNT（Top-N = N 次 SQL），
+        // 这里改成一次 GROUP BY 聚合，再在内存里取。
+        Map<String, Long> batchCounts = new HashMap<>();
+        if (!ranged && !recentGroups.isEmpty()) {
+            List<String> rankingGroupIds = new ArrayList<>();
+            for (Object[] row : recentGroups) {
+                if (row[0] != null) rankingGroupIds.add(row[0].toString());
+            }
+            if (!rankingGroupIds.isEmpty()) {
+                List<Object[]> countRows = messageRepository.countActiveMessagesByGroupIdsOnly(rankingGroupIds);
+                if (countRows != null) {
+                    for (Object[] cr : countRows) {
+                        if (cr == null || cr.length < 2 || cr[0] == null) continue;
+                        batchCounts.put(String.valueOf(cr[0]),
+                                cr[1] instanceof Number n ? n.longValue() : 0L);
+                    }
+                }
+            }
+        }
+
         for (Object[] row : recentGroups) {
             String groupId = row[0] != null ? row[0].toString() : "";
             String groupName = row[1] != null ? row[1].toString() : null;
             long count = ranged
                     ? (row[2] != null ? ((Number) row[2]).longValue() : 0L)
-                    : safeCount(messageRepository.countActiveMessagesByGroupId(groupId));
+                    : batchCounts.getOrDefault(groupId, 0L);
 
             Map<String, Object> groupData = new HashMap<>();
             groupData.put("groupId", groupId);

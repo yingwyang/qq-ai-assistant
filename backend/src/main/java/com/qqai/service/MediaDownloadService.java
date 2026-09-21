@@ -265,6 +265,8 @@ public class MediaDownloadService {
             String uploadsRoot = Paths.get("uploads").toAbsolutePath().normalize().toString().toLowerCase().replace('\\', '/');
             return p.startsWith(uploadsRoot);
         } catch (Exception e) {
+            // 路径归一化失败时按"非受控媒体路径"处理（不自动清理），留痕便于排查
+            log.warn("判断媒体路径失败，按非已知路径处理: path={}, err={}", path, e.toString());
             return false;
         }
     }
@@ -280,7 +282,9 @@ public class MediaDownloadService {
                 Path mp3FileName = Paths.get(mp3Path).getFileName();
                 try {
                     Files.deleteIfExists(localPath);
-                } catch (IOException ignored) {
+                } catch (IOException e) {
+                    // 清理旧转码产物失败不影响本次返回，记调试日志
+                    log.debug("删除旧音频文件失败: file={}, err={}", localPath, e.toString());
                 }
                 return "/images/" + mediaType + "/" + groupId + "/" + dateFolder + "/" + mp3FileName;
             }
@@ -582,6 +586,8 @@ public class MediaDownloadService {
             }
             return isBlockedHost(host);
         } catch (Exception e) {
+            // 安全判定失败按"阻断"处理（fail-closed），这是安全决策，必须留下 WARN
+            log.warn("下载地址安全判定失败，按阻断处理: url={}, err={}", urlStr, e.toString());
             return true;
         }
     }

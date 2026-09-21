@@ -51,7 +51,7 @@
 | A | 安全收口：二维码接口收权、响应体去 token、Cookie `secure` 配置化、降权递增 `tokenVersion`、`User` 敏感 getter 加 `@JsonIgnore` | ✅ 已完成（本轮，见下） |
 | B | 资金链路幂等与扣费顺序：`markPaid` 行锁、`grantPoints` 行锁、下单幂等键、AI/TTS 先扣后调 + 失败退费、签到冲突 `REQUIRES_NEW`、流水唯一约束 | ✅ 已完成（本轮，见下） |
 | C | 异常与校验规范化：删宽 catch、Map 入参换 DTO + `@Valid`、分页上限统一、归属校验收口 Service | ✅ 已完成（C.1/C.2/C.3/C.4，见下） |
-| D | 性能与静默异常：去 N+1、合并钱包页查询、消除 `catch { return null; }`、前端空 catch 补日志 | ⬜ 待办 |
+| D | 性能与静默异常：去 N+1、合并钱包页查询、消除 `catch { return null; }`、前端空 catch 补日志 | ✅ 已完成（见下） |
 | E | 可观测与去重：Actuator + `/health` 探 DB/MQ、初始密码不落日志、限流器换 Caffeine、抽订单映射器、套餐名动态生成 | ⬜ 待办 |
 | F | 前端一致性：清除原生弹窗、空/加载/错误态统一、大 chunk 代码分割、无障碍、暗色主题覆盖 | ⬜ 待办 |
 | G | 文档与技能：`doc/` 与 `frontend/src/docs/` 全量对齐、运维坑写回技能 | ⬜ 待办 |
@@ -97,6 +97,18 @@
 | C.3 | 新增 `common/PageLimits`（`clampSize` 上界 200、`clampPage` 下界 0）并替换 5 处用户可控分页：`AdminController`（用户列表）、`LogController`（审计日志）、`MessageController`（媒体列表）、`AstrBotConversationService.getConversations/getConversationMessages` | 守卫测试规则二 |
 | C.2 | 新增三个管理端 DTO + `@Valid`：`ManualCreateOrderRequest`（补单：`pointsGranted` ≤ 1000 万、`durationDays` 1~3650、`priceCents` 0~100 万、字段长度上限）、`CreditAdjustRequest`（调账：`amount` ±1000 万）、`CashEntryRequest`（记账：金额 0.01~9999999、两位小数、direction 白名单）；三个端点不再吃 `Map<String,Object>`，历史 `*Override` 别名字段一并去掉（前端发的一直是规范字段名）；删除手工 `parseCashAmount`（旧实现会把原始输入回显到错误信息） | `dto/admin/*.java`；新增 `AdminInputValidationTest` 5 项（缺字段/超上限/负数/非法方向/统一信封） |
 | C.4 | 归属校验收口：新增 `SubscriptionService.getOrderForUser`（未登录或非本人一律 403 `FORBIDDEN_ORDER`，不区分"不存在/不是你的"以防探测订单号）、`cancelOrderAsUser`（行锁 + 严格归属 + 状态校验三合一，管理员路径 `cancelOrder` 复用同一内部方法）、私有 `requireOrderOwner` 统一 `requestRefund`/`disputeOrder` 的归属判定；`SubscriptionsController` 的详情/取消端点不再自行查找与比对 | 新增 `OrderOwnershipTest` 5 项（详情/取消/退款/申诉越权 + 未登录 + 订单不存在的 404 语义 + 越权后状态不变） |
+
+### 批次 D 交付明细（性能与静默异常）
+
+| 项 | 改动 | 证据 |
+|----|------|------|
+| D.1a | `UserDashboardService.getGroupRanking` 去掉 N+1：原来「每群一次 COUNT + 一次查群名」= 2×群数 次 SQL，改为一次 `GROUP BY` 聚合 + 一次 `IN` 批量取群名，内存合并排序；失败从静默返回空改为 `log.warn` | 新增 `MessageRepository.countActiveMessagesByGroupIds`、`GroupRepository.findByGroupIdIn` |
+| D.1b | `MessageService.getRecentGroupsForUser` 去掉「逐绑定 QQ 查询」的 N+1（新增 `GroupRepository.findByOwnerQqInAndActiveTrue`，并按 groupId 去重） | 一次 IN 查询替代 N 次 |
+| D.1c | `DashboardService` 管理端排行在非区间口径下对 Top-10 群逐个 COUNT → 改为一次 `countActiveMessagesByGroupIdsOnly` 批量聚合 | 10 次 SQL → 1 次 |
+| D.2 | 钱包页收入/支出合计合并为**一条**聚合 SQL（新增 `CreditTransactionRepository.sumIncomeAndSpendByFilters` 与 `CreditService.sumIncomeAndSpend`，`@Transactional(readOnly=true)`）；分页统一走 `PageLimits` | 新增断言：合并结果与旧 `sumIncome`/`sumSpend` 完全一致（`MoneyPathConcurrencyTest.combinedIncomeSpendSumMatchesLegacyQueries`） |
+| D.3a | 后端静默 catch 清零：`AdminOrdersController`/`AdminCreditsController` 的日期与枚举解析、`SubscriptionService.parseStatuses`、`CreditsController` 日期解析、`MessageController`（群类型/数字/日期解析）、`BackupService`、`FilePurgeService`、`MediaDownloadService`（含安全判定 fail-closed 改 WARN）、`AstrBotController` SSE 行解析、`SystemController` 端口探测（debug 级） | 全部补 `log.warn/debug` 带上下文；`MediaDownloadService` 安全判定失败按阻断处理并留 WARN |
+| D.3b | 守卫测试新增规则三：`controller`/`service` 包内禁止「catch 体里直接 return 或空 catch」 | `ErrorLeakGuardTest.noSilentCatchInControllerAndService`——该规则首跑即抓出 5 个文件 6 处漏网点 |
+| D.4 | 前端空 catch 清零：`services/api.js`（登出通知、错误体解析）、`UserCenter.vue`、`SubscriptionDashboard.vue`（头像解析/详情加载/用户信息刷新）改为 `console.warn`／`logger.warn`／`logger.debug` | 前端扫描 0 处残留 |
 
 ## 四、验收基线（每轮必须全绿）
 

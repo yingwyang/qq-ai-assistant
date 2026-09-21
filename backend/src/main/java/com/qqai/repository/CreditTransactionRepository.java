@@ -76,5 +76,28 @@ public interface CreditTransactionRepository extends JpaRepository<CreditTransac
                            @Param("end") LocalDateTime end,
                            @Param("relatedId") String relatedId);
 
+    /**
+     * 一次聚合同时得到「收入合计」与「支出合计」（单行两列）。
+     * 钱包页原先分别调用 sumIncomeByFilters + sumSpendByFilters（同条件扫两遍），
+     * 这里合并为一条 SQL；过滤条件与上面两个方法保持一致。
+     *
+     * 返回 List&lt;Object[]&gt; 而非 Object[]：多列聚合在 Spring Data 下用 List 承接更稳
+     * （直接声明 Object[] 时单行结果会被再包一层，取到的不是数字）。
+     */
+    @Query("SELECT COALESCE(SUM(CASE WHEN ct.direction = com.qqai.entity.enums.CreditDirection.IN THEN ct.amount ELSE 0 END), 0), "
+            + "COALESCE(SUM(CASE WHEN ct.direction = com.qqai.entity.enums.CreditDirection.OUT THEN ct.amount ELSE 0 END), 0) "
+            + "FROM CreditTransaction ct WHERE ct.userId = :userId "
+            + "AND (:type IS NULL OR ct.type = :type) "
+            + "AND (:direction IS NULL OR ct.direction = :direction) "
+            + "AND (:start IS NULL OR ct.createdAt >= :start) "
+            + "AND (:end IS NULL OR ct.createdAt <= :end) "
+            + "AND (:relatedId IS NULL OR ct.relatedId = :relatedId)")
+    List<Object[]> sumIncomeAndSpendByFilters(@Param("userId") Long userId,
+                                              @Param("type") CreditTransactionType type,
+                                              @Param("direction") CreditDirection direction,
+                                              @Param("start") LocalDateTime start,
+                                              @Param("end") LocalDateTime end,
+                                              @Param("relatedId") String relatedId);
+
     void deleteByUserId(Long userId);
 }

@@ -1425,6 +1425,31 @@ public class CreditService {
         return list != null ? list : Collections.emptyList();
     }
 
+    /**
+     * 一次查询同时得到收入/支出合计，返回 [income, spend]。
+     * 钱包页原先两次独立聚合（同条件扫两遍），合并后少一次扫描；只读事务避免脏检查开销。
+     */
+    @Transactional(readOnly = true)
+    public long[] sumIncomeAndSpend(Long userId, CreditTransactionType type, CreditDirection direction,
+                                    LocalDateTime start, LocalDateTime end, String relatedId) {
+        List<Object[]> rows = creditTransactionRepository.sumIncomeAndSpendByFilters(
+                userId, type, direction, start, end, relatedId);
+        long income = 0L;
+        long spend = 0L;
+        if (rows != null && !rows.isEmpty()) {
+            Object[] row = rows.get(0);
+            // 兼容两种返回形态：直接是 {income, spend}，或外层再包一层
+            if (row != null && row.length == 1 && row[0] instanceof Object[] inner) {
+                row = inner;
+            }
+            if (row != null && row.length >= 2) {
+                if (row[0] instanceof Number n) income = n.longValue();
+                if (row[1] instanceof Number n) spend = n.longValue();
+            }
+        }
+        return new long[]{income, spend};
+    }
+
     private int safeNewUserBonus() {
         CreditRule rule = creditRuleService.getSafeRule();
         Integer value = rule != null ? rule.getNewUserBonus() : null;

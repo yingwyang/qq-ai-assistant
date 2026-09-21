@@ -74,6 +74,8 @@ public class BackupService {
                                     attrs.lastModifiedTime().toMillis()
                             );
                         } catch (IOException e) {
+                            // 单个备份文件读属性失败（被占用/权限）时跳过该文件，但要留下线索
+                            log.warn("读取备份文件属性失败，已跳过: file={}, err={}", p.getFileName(), e.toString());
                             return null;
                         }
                     })

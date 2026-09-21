@@ -2,6 +2,8 @@ package com.qqai.repository;
 
 import com.qqai.entity.Group;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
@@ -14,6 +16,13 @@ public interface GroupRepository extends JpaRepository<Group, Long> {
      * 根据群号查找群聊（所有登录账号，可能有多条记录对应不同 ownerQq）
      */
     List<Group> findByGroupId(String groupId);
+
+    /**
+     * 批量按群号取群聊记录（同一群号可能多行，调用方按 groupId 取第一条有效群名）。
+     * 用于替代逐群调用 findByGroupId 的 N+1 查询。
+     */
+    @Query("SELECT g FROM Group g WHERE g.groupId IN :groupIds")
+    List<Group> findByGroupIdIn(@Param("groupIds") List<String> groupIds);
     
     /**
      * 根据群号和登录者QQ查找群聊
@@ -29,6 +38,12 @@ public interface GroupRepository extends JpaRepository<Group, Long> {
      * 根据登录者QQ查找活跃群聊
      */
     List<Group> findByOwnerQqAndActiveTrue(String ownerQq);
+
+    /**
+     * 批量按绑定 QQ 取活跃群聊，替代「逐个 QQ 调用 findByOwnerQqAndActiveTrue」的 N+1。
+     */
+    @Query("SELECT g FROM Group g WHERE g.ownerQq IN :ownerQqList AND g.active = true")
+    List<Group> findByOwnerQqInAndActiveTrue(@Param("ownerQqList") List<String> ownerQqList);
     
     /**
      * 查询所有活跃群聊
