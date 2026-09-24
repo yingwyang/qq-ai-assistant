@@ -77,7 +77,7 @@ HTTP 层（由 `SecurityConfig` 的 entry point / `GlobalExceptionHandler` 产�
 |------|------|
 | `POST /api/auth/login`、`POST /api/auth/register`、`POST /api/auth/logout` | 认证入口（登出即使令牌已过期也应幂等成功） |
 | `GET /api/system/health` | 健康检查 |
-| `GET /api/system/component-status`、`GET /api/system/napcat/login-status`、`GET /api/system/napcat/qrcode-image` | 登录页状态灯与扫码 |
+| `GET /api/system/component-status`、`GET /api/system/napcat/login-status` | 登录页状态灯；二维码接口不再公开（匿名 401，登录用户可读） |
 | `POST /`、`POST /webhook`、`POST /api/napcat`、`POST /api/napcat/webhook` | NapCat 上报（令牌在控制器内校验） |
 | `/ws`、`/ws/**` | WebSocket 握手（鉴权在拦截器） |
 | `GET /api/avatar/**`、`/uploads/avatars/**` | 头像展示 |
@@ -170,7 +170,7 @@ HTTP 层（由 `SecurityConfig` 的 entry point / `GlobalExceptionHandler` 产�
 | GET | `/actuator/metrics` | **ADMIN** | `requiredMetricName`(可选) | Micrometer 指标列表/单指标明细（JVM、HTTP、连接池等） |
 | GET | `/api/system/component-status` | 公开 | — | `astrbot`/`napcat`/`gptsovits` 的 `running`、`status`（端口探测：6185/6100/8000） |
 | GET | `/api/system/napcat/login-status` | 公开 | — | `loggedIn`；⚠️ 已知在已登录时可能返回 `false`，真实状态请用 6100 的 `get_login_info` |
-| GET | `/api/system/napcat/qrcode` / `qrcode-path` / `qrcode-image` | **ADMIN** | — | 扫码登录机器人 QQ；⚠️ 扫码即等于接管机器人账号，已收权为仅管理员可读 |
+| GET | `/api/system/napcat/qrcode` / `qrcode-path` / `qrcode-image` | 登录 | — | 扫码登录机器人 QQ；⚠️ 二维码＝机器人账号接管入口，**匿名仍被拦（401）**；普通登录用户可用（2026-09-24 由 ADMIN-only 放宽——此前普通用户 403 即「登录不了 QQ」） |
 | POST | `/api/system/start-all` / `stop-all` | **ADMIN** | — | 一键启停，顺序为 AstrBot → NapCat → GPT-SoVITS |
 | POST | `/api/system/start-astrbot` / `stop-astrbot` | **ADMIN** | — | 单组件控制（另有 `start-napcat`、`stop-napcat`、`start-gptsovits`、`stop-gptsovits`） |
 | POST | `/api/system/napcat/auto-configure` | **ADMIN** | — | 检测新 QQ 并自动写 Webhook 配置 |

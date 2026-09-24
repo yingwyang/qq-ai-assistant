@@ -112,6 +112,8 @@
 **为什么 `qrcode` 与 `qrcode-path` 也要收权**：原先它们只要求「已登录」，任何普通用户都能读到机器人二维码与服务器绝对路径；二维码本身即账号接管凭据，因此三者必须同一权限。
 **为什么状态接口保持公开**：`login-status`、`component-status` 只返回布尔量，且登录页在 Cookie 过期时仍需显示组件状态灯（见 `docs/development/architecture.md` 的白名单说明）。
 
+> **A.1 回调（2026-09-24）**：`ROLE_ADMIN` 收得太紧——普通用户拿不到二维码，实际表现是「普通用户登录不了 QQ」。现改为 **`authenticated()`**：匿名仍 401（保住了当初要堵的账号接管面），登录用户（含普通用户）可读，前端 `UserMenuPopover`/`LoginModal` 的二维码区同步对所有登录用户开放；组件启停保持 ADMIN-only。同步更新 `SecurityHardeningTest`、`check-security-hardening.mjs` 与权限矩阵文档。
+
 ### 批次 B 交付明细（资金链路幂等与扣费顺序）
 
 | 项 | 改动 | 证据 |

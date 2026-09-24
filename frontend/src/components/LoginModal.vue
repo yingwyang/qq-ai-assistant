@@ -6,15 +6,15 @@
         <button class="close-btn" @click="closeModal">×</button>
       </div>
       <div class="modal-body">
-        <!-- 机器人登录二维码 + 组件启停均为管理员操作（后端已收权为 ADMIN-only），非管理员只给指路 -->
+        <!-- 组件启停仍是管理员操作（后端 /api/system/start-* | stop-* 为 ADMIN-only）；
+             机器人登录二维码对所有登录用户开放 —— 普通用户也要能扫码登录 QQ。 -->
         <div v-if="!canManage" class="admin-only-notice">
-          <h3>仅管理员可操作</h3>
-          <p>启动 / 停止组件、查看机器人登录二维码属于管理员操作，请前往
-            <b>系统管理中心 → 组件控制</b>。</p>
+          <h3>组件启停需要管理员</h3>
+          <p>启动 / 停止 AstrBot、NapCat、GPT-SoVITS 属于管理员操作，请前往
+            <b>系统管理中心 → 组件控制</b>。下方扫码登录 QQ 不受影响。</p>
         </div>
-        <template v-else>
-        <!-- 系统控制模块 -->
-        <div class="system-control-section">
+        <!-- 系统控制模块（仅管理员） -->
+        <div v-else class="system-control-section">
           <h3>系统控制</h3>
           
           <!-- 分别启动各组件 -->
@@ -96,7 +96,6 @@
             </div>
           </div>
         </div>
-        </template>
       </div>
     </div>
   </div>
@@ -122,7 +121,8 @@ export default {
   },
   emits: ['update:visible', 'login-status-changed'],
   setup(props, { emit }) {
-    // 二维码与组件启停仅管理员可用：非管理员不渲染这些控件，避免出现 403 的破图与点不动的按钮
+    // 组件启停仅管理员可用（后端 start-*/stop-* 为 ADMIN-only），非管理员只给指路；
+    // QQ 登录二维码对所有登录用户渲染（普通用户也要能扫码登录 QQ）。
     const canManage = computed(() => props.isAdmin || (localStorage.getItem('user_role') || '') === 'ADMIN');
     const qrCode = ref('');
     const isLoggedIn = ref(false);
@@ -494,7 +494,7 @@ export default {
   padding: 20px;
 }
 
-/* 非管理员的指路提示：不再渲染二维码与组件启停按钮，避免 403 破图与无效操作 */
+/* 非管理员的指路提示：只针对「组件启停」这一段，二维码区仍然渲染给所有人 */
 .admin-only-notice {
   padding: 24px 20px;
   text-align: center;

@@ -31,9 +31,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *
  * 覆盖四类此前会被绕过的问题：
  *  1. QQ 机器人登录二维码被匿名拉取（扫码即等于接管机器人账号）；
- *  2. 普通登录用户也能拿到二维码与服务器路径；
- *  3. 登录响应体回传 JWT 明文，抵消 HttpOnly 的防 XSS 价值；
- *  4. 角色变更不递增 tokenVersion，被降权的管理员旧令牌仍然可用。
+ *  2. 登录响应体回传 JWT 明文，抵消 HttpOnly 的防 XSS 价值；
+ *  3. 角色变更不递增 tokenVersion，被降权的管理员旧令牌仍然可用。
+ *
+ * <p>2026-09-24 回归：二维码三个入口由 ROLE_ADMIN 放宽为「已登录即可」——此前普通用户被 403，
+ * 直接表现为「普通用户登录不了 QQ」。匿名拦截保持不变。</p>
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -88,13 +90,18 @@ class SecurityHardeningTest {
     }
 
     @Test
-    @DisplayName("普通登录用户也拿不到二维码（403，仅 ADMIN 可读）")
-    void normalUserCannotFetchBotQrCode() throws Exception {
+    @DisplayName("普通登录用户可以读二维码（QQ 登录是普通用户功能；只有匿名被拦）")
+    void normalUserCanFetchBotQrCode() throws Exception {
         User user = save("normal", "USER", true);
-        mockMvc.perform(get("/api/system/napcat/qrcode-image").cookie(tokenCookie(user, "USER")))
-                .andExpect(status().isForbidden());
-        mockMvc.perform(get("/api/system/napcat/qrcode-path").cookie(tokenCookie(user, "USER")))
-                .andExpect(status().isForbidden());
+        for (String path : new String[]{
+                "/api/system/napcat/qrcode-image",
+                "/api/system/napcat/qrcode-path",
+                "/api/system/napcat/qrcode"}) {
+            int statusCode = mockMvc.perform(get(path).cookie(tokenCookie(user, "USER")))
+                    .andReturn().getResponse().getStatus();
+            assertNotEquals(401, statusCode, "普通登录用户不应被判未登录：" + path);
+            assertNotEquals(403, statusCode, "普通登录用户不应被判权限不足：" + path);
+        }
     }
 
     @Test

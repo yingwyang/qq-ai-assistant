@@ -185,7 +185,7 @@ prefetch 是 `RabbitMQConfig` 里的常量，配置文件改不动；调并发�
 | `/api/admin/**`、`/api/credits/admin/**`、`/actuator/**` | `ROLE_ADMIN`（Actuator 的 health/metrics 含依赖详情，仅管理员可读） |
 | `/api/system/start-*`、`stop-*`、`restart-*`、`/api/system/napcat/auto-configure` | `ROLE_ADMIN` |
 | `/api/system/tts`、`/tts/**`、`/convert-voice` | 登录即可（积分在服务内扣减） |
-| `/api/system/napcat/qrcode`、`qrcode-path`、`qrcode-image` | `ROLE_ADMIN`（二维码＝机器人账号接管入口，普通用户不需要） |
+| `/api/system/napcat/qrcode`、`qrcode-path`、`qrcode-image` | 登录即可（匿名仍被拦；QQ 扫码登录是普通用户也要用的功能） |
 | `/api/system/napcat/login-status`、`/api/system/component-status` | 公开（登录页状态灯，只暴露布尔量） |
 | 其余 | `authenticated()` |
 
@@ -195,7 +195,9 @@ prefetch 是 `RabbitMQConfig` 里的常量，配置文件改不动；调并发�
 
 `JwtAuthenticationFilter.PUBLIC_PATHS` 中的路径会**完全跳过过滤器**（连 Cookie 都不解析）：`/api/auth/{login,register,logout}`、`/api/system/health`、`/api/system/napcat/login-status`、`/api/system/component-status`、`/`、`/webhook`、`/api/napcat`、`/api/napcat/**`、`/ws`、`/ws/**`、`/uploads/avatars/**`。原因很实际：带着**过期** Cookie 打开登录页时若仍走过滤器会被判 401，导致「无法重新登录」。
 
-> 安全收口（2026-09-21）：`/api/system/napcat/qrcode-image` 已从这个白名单**移除**。此前它被 `permitAll`，任何人无需登录即可拉取 QQ 机器人登录二维码图片（扫码即等于接管机器人账号），并可通过 `qrcode-path` 读到服务器绝对路径。现在三个二维码入口统一为 `ROLE_ADMIN`；纯状态接口（`login-status`、`component-status`）按上面的登录页原因继续公开。
+> 安全收口（2026-09-21）：`/api/system/napcat/qrcode-image` 已从这个白名单**移除**。此前它被 `permitAll`，任何人无需登录即可拉取 QQ 机器人登录二维码图片（扫码即等于接管机器人账号），并可通过 `qrcode-path` 读到服务器绝对路径。纯状态接口（`login-status`、`component-status`）按上面的登录页原因继续公开。
+>
+> 权限回调（2026-09-24）：三个二维码入口由 `ROLE_ADMIN` **放宽为「已登录即可」**——收成 ADMIN-only 后普通用户拿不到二维码，直接表现为「普通用户登录不了 QQ」。当前边界 = **匿名拦截 + 登录可读**（`authenticated()`，且仍不在 `PUBLIC_PATHS`）。组件启停（`start-*`/`stop-*`）保持 `ROLE_ADMIN` 不变。
 
 ## 模块分层
 
