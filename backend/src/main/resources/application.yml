@@ -153,6 +153,18 @@ file:
     temp-path: ./uploads/temp
     archive-path: ./uploads/archive
     local-path: ./uploads/images
+  # 媒体保留策略：超过 days 天的媒体文件由定时任务自动清理
+  # **默认关闭**（enabled=false）。开关与天数可在「后台 → 数据维护 → 媒体管理」修改，
+  # 保存后落盘到 data/application-override.properties，重启后仍生效、改完立即生效。
+  # 年龄口径：按文件「修改时间」计算，与媒体管理列表的时间筛选保持同一口径。
+  retention:
+    enabled: ${FILE_RETENTION_ENABLED:false}
+    days: ${FILE_RETENTION_DAYS:90}
+    # 参与自动清理的类型（逗号分隔）。刻意不含 FILE：pdf/zip/doc 不纳入自动删除。
+    types: "${FILE_RETENTION_TYPES:IMAGE,VIDEO,AUDIO}"
+    # 定时清理 cron（必须 6 段含秒）。默认每天 4:00，避开 2:00 归档/订阅过期、3:00 归档清理。
+    # 该 cron 只在启动时注册，故只走配置，不在管理端暴露。
+    cron: "${FILE_RETENTION_CRON:0 0 4 * * ?}"
 
 # 消息归档配置
 archive:

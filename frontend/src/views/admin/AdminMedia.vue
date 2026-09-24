@@ -150,14 +150,83 @@
         </div>
       </div>
     </div>
+
+    <!-- 媒体保留策略：超过 N 天自动删除。默认关闭；打开前先用 dry-run 预览看清影响面 -->
+    <div class="section-card retention-card">
+      <div class="section-card-header">
+        <h4>媒体保留策略</h4>
+        <span class="page-header-meta">超过指定天数的图片 / 视频 / 语音由定时任务自动清理（默认关闭）</span>
+      </div>
+
+      <div v-if="retentionError" class="state-box is-error">
+        <span class="state-title">保留策略加载失败</span>
+        <span>{{ retentionError }}</span>
+        <div class="state-actions"><button class="btn-action promote" @click="loadRetention">重试</button></div>
+      </div>
+
+      <div v-else class="media-manager-card">
+        <div class="retention-row">
+          <label class="retention-switch">
+            <input
+              type="checkbox"
+              :checked="retentionForm.enabled"
+              :disabled="retentionLoading || retentionSaving"
+              @change="retentionForm.enabled = $event.target.checked"
+            />
+            <span>启用自动清理</span>
+          </label>
+
+          <label class="retention-field">
+            保留最近
+            <input
+              v-model.number="retentionForm.days"
+              type="number"
+              min="1"
+              max="3650"
+              :disabled="retentionLoading || retentionSaving"
+              @change="onRetentionDaysChanged"
+            />
+            天
+          </label>
+
+          <button class="btn-action promote" :disabled="retentionSaving || retentionLoading || !retentionDirty" @click="saveRetention">
+            {{ retentionSaving ? '保存中...' : '保存' }}
+          </button>
+          <button class="btn-action" :disabled="retentionPreviewLoading || retentionLoading" @click="loadRetentionPreview()">
+            {{ retentionPreviewLoading ? '统计中...' : '刷新预览' }}
+          </button>
+          <button class="btn-action danger" :disabled="retentionRunning || retentionLoading" @click="confirmRunRetention">
+            {{ retentionRunning ? '清理中...' : '立即清理一次' }}
+          </button>
+          <span v-if="retentionDirty" class="retention-dirty">有未保存的改动</span>
+        </div>
+
+        <div v-if="retentionPreview" class="purge-preview retention-preview">
+          <span class="purge-preview-title">清理预览（不会真的删除）</span>
+          <span class="purge-preview-item">
+            将删除 <b>{{ retentionPreview.totalFiles }}</b> 个文件 / {{ formatBytes(retentionPreview.totalBytes) }}
+          </span>
+          <span v-if="retentionCutoffText" class="purge-preview-item">早于 {{ retentionCutoffText }}</span>
+          <span v-for="t in ['IMAGE', 'VIDEO', 'AUDIO']" :key="t" class="purge-preview-item">
+            {{ labels[t] }}：<b>{{ previewCountOf(t) }}</b> 个 / {{ formatBytes(previewBytesOf(t)) }}
+          </span>
+        </div>
+        <div v-else-if="retentionPreviewError" class="retention-preview-error">{{ retentionPreviewError }}</div>
+        <div v-else class="retention-hint">
+          保留策略按文件「修改时间」计算年龄；到点由后端定时任务清理（默认每天 4:00），
+          并记入审计日志（操作项 FILE_RETENTION_PURGE）。
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script>
-import { inject, computed, onMounted } from 'vue';
+import { inject, computed, onMounted, ref } from 'vue';
 import Icon from '../../components/Icon.vue';
 import AdminPageHeader from '../../components/admin/AdminPageHeader.vue';
 import { showConfirm } from '../../components/ConfirmDialog.vue';
+import { adminApi } from '../../services/api';
 
 /**
  * 缩略图懒加载指令：进入视口才真正请求图片，
@@ -207,6 +276,141 @@ export default {
     const formatFileSize = inject('adminFormatFileSize');
     const openMediaImagePreview = inject('adminOpenMediaImagePreview');
     const isMediaCollapsed = inject('adminIsMediaCollapsed');
+    const showMsg = inject('adminShowMsg');
+
+    // ===== 媒体保留策略（超过 N 天自动删除）=====
+    // retention = 服务端已生效的值；retentionForm = 表单里待保存的值。
+    // 两者分开是为了「改了天数先看影响面、确认了再保存」——预览按表单值算。
+    const retention = ref({ enabled: false, days: 90, types: [] });
+    const retentionForm = ref({ enabled: false, days: 90 });
+    const retentionPreview = ref(null);
+    const retentionPreviewError = ref('');
+    const retentionError = ref('');
+    const retentionLoading = ref(false);
+    const retentionSaving = ref(false);
+    const retentionPreviewLoading = ref(false);
+    const retentionRunning = ref(false);
+
+    const retentionDirty = computed(() =>
+      retentionForm.value.enabled !== retention.value.enabled
+      || Number(retentionForm.value.days) !== Number(retention.value.days));
+
+    const retentionCutoffText = computed(() => {
+      const c = retentionPreview.value && retentionPreview.value.cutoff;
+      return c ? String(c).replace('T', ' ').slice(0, 16) : '';
+    });
+
+    const previewCountOf = (t) => {
+      const b = retentionPreview.value && retentionPreview.value.byType
+        && retentionPreview.value.byType[t];
+      return b ? b.count : 0;
+    };
+    const previewBytesOf = (t) => {
+      const b = retentionPreview.value && retentionPreview.value.byType
+        && retentionPreview.value.byType[t];
+      return b ? b.bytes : 0;
+    };
+
+    const clampRetentionDays = (value) => {
+      const n = Number(value);
+      if (!Number.isFinite(n)) return 90;
+      return Math.max(1, Math.min(3650, Math.round(n)));
+    };
+
+    /** dry-run 预检：只统计影响面，不删除任何文件 */
+    const loadRetentionPreview = async (days) => {
+      retentionPreviewLoading.value = true;
+      retentionPreviewError.value = '';
+      try {
+        const d = days != null ? days : retentionForm.value.days;
+        const res = await adminApi.previewMediaRetention(d);
+        retentionPreview.value = res || null;
+      } catch (e) {
+        retentionPreview.value = null;
+        retentionPreviewError.value = e.message || '清理预览失败';
+      } finally {
+        retentionPreviewLoading.value = false;
+      }
+    };
+
+    const loadRetention = async () => {
+      retentionLoading.value = true;
+      retentionError.value = '';
+      try {
+        const cfg = await adminApi.getMediaRetentionConfig();
+        retention.value = {
+          enabled: !!(cfg && cfg.enabled),
+          days: clampRetentionDays(cfg && cfg.days),
+          types: (cfg && cfg.types) || [],
+        };
+        retentionForm.value = { enabled: retention.value.enabled, days: retention.value.days };
+        await loadRetentionPreview(retentionForm.value.days);
+      } catch (e) {
+        retentionError.value = e.message || '加载保留策略失败';
+      } finally {
+        retentionLoading.value = false;
+      }
+    };
+
+    /** 改天数时立刻按新天数预检（不保存），方便「先看影响面再决定」 */
+    const onRetentionDaysChanged = () => {
+      const d = clampRetentionDays(retentionForm.value.days);
+      retentionForm.value.days = d;
+      loadRetentionPreview(d);
+    };
+
+    /**
+     * 立即执行一次清理（一次性，不改动已保存的开关设置）。
+     * 定时任务每天 4:00 才跑，验收/救急时需要能当场触发一次。
+     */
+    const confirmRunRetention = async () => {
+      const days = clampRetentionDays(retentionForm.value.days);
+      const count = retentionPreview.value ? retentionPreview.value.totalFiles : '?';
+      const size = retentionPreview.value ? media.formatBytes(retentionPreview.value.totalBytes) : '未知';
+      const ok = await showConfirm({
+        title: '立即执行一次媒体清理',
+        message: '将删除修改时间早于「现在 - ' + days + ' 天」的图片 / 视频 / 语音，共 '
+          + count + ' 个（约 ' + size + '）。删除后不可恢复，关联消息会被软删除，头像不会被清理。'
+          + '本操作不影响已保存的开关设置。',
+        type: 'warning',
+        confirmText: '立即清理',
+      });
+      if (!ok) return;
+      retentionRunning.value = true;
+      try {
+        const res = await adminApi.runMediaRetention(days);
+        if (showMsg) showMsg((res && res.message) ? res.message : '清理完成', 'success');
+        await loadRetentionPreview(days);
+        await media.loadMediaFiles();
+        await media.loadMediaSummary();
+      } catch (e) {
+        if (showMsg) showMsg('清理失败: ' + e.message, 'error');
+      } finally {
+        retentionRunning.value = false;
+      }
+    };
+
+    const saveRetention = async () => {
+      retentionSaving.value = true;
+      try {
+        const saved = await adminApi.updateMediaRetentionConfig({
+          enabled: !!retentionForm.value.enabled,
+          days: clampRetentionDays(retentionForm.value.days),
+        });
+        retention.value = {
+          enabled: !!(saved && saved.enabled),
+          days: clampRetentionDays(saved && saved.days),
+          types: (saved && saved.types) || [],
+        };
+        retentionForm.value = { enabled: retention.value.enabled, days: retention.value.days };
+        if (showMsg) showMsg('媒体保留策略已保存并立即生效', 'success');
+        await loadRetentionPreview(retention.value.days);
+      } catch (e) {
+        if (showMsg) showMsg('保存保留策略失败: ' + e.message, 'error');
+      } finally {
+        retentionSaving.value = false;
+      }
+    };
 
     const currentFilesTotalSize = computed(() =>
       media.mediaFiles.value.reduce((sum, f) => sum + (f.fileSize || 0), 0)
@@ -265,6 +469,8 @@ export default {
     onMounted(() => {
       // 清理预览需要各类型的数量与体积，进页面时取一次
       if (!media.mediaSummary.value) media.loadMediaSummary();
+      // 保留策略：配置 + dry-run 预览各取一次（普通用户不会进这个页面，接口本身也是 ADMIN-only）
+      loadRetention();
     });
 
     return {
@@ -307,6 +513,24 @@ export default {
       confirmDeleteSelected,
       confirmPurgeByFilter,
       filterLabel,
+      labels,
+      retentionForm,
+      retentionPreview,
+      retentionPreviewError,
+      retentionError,
+      retentionLoading,
+      retentionSaving,
+      retentionPreviewLoading,
+      retentionRunning,
+      retentionDirty,
+      retentionCutoffText,
+      loadRetention,
+      loadRetentionPreview,
+      onRetentionDaysChanged,
+      saveRetention,
+      confirmRunRetention,
+      previewCountOf,
+      previewBytesOf,
       openPreview: media.openPreview,
       previewAllFiles: media.previewAllFiles,
       isMediaCollapsed,
@@ -356,4 +580,16 @@ export default {
 .btn-preview { padding: 4px 10px; font-size: 12px; color: var(--accent-color, #3498db); background: var(--bg-tertiary, #f0f9ff); border: 1px solid var(--border-color, #b7d8f7); border-radius: 4px; cursor: pointer; transition: all 0.2s; }
 .btn-preview:hover:not(:disabled) { background: var(--bg-tertiary, #e0f2ff); border-color: var(--accent-color, #3498db); }
 .btn-preview:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* 媒体保留策略面板 */
+.retention-card { margin-top: 16px; }
+.retention-row { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+.retention-switch { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-primary, #333); cursor: pointer; }
+.retention-switch input { width: 16px; height: 16px; cursor: pointer; }
+.retention-field { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-secondary, #666); }
+.retention-field input { width: 96px; padding: 4px 8px; border: 1px solid var(--border-color, #d9d9d9); border-radius: 4px; background: var(--card-bg, #fff); color: var(--text-primary, #333); }
+.retention-dirty { font-size: 12px; color: #f39c12; }
+.retention-preview { margin-top: 12px; margin-bottom: 0; }
+.retention-preview-error { margin-top: 12px; font-size: 12.5px; color: #e74c3c; }
+.retention-hint { margin-top: 12px; font-size: 12.5px; line-height: 1.7; color: var(--text-secondary, #666); }
 </style>

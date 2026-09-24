@@ -391,7 +391,11 @@ qq-web/
 
 **[FileStorageService.java](file:///d:/ai/Documents/qq-web/qq-ai-assistant/backend/src/main/java/com/qqai/service/FileStorageService.java)** - 文件存储管理
 
-**[FilePurgeService.java](file:///d:/ai/Documents/qq-web/qq-ai-assistant/backend/src/main/java/com/qqai/service/FilePurgeService.java)** - 文件清理服务
+**[FilePurgeService.java](file:///d:/ai/Documents/qq-web/qq-ai-assistant/backend/src/main/java/com/qqai/service/FilePurgeService.java)** - 文件清理服务（按类型清理 / 列表筛选排序 / 按 id 删除 / **按年龄清理**；头像目录保护、引用消息软删除、审计留痕）
+
+**[MediaRetentionSettingsService.java](file:///d:/ai/Documents/qq-web/qq-ai-assistant/backend/src/main/java/com/qqai/service/MediaRetentionSettingsService.java)** - 媒体保留策略运行时设置（`file.retention.enabled` / `days`，**默认关闭**，落盘 `data/application-override.properties`）
+
+**[MediaRetentionScheduler.java](file:///d:/ai/Documents/qq-web/qq-ai-assistant/backend/src/main/java/com/qqai/config/MediaRetentionScheduler.java)** - 媒体保留策略定时任务（默认每天 4:00，`file.retention.cron`；开关关闭时连目录扫描都不做）
 
 **[MessageBroadcastService.java](file:///d:/ai/Documents/qq-web/qq-ai-assistant/backend/src/main/java/com/qqai/service/MessageBroadcastService.java)** - WebSocket 消息广播
 

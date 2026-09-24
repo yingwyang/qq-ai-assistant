@@ -189,6 +189,10 @@ HTTP 层（由 `SecurityConfig` 的 entry point / `GlobalExceptionHandler` 产�
 | GET/PUT | `/api/admin/config` | ADMIN | 系统配置读写 |
 | POST | `/api/admin/backup`、`GET /api/admin/backup/list`、`GET /api/admin/backup/{fileName}/download` | ADMIN | 数据库备份（落 `data/backups/`） |
 | POST | `/api/admin/archive` | ADMIN | `days=90` 归档历史消息 |
+| GET | `/api/admin/media-retention/config` | ADMIN | — | 读取媒体保留策略（开关 / 天数 / 类型） |
+| PUT | `/api/admin/media-retention/config` | ADMIN | `enabled`、`days` | 更新保留策略（保存即生效并落盘） |
+| GET | `/api/admin/media-retention/preview` | ADMIN | `days` | 清理预检（**dry-run**，不删除任何文件） |
+| POST | `/api/admin/media-retention/run` | ADMIN | `days` | 立即执行一次保留清理（一次性，不改动已保存的开关） |
 | GET/PUT | `/api/credits/admin/rule` | ADMIN | 积分规则（价格、签到分、月卡加成、折扣阶梯等） |
 | GET | `/api/credits/admin/user-credits` | ADMIN | `keyword`、`page`、`size` |
 | POST | `/api/credits/admin/adjust` | ADMIN | `userId`、`amount`、`reason`（正数发放、负数扣除，用于退费/补偿） |

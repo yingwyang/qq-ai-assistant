@@ -690,6 +690,20 @@ export const adminApi = {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data || {}),
   }),
+  // ===== 媒体保留策略（超过 N 天自动删除；运行时开关 + dry-run 预检）=====
+  // 字段：{ enabled, days, types }。默认关闭，必须由管理员显式打开。
+  getMediaRetentionConfig: () => request('/admin/media-retention/config'),
+  updateMediaRetentionConfig: (data) => request('/admin/media-retention/config', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data || {}),
+  }),
+  /** 保留策略清理预检：只统计影响面，不删除任何文件（与 previewArchive 同款 dry-run） */
+  previewMediaRetention: (days) => request('/admin/media-retention/preview'
+    + (days != null ? '?days=' + encodeURIComponent(days) : '')),
+  /** 立即执行一次保留清理（一次性，不影响已保存的开关设置） */
+  runMediaRetention: (days) => request('/admin/media-retention/run'
+    + (days != null ? '?days=' + encodeURIComponent(days) : ''), { method: 'POST' }),
   getConfig: () => request('/admin/config'),
   updateConfig: (data) => request('/admin/config', {
     method: 'PUT',

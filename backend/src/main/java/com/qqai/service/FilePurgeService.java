@@ -111,28 +111,7 @@ public class FilePurgeService {
             return new PurgeResult(0, 0L, Collections.emptyList(), "未指定类型，跳过");
         }
 
-        Set<String> finalExts = new HashSet<>();
-        for (String t : types) {
-            if (t == null) continue;
-            switch (t.toUpperCase()) {
-                case "IMAGE":
-                    finalExts.addAll(IMAGE_EXTS); break;
-                case "VIDEO":
-                    finalExts.addAll(VIDEO_EXTS); break;
-                case "AUDIO":
-                    finalExts.addAll(AUDIO_EXTS); break;
-                case "FILE":
-                    finalExts.addAll(FILE_EXTS); break;
-                case "ALL":
-                    finalExts.addAll(IMAGE_EXTS);
-                    finalExts.addAll(VIDEO_EXTS);
-                    finalExts.addAll(AUDIO_EXTS);
-                    finalExts.addAll(FILE_EXTS);
-                    break;
-                default:
-                    // 未知类型忽略
-            }
-        }
+        Set<String> finalExts = resolveExtensionsForTypes(types);
 
         if (finalExts.isEmpty()) {
             return new PurgeResult(0, 0L, Collections.emptyList(), "未匹配到任何扩展名，跳过");
@@ -146,38 +125,18 @@ public class FilePurgeService {
                     "媒体目录不存在: " + root.toAbsolutePath());
         }
 
-        List<String> deletedFiles = new ArrayList<>();
-        long totalBytes = 0L;
-        int totalFiles = 0;
-
-        try (Stream<Path> walk = Files.walk(root)) {
-            List<Path> paths = walk
-                    .filter(Files::isRegularFile)
-                    .filter(p -> !isAvatarPath(root, p))
-                    .filter(p -> matchExtension(p, finalExts))
-                    .toList();
-
-            for (Path p : paths) {
-                File f = p.toFile();
-                long size = f.length();
-                if (f.delete()) {
-                    totalFiles++;
-                    totalBytes += size;
-                    deletedFiles.add(root.relativize(p).toString());
-                    deactivateFileRecordIfExists(p, root);
-                    softDeleteMessagesReferencingFile(root.relativize(p).toString().replace('\\', '/'));
-                } else {
-                    log.warn("无法删除文件: {}", f.getAbsolutePath());
-                }
-            }
+        List<Path> paths;
+        try {
+            paths = collectMediaFiles(root, finalExts, null);
         } catch (IOException e) {
             log.warn("扫描媒体目录失败: {}", e.getMessage());
-            return new PurgeResult(totalFiles, totalBytes, deletedFiles,
+            return new PurgeResult(0, 0L, Collections.emptyList(),
                     "扫描过程中发生 IO 错误: " + e.getMessage());
         }
 
-        log.info("purgeMedia finished: {} files, {} bytes", totalFiles, totalBytes);
-        return new PurgeResult(totalFiles, totalBytes, deletedFiles, null);
+        PurgeResult result = deleteCollectedFiles(paths, root);
+        log.info("purgeMedia finished: {} files, {} bytes", result.getTotalDeleted(), result.getFreedBytes());
+        return result;
     }
 
     /**
@@ -199,6 +158,182 @@ public class FilePurgeService {
                     result.getNote() != null ? result.getNote() : "无文件被清理");
         }
         return result;
+    }
+
+    // ==================== 保留策略：超过 N 天的媒体文件 ====================
+
+    /**
+     * 保留策略预览（dry-run）：只统计「修改时间早于 现在 - days 天」的媒体文件数量与体积，<b>不删除任何东西</b>。
+     *
+     * <p>这是自动删除功能的安全前提：管理员在打开开关前应先看清影响面。
+     * 统计口径与 {@link #purgeMediaOlderThan} 完全一致（同一个扫描方法、同一个 cutoff），
+     * 因此「预览说会删 N 个」与「实际删掉 N 个」不会对不上。</p>
+     *
+     * @param days  保留天数（&lt;=0 会被收敛到 1，防止「0 天」把刚收到的媒体全删）
+     * @param types IMAGE / VIDEO / AUDIO / FILE / ALL
+     */
+    public RetentionPreview previewRetention(int days, List<String> types) {
+        int safeDays = clampDays(days);
+        LocalDateTime cutoff = cutoffFor(safeDays);
+        Set<String> exts = resolveExtensionsForTypes(types);
+        Path root = getBasePath();
+
+        List<Path> expired;
+        try {
+            expired = collectMediaFiles(root, exts, cutoff);
+        } catch (IOException e) {
+            log.warn("扫描媒体目录失败: {}", e.getMessage());
+            expired = Collections.emptyList();
+        }
+
+        Map<String, long[]> byType = new LinkedHashMap<>();
+        long totalBytes = 0L;
+        for (Path p : expired) {
+            File f = p.toFile();
+            long size = f.length();
+            String type = detectFileType(f.getName());
+            long[] slot = byType.computeIfAbsent(type, k -> new long[]{0L, 0L});
+            slot[0]++;
+            slot[1] += size;
+            totalBytes += size;
+        }
+
+        return new RetentionPreview(safeDays, cutoff, expired.size(), totalBytes, byType);
+    }
+
+    /**
+     * 按保留策略删除媒体文件（超过 days 天的），并写审计日志。
+     *
+     * <p>与 {@link #purgeMedia(List)} 的区别只有一个：多一个「年龄」条件。
+     * 删除动作本身走同一条 {@link #deleteCollectedFiles}，因此头像保护、
+     * file_records 置为 inactive、引用消息软删除这些既有行为完全一致。</p>
+     *
+     * <p><b>只在真的删了东西时才写审计</b>：本方法由每日定时任务调用，
+     * 若每次运行都记一条「无文件被清理」，审计表一年会白涨 365 行。
+     * 「今天跳过了」这件事由调度器的日志承担。</p>
+     *
+     * @param days     保留天数
+     * @param types    参与清理的类型
+     * @param operator 操作人（定时任务传 {@code system:media-retention}）
+     */
+    public PurgeResult purgeMediaOlderThan(int days, List<String> types, String operator) {
+        int safeDays = clampDays(days);
+        Set<String> exts = resolveExtensionsForTypes(types);
+        Path root = getBasePath();
+        File rootFile = root.toFile();
+        if (!rootFile.exists() || !rootFile.isDirectory()) {
+            log.info("媒体目录不存在: {}", root);
+            return new PurgeResult(0, 0L, Collections.emptyList(),
+                    "媒体目录不存在: " + root.toAbsolutePath());
+        }
+
+        List<Path> expired;
+        try {
+            expired = collectMediaFiles(root, exts, cutoffFor(safeDays));
+        } catch (IOException e) {
+            log.warn("扫描媒体目录失败: {}", e.getMessage());
+            return new PurgeResult(0, 0L, Collections.emptyList(),
+                    "扫描过程中发生 IO 错误: " + e.getMessage());
+        }
+
+        PurgeResult result = deleteCollectedFiles(expired, root);
+        invalidateMediaCaches();
+
+        if (result.getTotalDeleted() > 0 && auditLogService != null) {
+            try {
+                auditLogService.log(operator, "FILE_RETENTION_PURGE", "days:" + safeDays,
+                        "SUCCESS",
+                        "保留策略自动清理 " + result.getTotalDeleted() + " 个文件, 释放 " + result.getFreedMB());
+            } catch (Exception e) {
+                log.warn("写媒体保留策略审计日志失败: {}", e.getMessage());
+            }
+        }
+        return result;
+    }
+
+    /** 保留天数的合法区间：下限 1 天、上限 10 年（与 MediaRetentionSettingsService 的区间一致） */
+    private static int clampDays(int days) {
+        return Math.max(1, Math.min(3650, days));
+    }
+
+    private static LocalDateTime cutoffFor(int days) {
+        return LocalDateTime.now().minusDays(days);
+    }
+
+    /**
+     * 把类型列表解析成扩展名集合（IMAGE/VIDEO/AUDIO/FILE/ALL）。
+     * 空集合表示「未匹配到任何扩展名」，调用方需自行判断，不要当成「不限制」。
+     */
+    private Set<String> resolveExtensionsForTypes(List<String> types) {
+        Set<String> exts = new HashSet<>();
+        if (types == null) {
+            return exts;
+        }
+        for (String t : types) {
+            if (t == null) continue;
+            switch (t.toUpperCase()) {
+                case "IMAGE":
+                    exts.addAll(IMAGE_EXTS); break;
+                case "VIDEO":
+                    exts.addAll(VIDEO_EXTS); break;
+                case "AUDIO":
+                    exts.addAll(AUDIO_EXTS); break;
+                case "FILE":
+                    exts.addAll(FILE_EXTS); break;
+                case "ALL":
+                    exts.addAll(IMAGE_EXTS);
+                    exts.addAll(VIDEO_EXTS);
+                    exts.addAll(AUDIO_EXTS);
+                    exts.addAll(FILE_EXTS);
+                    break;
+                default:
+                    // 未知类型忽略
+            }
+        }
+        return exts;
+    }
+
+    /**
+     * 扫描媒体目录，收集满足「扩展名匹配 + 非头像 + （可选）早于 cutoff」的文件。
+     *
+     * @param exts   扩展名集合；空集合 = 不按扩展名过滤（与 {@link #scanMediaFilesUncached} 一致）
+     * @param cutoff 年龄上限；null = 不按年龄过滤
+     */
+    private List<Path> collectMediaFiles(Path root, Set<String> exts, LocalDateTime cutoff) throws IOException {
+        try (Stream<Path> walk = Files.walk(root)) {
+            return walk
+                    .filter(Files::isRegularFile)
+                    .filter(p -> !isAvatarPath(root, p))
+                    .filter(p -> exts.isEmpty() || matchExtension(p, exts))
+                    .filter(p -> cutoff == null || toLocalDateTime(p.toFile().lastModified()).isBefore(cutoff))
+                    .toList();
+        }
+    }
+
+    /**
+     * 删除收集到的文件（物理删除 + file_records 置 inactive + 引用消息软删除）。
+     * 删不掉的文件只记 warn 并跳过，不抛异常——批量清理不能因为一个占用中的文件整体失败。
+     */
+    private PurgeResult deleteCollectedFiles(List<Path> paths, Path root) {
+        List<String> deletedFiles = new ArrayList<>();
+        long totalBytes = 0L;
+        int totalFiles = 0;
+
+        for (Path p : paths) {
+            File f = p.toFile();
+            long size = f.length();
+            if (f.delete()) {
+                totalFiles++;
+                totalBytes += size;
+                deletedFiles.add(root.relativize(p).toString());
+                deactivateFileRecordIfExists(p, root);
+                softDeleteMessagesReferencingFile(root.relativize(p).toString().replace('\\', '/'));
+            } else {
+                log.warn("无法删除文件: {}", f.getAbsolutePath());
+            }
+        }
+
+        return new PurgeResult(totalFiles, totalBytes, deletedFiles, null);
     }
 
     private boolean matchExtension(Path p, Set<String> exts) {
@@ -606,6 +741,55 @@ public class FilePurgeService {
          */
         public String getFreedMB() {
             return String.format("%.2f MB", freedBytes / (1024.0 * 1024.0));
+        }
+    }
+
+    /**
+     * 保留策略预览结果（dry-run，不含任何删除动作）。
+     *
+     * <p>{@link #getView()} 的输出即前端契约：
+     * {@code { days, cutoff, totalFiles, totalBytes, byType: { IMAGE: {count, bytes}, ... } }}。
+     * 控制器会再往这个 map 里补一个 {@code enabled}（当前开关状态），让前端一次请求就能渲染整块面板。</p>
+     */
+    public static class RetentionPreview {
+        private final int days;
+        private final LocalDateTime cutoff;
+        private final int totalFiles;
+        private final long totalBytes;
+        private final Map<String, long[]> byType;
+
+        public RetentionPreview(int days, LocalDateTime cutoff, int totalFiles, long totalBytes,
+                                Map<String, long[]> byType) {
+            this.days = days;
+            this.cutoff = cutoff;
+            this.totalFiles = totalFiles;
+            this.totalBytes = totalBytes;
+            this.byType = byType == null ? new LinkedHashMap<>() : byType;
+        }
+
+        public int getDays() { return days; }
+        public LocalDateTime getCutoff() { return cutoff; }
+        public int getTotalFiles() { return totalFiles; }
+        public long getTotalBytes() { return totalBytes; }
+
+        /** 面向前端的视图：byType 固定输出四类，没有的补 0，前端不用做 null 判断 */
+        public Map<String, Object> getView() {
+            Map<String, Object> view = new LinkedHashMap<>();
+            view.put("days", days);
+            view.put("cutoff", cutoff == null ? null : cutoff.toString());
+            view.put("totalFiles", totalFiles);
+            view.put("totalBytes", totalBytes);
+
+            Map<String, Object> types = new LinkedHashMap<>();
+            for (String t : List.of("IMAGE", "VIDEO", "AUDIO", "FILE")) {
+                long[] slot = byType.getOrDefault(t, new long[]{0L, 0L});
+                Map<String, Object> one = new LinkedHashMap<>();
+                one.put("count", slot[0]);
+                one.put("bytes", slot[1]);
+                types.put(t, one);
+            }
+            view.put("byType", types);
+            return view;
         }
     }
 

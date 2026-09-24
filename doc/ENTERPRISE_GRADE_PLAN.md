@@ -114,6 +114,30 @@
 
 > **A.1 回调（2026-09-24）**：`ROLE_ADMIN` 收得太紧——普通用户拿不到二维码，实际表现是「普通用户登录不了 QQ」。现改为 **`authenticated()`**：匿名仍 401（保住了当初要堵的账号接管面），登录用户（含普通用户）可读，前端 `UserMenuPopover`/`LoginModal` 的二维码区同步对所有登录用户开放；组件启停保持 ADMIN-only。同步更新 `SecurityHardeningTest`、`check-security-hardening.mjs` 与权限矩阵文档。
 
+> **追加功能：媒体保留策略「超过 N 天自动删除」开关（2026-09-24）**
+>
+> 补上媒体生命周期里缺的一环：此前只有「管理员手动按类型清理」，没有任何按时间的保留策略。
+>
+> - **运行时开关**：`file.retention.enabled`（**默认关闭**）+ `file.retention.days`（默认 90 天），
+>   后台「数据维护 → 媒体管理」可改，保存即生效并落盘 `data/application-override.properties`（重启仍生效）；
+>   `file.retention.cron` 与 `file.retention.types` 只走配置（cron 只在启动时注册一次）。
+> - **年龄口径 = 文件修改时间**，与「媒体管理」列表的时间筛选同一口径——避免出现「列表里看着才 3 天、定时任务却按 100 天删掉」。
+> - 新增 `FilePurgeService.purgeMediaOlderThan()` 与 `previewRetention()`：
+>   **预览与实删共用同一次扫描**（同一个 `collectMediaFiles` + 同一个 cutoff），所以「预览说会删 N 个」与「实际删掉 N 个」不会对不上。
+>   顺带把 `purgeMedia` 的删除循环抽成共享的 `deleteCollectedFiles`，三条删除路径不再各写一遍。
+> - **复用既有删除语义**：头像目录保护（`isAvatarPath`）、`file_records` 置 inactive、引用消息软删除、审计留痕
+>   （新增动作 `FILE_RETENTION_PURGE`，**仅在真的删了文件时记录**——每日任务若每次都记「无文件被清理」，审计表一年白涨 365 行）。
+> - **定时任务** `MediaRetentionScheduler`：默认每天 **4:00**（避开 2:00 的消息归档/订阅过期、3:00 的归档清理）；
+>   开关关闭时**连目录扫描都不做**，异常全部 catch 住不影响后续调度。
+> - **配套手动执行** `POST /api/admin/media-retention/run`：与归档功能的「preview + manual」是同一对搭配；
+>   没有它，这个功能只能等到凌晨 4 点才能验收。
+> - **守卫**：新增 `MediaRetentionTest` **9 项**（纯 JUnit、毫秒级，刻意不用 `@SpringBootTest` 以免每方法重建上下文 60s）：
+>   只删超期、头像保留、FILE 类型不在自动清理范围内、天数下界收敛到 1 天（传 0 不会误删刚收到的媒体）、目录不存在安全返回、开关默认关闭、天数区间收敛。
+>
+> > 未做（有意）：客户端本地缓存媒体（分账号分 QQ 存浏览器侧、用户主动删除）。评估结论是**可行但它是缓存不是权威副本**
+> > ——浏览器配额/驱逐/Safari 7 天/无跨设备四条硬约束下，「用户主动删除」无法成为唯一删除路径。
+> > 本轮只做后端这一半，因为它与前端解耦、独立就有价值。
+
 ### 批次 B 交付明细（资金链路幂等与扣费顺序）
 
 | 项 | 改动 | 证据 |
