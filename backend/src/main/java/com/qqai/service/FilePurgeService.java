@@ -675,7 +675,11 @@ public class FilePurgeService {
         }
         try {
             String withSlash = "/" + relativePath;
-            List<Message> messages = messageRepository.findByContentContainingPath(relativePath, withSlash);
+            // 能从路径解析出群号时先按群收窄——否则每删一个文件就是一次全表 LIKE 扫描
+            String groupId = extractGroupIdFromMediaPath(relativePath);
+            List<Message> messages = (groupId != null)
+                    ? messageRepository.findByGroupIdAndContentContainingPath(groupId, relativePath, withSlash)
+                    : messageRepository.findByContentContainingPath(relativePath, withSlash);
             if (messages == null || messages.isEmpty()) {
                 return;
             }
@@ -697,6 +701,32 @@ public class FilePurgeService {
         } catch (Exception e) {
             log.warn("同步软删除引用消息失败: {}", e.getMessage());
         }
+    }
+
+    /** 识别的媒体类型目录名（与 MediaDownloadService 的落盘目录一致） */
+    private static final Set<String> MEDIA_TYPE_DIRS =
+            Set.of("image", "images", "video", "voice", "audio", "file", "files");
+
+    /**
+     * 从媒体相对路径 {@code <mediaType>/<groupId>/<date>/<file>} 中提取群号。
+     *
+     * <p>形态不符（旧版平铺文件、头像、其它中间产物）时返回 null，调用方回退到不带群号的查询，
+     * 保证不漏删——只是那种情况下无法收窄扫描范围。</p>
+     */
+    static String extractGroupIdFromMediaPath(String relativePath) {
+        if (relativePath == null) {
+            return null;
+        }
+        String p = relativePath.startsWith("/") ? relativePath.substring(1) : relativePath;
+        String[] parts = p.split("/");
+        if (parts.length < 3) {
+            return null;
+        }
+        if (!MEDIA_TYPE_DIRS.contains(parts[0].toLowerCase(java.util.Locale.ROOT))) {
+            return null;
+        }
+        String candidate = parts[1];
+        return candidate.matches("\\d{5,}") ? candidate : null;
     }
 
     /**

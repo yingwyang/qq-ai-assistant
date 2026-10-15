@@ -1,60 +1,102 @@
 package com.qqai.service;
 
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.security.SecureRandom;
+import java.time.Duration;
 import java.time.Instant;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
+import java.time.LocalDate;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * QQ绑定验证服务 - 通过向QQ发送验证码私信来验证QQ主人身份
+ *
+ * <p><b>两道频次限制</b>（此前只有第一道，于是登录用户可以把机器人当"给任意 QQ 发私信"的通道）：</p>
+ * <ol>
+ *   <li>每个 QQ 每天最多 {@value #MAX_DAILY_ATTEMPTS} 次；</li>
+ *   <li>每个<b>账号</b>每天最多 {@value #MAX_DAILY_ATTEMPTS_PER_USER} 次（防群发）。</li>
+ * </ol>
+ *
+ * <p><b>存储改有界缓存</b>：原先三个 {@code ConcurrentHashMap} 只靠"恰好读到空"来清理，
+ * 键随 QQ 数无限增长（内存泄漏）。现在统一用 Caffeine 带容量上限 + 自动过期。</p>
  */
 @Service
 public class QqVerificationService {
 
     private static final Logger log = LoggerFactory.getLogger(QqVerificationService.class);
 
-    // 验证码有效期（分钟）
+    /** 验证码有效期（分钟） */
     private static final long CODE_EXPIRE_MINUTES = 5;
-    // 验证码长度
+    /** 验证码长度 */
     private static final int CODE_LENGTH = 6;
-    // 每个QQ每天最多发送验证码次数
+    /** 每个 QQ 每天最多发送验证码次数 */
     private static final int MAX_DAILY_ATTEMPTS = 10;
+    /** 每个账号每天最多发送验证码次数（按账号维度收口，防止把机器人当私信群发器） */
+    private static final int MAX_DAILY_ATTEMPTS_PER_USER = 10;
+    /** 同一验证码最多尝试次数，超过即作废 */
+    private static final int MAX_VERIFY_ATTEMPTS = 10;
+
+    private static final Duration CODE_TTL = Duration.ofMinutes(CODE_EXPIRE_MINUTES);
 
     @Autowired
     private NapCatService napCatService;
 
     private final SecureRandom random = new SecureRandom();
 
-    // 内存存储验证码: key = qqNumber, value = VerificationCode
-    private final Map<String, VerificationCode> codeStore = new ConcurrentHashMap<>();
-    // 每日发送次数限制: key = qqNumber + "_" + date, value = count
-    private final Map<String, Integer> dailyAttemptStore = new ConcurrentHashMap<>();
-    // 验证码验证爆破防护: key = qqNumber, value = 同一验证码累计失败次数
-    private final Map<String, Integer> verifyAttempts = new ConcurrentHashMap<>();
+    /** 验证码：key = qqNumber */
+    private final Cache<String, VerificationCode> codeStore = Caffeine.newBuilder()
+            .maximumSize(10_000)
+            .expireAfterWrite(CODE_TTL)
+            .build();
+
+    /** 每日发送次数：key = qqNumber_yyyy-MM-dd 或 user_<userId>_yyyy-MM-dd */
+    private final Cache<String, AtomicInteger> dailyAttemptStore = Caffeine.newBuilder()
+            .maximumSize(50_000)
+            .expireAfterWrite(Duration.ofDays(1))
+            .build();
+
+    /** 验证码爆破计数：key = qqNumber，与验证码同寿命即可 */
+    private final Cache<String, AtomicInteger> verifyAttempts = Caffeine.newBuilder()
+            .maximumSize(10_000)
+            .expireAfterWrite(CODE_TTL)
+            .build();
+
+    /** 发送结果（区分"被限流"与"发送失败"，便于前端给出准确提示） */
+    public enum SendResult {
+        SENT,
+        RATE_LIMITED,
+        SEND_FAILED
+    }
 
     /**
-     * 发送验证码到指定QQ号
+     * 发送验证码到指定QQ号。
+     *
      * @param qqNumber 目标QQ号
-     * @return 是否发送成功
+     * @param userId   发起请求的系统账号（用于账号级每日限额；为 null 时跳过账号级校验）
+     * @return 发送结果
      */
-    public boolean sendVerificationCode(String qqNumber) {
-        // 检查每日发送次数限制
-        String todayKey = qqNumber + "_" + java.time.LocalDate.now();
-        int attempts = dailyAttemptStore.getOrDefault(todayKey, 0);
-        if (attempts >= MAX_DAILY_ATTEMPTS) {
-            log.warn("QQ {} 今日验证码发送次数已达上限", qqNumber);
-            return false;
+    public SendResult sendVerificationCode(String qqNumber, Long userId) {
+        String today = LocalDate.now().toString();
+
+        // 1) 账号级每日限额：防止一个账号给大量 QQ 发私信（机器人被当群发器）
+        if (userId != null && !incrementWithinLimit("user:" + userId + "_" + today, MAX_DAILY_ATTEMPTS_PER_USER)) {
+            log.warn("账号 {} 今日验证码发送次数已达上限({})，拒绝", userId, MAX_DAILY_ATTEMPTS_PER_USER);
+            return SendResult.RATE_LIMITED;
         }
 
-        // 生成验证码
-        String code = generateCode();
+        // 2) 单个 QQ 每日限额
+        if (!incrementWithinLimit(qqNumber + "_" + today, MAX_DAILY_ATTEMPTS)) {
+            log.warn("QQ {} 今日验证码发送次数已达上限({})，拒绝", qqNumber, MAX_DAILY_ATTEMPTS);
+            return SendResult.RATE_LIMITED;
+        }
 
-        // 构建验证消息
+        // 生成验证码并通过 NapCat 发私信
+        String code = generateCode();
         String message = String.format(
             "【铃音QQ助手】您正在进行QQ账号绑定验证，验证码为：%s\n" +
             "该验证码 %d 分钟内有效，请勿泄露给他人。\n" +
@@ -62,83 +104,83 @@ public class QqVerificationService {
             code, CODE_EXPIRE_MINUTES
         );
 
-        // 通过NapCat发送私信
         boolean sent = napCatService.sendPrivateMessage(qqNumber, message);
-        if (sent) {
-            // 存储验证码
-            codeStore.put(qqNumber, new VerificationCode(code, Instant.now()));
-            // 更新发送次数
-            dailyAttemptStore.put(todayKey, attempts + 1);
-            // 重置爆破计数
-            verifyAttempts.remove(qqNumber);
-            log.info("验证码已发送到QQ {}", qqNumber);
-        } else {
+        if (!sent) {
             log.error("发送验证码到QQ {} 失败", qqNumber);
+            return SendResult.SEND_FAILED;
         }
 
-        return sent;
+        codeStore.put(qqNumber, new VerificationCode(code));
+        verifyAttempts.invalidate(qqNumber);
+        log.info("验证码已发送到QQ {}（发起账号 {}）", qqNumber, userId);
+        return SendResult.SENT;
+    }
+
+    /** 计数 +1 并在达到上限前放行；原子累加，并发下也不会多放行 */
+    private boolean incrementWithinLimit(String key, int maxRequests) {
+        AtomicInteger counter = dailyAttemptStore.get(key, k -> new AtomicInteger());
+        return counter.incrementAndGet() <= maxRequests;
     }
 
     /**
      * 验证验证码
+     *
      * @param qqNumber QQ号
      * @param code 用户输入的验证码
      * @return 验证结果
      */
     public VerificationResult verifyCode(String qqNumber, String code) {
-        VerificationCode stored = codeStore.get(qqNumber);
+        VerificationCode stored = codeStore.getIfPresent(qqNumber);
         if (stored == null) {
             return VerificationResult.NO_CODE;
         }
 
-        // 检查是否过期
-        long elapsedMinutes = java.time.Duration.between(stored.timestamp, Instant.now()).toMinutes();
-        if (elapsedMinutes > CODE_EXPIRE_MINUTES) {
-            codeStore.remove(qqNumber);
+        // 双保险：缓存已有 TTL，这里再按时间判定一次
+        if (isExpired(stored)) {
+            codeStore.invalidate(qqNumber);
             return VerificationResult.EXPIRED;
         }
 
-        // 验证验证码
         if (!stored.code.equalsIgnoreCase(code)) {
             // 爆破防护：累计同一验证码的失败次数
-            int attempts = verifyAttempts.getOrDefault(qqNumber, 0) + 1;
-            verifyAttempts.put(qqNumber, attempts);
-            if (attempts >= 10) {
-                codeStore.remove(qqNumber);
-                verifyAttempts.remove(qqNumber);
-                log.warn("QQ {} 验证码爆破防护触发，累计失败{}次，验证码已作废", qqNumber, attempts);
+            AtomicInteger attempts = verifyAttempts.get(qqNumber, k -> new AtomicInteger());
+            if (attempts.incrementAndGet() >= MAX_VERIFY_ATTEMPTS) {
+                codeStore.invalidate(qqNumber);
+                verifyAttempts.invalidate(qqNumber);
+                log.warn("QQ {} 验证码爆破防护触发，累计失败{}次，验证码已作废", qqNumber, attempts.get());
                 return VerificationResult.EXPIRED;
             }
             return VerificationResult.INVALID;
         }
 
         // 验证成功，清除验证码和爆破计数
-        codeStore.remove(qqNumber);
-        verifyAttempts.remove(qqNumber);
+        codeStore.invalidate(qqNumber);
+        verifyAttempts.invalidate(qqNumber);
         return VerificationResult.SUCCESS;
     }
 
     /**
      * 检查是否存在未过期的验证码
+     *
      * @param qqNumber QQ号
-     * @return 是否存在有效验证码
      */
     public boolean hasValidCode(String qqNumber) {
-        VerificationCode stored = codeStore.get(qqNumber);
+        VerificationCode stored = codeStore.getIfPresent(qqNumber);
         if (stored == null) {
             return false;
         }
-        long elapsedMinutes = java.time.Duration.between(stored.timestamp, Instant.now()).toMinutes();
-        if (elapsedMinutes > CODE_EXPIRE_MINUTES) {
-            codeStore.remove(qqNumber);
+        if (isExpired(stored)) {
+            codeStore.invalidate(qqNumber);
             return false;
         }
         return true;
     }
 
-    /**
-     * 生成随机数字验证码
-     */
+    private boolean isExpired(VerificationCode stored) {
+        return Duration.between(stored.timestamp, Instant.now()).toMinutes() > CODE_EXPIRE_MINUTES;
+    }
+
+    /** 生成随机数字验证码 */
     private String generateCode() {
         StringBuilder sb = new StringBuilder(CODE_LENGTH);
         for (int i = 0; i < CODE_LENGTH; i++) {
@@ -148,26 +190,23 @@ public class QqVerificationService {
     }
 
     /**
-     * 清理过期的验证码（可由定时任务调用）
+     * 兼容旧调用点：缓存已自带过期与容量上限，无需手动清理。
      */
+    @Deprecated
     public void cleanupExpiredCodes() {
-        Instant now = Instant.now();
-        codeStore.entrySet().removeIf(entry -> {
-            long elapsedMinutes = java.time.Duration.between(entry.getValue().timestamp, now).toMinutes();
-            return elapsedMinutes > CODE_EXPIRE_MINUTES;
-        });
+        codeStore.cleanUp();
+        verifyAttempts.cleanUp();
+        dailyAttemptStore.cleanUp();
     }
 
-    /**
-     * 验证码内部类
-     */
+    /** 验证码内部类 */
     private static class VerificationCode {
         final String code;
         final Instant timestamp;
 
-        VerificationCode(String code, Instant timestamp) {
+        VerificationCode(String code) {
             this.code = code;
-            this.timestamp = timestamp;
+            this.timestamp = Instant.now();
         }
     }
 

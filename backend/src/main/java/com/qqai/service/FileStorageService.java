@@ -34,6 +34,10 @@ public class FileStorageService {
     @Autowired
     private FileRecordRepository fileRecordRepository;
 
+    /** 上传类型白名单（配置 file.upload.allowed-types 的唯一执行点） */
+    @Autowired
+    private com.qqai.common.UploadTypePolicy uploadTypePolicy;
+
     @Value("${minio.bucket-name}")
     private String bucketName;
 
@@ -43,16 +47,22 @@ public class FileStorageService {
 
     /**
      * 上传文件
+     *
+     * <p>类型由 {@link UploadTypePolicy} 按配置白名单校验，Content-Type 由扩展名推导——
+     * 不再采信客户端提供的 MIME（否则可把 .html 声明成 image/png 存进来）。</p>
      */
     public FileRecord uploadFile(MultipartFile file, FileRecord.FileType fileType, Long uploaderId) throws Exception {
+        String originalFilename = file.getOriginalFilename();
+        // 白名单校验：不允许则抛 400
+        String extension = uploadTypePolicy.requireAllowedExtension(originalFilename);
+        String contentType = uploadTypePolicy.resolveContentType(originalFilename);
+
         // 生成文件ID
         String fileId = UUID.randomUUID().toString().replace("-", "");
-        
+
         // 确定存储路径
         String folder = getFolderByType(fileType);
-        String originalFilename = file.getOriginalFilename();
-        String extension = getExtension(originalFilename);
-        String objectName = folder + "/" + fileId + extension;
+        String objectName = folder + "/" + fileId + (extension == null ? "" : "." + extension);
 
         // 确保 bucket 存在
         ensureBucketExists();
@@ -63,7 +73,7 @@ public class FileStorageService {
                 .bucket(bucketName)
                 .object(objectName)
                 .stream(file.getInputStream(), file.getSize(), -1)
-                .contentType(file.getContentType())
+                .contentType(contentType)
                 .build()
         );
 
@@ -71,13 +81,13 @@ public class FileStorageService {
         String thumbnailUrl = null;
         Integer width = null;
         Integer height = null;
-        
+
         if (fileType == FileRecord.FileType.IMAGE) {
             BufferedImage originalImage = ImageIO.read(file.getInputStream());
             if (originalImage != null) {
                 width = originalImage.getWidth();
                 height = originalImage.getHeight();
-                
+
                 // 生成缩略图
                 thumbnailUrl = generateThumbnail(file, folder, fileId, extension);
             }
@@ -92,7 +102,7 @@ public class FileStorageService {
         fileRecord.setFileName(originalFilename);
         fileRecord.setFileType(fileType);
         fileRecord.setFileSize(file.getSize());
-        fileRecord.setMimeType(file.getContentType());
+        fileRecord.setMimeType(contentType);
         fileRecord.setStorageType(FileRecord.StorageType.MINIO);
         fileRecord.setBucketName(bucketName);
         fileRecord.setObjectKey(objectName);
@@ -111,8 +121,10 @@ public class FileStorageService {
     public FileRecord uploadBytes(byte[] data, String fileName, FileRecord.FileType fileType, String mimeType, Long uploaderId) throws Exception {
         String fileId = UUID.randomUUID().toString().replace("-", "");
         String folder = getFolderByType(fileType);
-        String extension = getExtension(fileName);
-        String objectName = folder + "/" + fileId + extension;
+        // 同样按白名单校验，并用扩展名推导的 MIME（不采信入参 mimeType）
+        String extension = uploadTypePolicy.requireAllowedExtension(fileName);
+        String contentType = uploadTypePolicy.resolveContentType(fileName);
+        String objectName = folder + "/" + fileId + (extension == null ? "" : "." + extension);
 
         ensureBucketExists();
 
@@ -121,7 +133,7 @@ public class FileStorageService {
                 .bucket(bucketName)
                 .object(objectName)
                 .stream(new ByteArrayInputStream(data), data.length, -1)
-                .contentType(mimeType)
+                .contentType(contentType)
                 .build()
         );
 
@@ -132,7 +144,7 @@ public class FileStorageService {
         fileRecord.setFileName(fileName);
         fileRecord.setFileType(fileType);
         fileRecord.setFileSize((long) data.length);
-        fileRecord.setMimeType(mimeType);
+        fileRecord.setMimeType(contentType);
         fileRecord.setStorageType(FileRecord.StorageType.MINIO);
         fileRecord.setBucketName(bucketName);
         fileRecord.setObjectKey(objectName);
@@ -241,25 +253,28 @@ public class FileStorageService {
 
     /**
      * 生成缩略图
+     *
+     * @param extension 已校验的小写扩展名（不含点）
      */
     private String generateThumbnail(MultipartFile file, String folder, String fileId, String extension) {
         try {
             ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
-            
+            String format = (extension == null || extension.isBlank()) ? "jpg" : extension;
+
             Thumbnails.of(file.getInputStream())
                 .size(THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT)
-                .outputFormat(extension.replace(".", ""))
+                .outputFormat(format)
                 .toOutputStream(outputStream);
 
             byte[] thumbnailBytes = outputStream.toByteArray();
-            String thumbnailObjectName = folder + "/thumbs/" + fileId + "_thumb" + extension;
+            String thumbnailObjectName = folder + "/thumbs/" + fileId + "_thumb." + format;
 
             minioClient.putObject(
                 PutObjectArgs.builder()
                     .bucket(bucketName)
                     .object(thumbnailObjectName)
                     .stream(new ByteArrayInputStream(thumbnailBytes), thumbnailBytes.length, -1)
-                    .contentType(file.getContentType())
+                    .contentType(uploadTypePolicy.resolveContentType(thumbnailObjectName))
                     .build()
             );
 
@@ -301,15 +316,5 @@ public class FileStorageService {
             default:
                 return "others";
         }
-    }
-
-    /**
-     * 获取文件扩展名
-     */
-    private String getExtension(String filename) {
-        if (filename == null || filename.lastIndexOf(".") == -1) {
-            return "";
-        }
-        return filename.substring(filename.lastIndexOf("."));
     }
 }
