@@ -63,6 +63,9 @@ public class SecurityConfig implements WebSocketConfigurer {
     @Autowired
     private NapCatHandshakeInterceptor napCatHandshakeInterceptor;
 
+    @Autowired
+    private MediaAccessFilter mediaAccessFilter;
+
     @Bean
     public Filter requestLoggingFilter() {
         return new OncePerRequestFilter() {
@@ -145,11 +148,10 @@ public class SecurityConfig implements WebSocketConfigurer {
                 .requestMatchers(HttpMethod.POST, "/api/avatar/**").hasRole("ADMIN")
                 .requestMatchers(HttpMethod.DELETE, "/api/avatar/**").hasRole("ADMIN")
                 .requestMatchers("/uploads/avatars/**").permitAll()
-                // 聊天媒体不再公开:任何登录用户经同源 Cookie 访问(前端 <img>/<audio> 自动携带 Cookie)
-                // /images/** 与 /uploads/** 均落入 anyRequest().authenticated()
-                // 但 <video> <img> 标签无法携带 JWT Header，需要允许同源 Cookie 访问
-                .requestMatchers("/images/**").permitAll()
-                .requestMatchers("/uploads/**").permitAll()
+                // 聊天媒体(/images/**、/uploads/**)不再 permitAll：先落到下面的 anyRequest().authenticated()
+                // 要求登录(前端 <img>/<audio> 同源请求会自动带 qqai_token Cookie)，再由 MediaAccessFilter
+                // 做对象级授权(群归属 / TTS 归属 / 中间产物仅 ADMIN)，避免凭 URL 越权读取他人媒体。
+                .requestMatchers("/images/**", "/uploads/**").authenticated()
                 // 管理后台
                 .requestMatchers("/api/admin/**").hasRole("ADMIN")
                 .requestMatchers("/api/credits/admin/**").hasRole("ADMIN")
@@ -170,7 +172,9 @@ public class SecurityConfig implements WebSocketConfigurer {
                 .anyRequest().authenticated()
             )
             .addFilterBefore(requestLoggingFilter(), org.springframework.security.web.context.SecurityContextHolderFilter.class)
-            .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
+            .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
+            // 媒体授权必须排在 JWT 过滤器之后：它依赖 SecurityContext 中已建立的当前用户身份
+            .addFilterAfter(mediaAccessFilter, JwtAuthenticationFilter.class);
 
         return http.build();
     }
@@ -200,6 +204,21 @@ public class SecurityConfig implements WebSocketConfigurer {
     @Bean
     public PasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder();
+    }
+
+    /**
+     * 阻止 Spring Boot 把 {@link MediaAccessFilter} 再自动注册到 Servlet 容器。
+     *
+     * <p>它只应在 Security 过滤器链中执行一次（依赖链内已建立的 SecurityContext）。
+     * 若容器层再注册一份，一旦执行顺序先于安全链，就会因上下文为空把全部媒体请求判成 401。</p>
+     */
+    @Bean
+    public org.springframework.boot.web.servlet.FilterRegistrationBean<MediaAccessFilter> mediaAccessFilterRegistration(
+            MediaAccessFilter filter) {
+        org.springframework.boot.web.servlet.FilterRegistrationBean<MediaAccessFilter> registration =
+                new org.springframework.boot.web.servlet.FilterRegistrationBean<>(filter);
+        registration.setEnabled(false);
+        return registration;
     }
 
     @Bean

@@ -160,6 +160,7 @@
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import MarkdownIt from 'markdown-it';
+import DOMPurify from 'dompurify';
 import { useDocs } from '../composables/useDocs';
 import { useTheme } from '../composables/useTheme';
 import Icon from '../components/Icon.vue';
@@ -197,7 +198,20 @@ export default {
     const currentPage = computed(() => (currentSlug.value ? getPage(currentSlug.value) : null));
     const siblings = computed(() => (currentPage.value ? getSiblingPages(currentPage.value.slug) : { prev: null, next: null }));
 
-    const renderedHtml = computed(() => (currentPage.value ? md.render(currentPage.value.body || '') : ''));
+    const renderedHtml = computed(() => {
+      if (!currentPage.value) return '';
+      // 渲染结果必须过 DOMPurify 再交给 v-html：
+      // markdown-it 打开了 html: true，文档正文里的 <script>/onerror 等会被原样透传到页面（XSS）。
+      // 与 RichTextRenderer 保持同一处消毒口径，白名单也一致。
+      return DOMPurify.sanitize(md.render(currentPage.value.body || ''), {
+        ALLOWED_TAGS: [
+          'a', 'b', 'strong', 'i', 'em', 'code', 'pre', 'blockquote',
+          'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'li', 'p', 'br', 'hr',
+          'table', 'thead', 'tbody', 'tr', 'th', 'td', 'details', 'summary', 'div', 'span', 'section', 'img'
+        ],
+        ALLOWED_ATTR: ['href', 'target', 'rel', 'class', 'title', 'id', 'open', 'src', 'alt']
+      });
+    });
 
     const latestUpdated = computed(() => {
       const dates = categories.value.flatMap(c => c.pages.map(p => p.updated)).filter(Boolean).sort();

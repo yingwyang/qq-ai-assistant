@@ -292,36 +292,75 @@ public class MediaDownloadService {
         return "/images/" + mediaType + "/" + groupId + "/" + dateFolder + "/" + fileName;
     }
 
+    /** 媒体下载最多跟随的重定向跳数（每一跳都要重新过 SSRF 校验） */
+    private static final int MAX_DOWNLOAD_REDIRECTS = 3;
+
     /**
      * 从远程 URL 下载文件到本地路径，返回相对访问路径（成功）或 null（失败）。
+     *
+     * <p><b>重定向必须自己跟随</b>：HttpURLConnection 默认自动跟随 302，而 SSRF 校验只发生在首跳——
+     * 攻击者只需给出一个「会 302 到 http://127.0.0.1:9000/... 的外部地址」，就能把内网内容拉进公开媒体目录。
+     * 因此这里关闭自动跟随，改成逐跳校验、限制跳数。</p>
      */
     private String downloadFromUrl(String mediaUrl, Path localPath, String groupId,
                                    String mediaType, String dateFolder, String fileName) throws IOException {
-        if (isBlockedUrl(mediaUrl)) {
-            log.warn("SSRF防护：拒绝访问内网/敏感地址: {}", mediaUrl);
-            return null;
-        }
-        URL url = new URL(mediaUrl);
-        HttpURLConnection connection = (HttpURLConnection) url.openConnection();
-        connection.setRequestMethod("GET");
-        connection.setConnectTimeout(15000);
-        connection.setReadTimeout(120000);
-        connection.setRequestProperty("User-Agent", "Mozilla/5.0");
-        // 仅对 NapCat 自身的文件服务附带 token;QQ CDN 等第三方地址不应带 Authorization,
-        // 否则部分 CDN 会因未知认证头拒绝请求(视频下载常见 403)。
-        String targetHost = url.getHost() == null ? "" : url.getHost().toLowerCase();
-        boolean isNapCatHost = targetHost.equals(napCatHost)
-                || ("localhost".equals(napCatHost) && ("127.0.0.1".equals(targetHost) || "0.0.0.0".equals(targetHost)));
-        if (isNapCatHost && napCatToken != null && !napCatToken.isBlank()) {
-            connection.setRequestProperty("Authorization", "Bearer " + napCatToken);
-        }
+        String currentUrl = mediaUrl;
+        for (int hop = 0; hop <= MAX_DOWNLOAD_REDIRECTS; hop++) {
+            if (isBlockedUrl(currentUrl)) {
+                log.warn("SSRF防护：拒绝访问内网/敏感地址(第 {} 跳): {}", hop, currentUrl);
+                return null;
+            }
+            URL url = new URL(currentUrl);
+            HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+            connection.setRequestMethod("GET");
+            // 关闭自动重定向：避免跳过后续跳数的 SSRF 校验
+            connection.setInstanceFollowRedirects(false);
+            connection.setConnectTimeout(15000);
+            connection.setReadTimeout(120000);
+            connection.setRequestProperty("User-Agent", "Mozilla/5.0");
+            // 仅对 NapCat 自身的文件服务附带 token;QQ CDN 等第三方地址不应带 Authorization,
+            // 否则部分 CDN 会因未知认证头拒绝请求(视频下载常见 403)。
+            String targetHost = url.getHost() == null ? "" : url.getHost().toLowerCase();
+            boolean isNapCatHost = targetHost.equals(napCatHost)
+                    || ("localhost".equals(napCatHost) && ("127.0.0.1".equals(targetHost) || "0.0.0.0".equals(targetHost)));
+            if (isNapCatHost && napCatToken != null && !napCatToken.isBlank()) {
+                connection.setRequestProperty("Authorization", "Bearer " + napCatToken);
+            }
 
-        int code = connection.getResponseCode();
-        if (code != HttpURLConnection.HTTP_OK) {
-            log.warn("下载{}失败，HTTP状态码: {}, url={}", mediaType, code, mediaUrl);
-            return null;
+            int code = connection.getResponseCode();
+            if (isRedirect(code)) {
+                String location = connection.getHeaderField("Location");
+                connection.disconnect();
+                if (location == null || location.isBlank()) {
+                    log.warn("下载{}失败，重定向缺少 Location: {}", mediaType, currentUrl);
+                    return null;
+                }
+                // 相对 Location 按当前地址解析成绝对地址，下一轮循环会重新校验
+                currentUrl = new URL(url, location.trim()).toString();
+                log.info("媒体下载跟随重定向(第 {} 跳): {} -> {}", hop + 1, url, currentUrl);
+                continue;
+            }
+            if (code != HttpURLConnection.HTTP_OK) {
+                log.warn("下载{}失败，HTTP状态码: {}, url={}", mediaType, code, currentUrl);
+                return null;
+            }
+            return downloadBody(connection, localPath, mediaType, groupId, dateFolder, fileName, currentUrl);
         }
+        log.warn("下载{}失败，重定向次数超过上限 {}: 起始地址={}", mediaType, MAX_DOWNLOAD_REDIRECTS, mediaUrl);
+        return null;
+    }
 
+    private static boolean isRedirect(int code) {
+        return code == HttpURLConnection.HTTP_MOVED_PERM        // 301
+                || code == HttpURLConnection.HTTP_MOVED_TEMP    // 302
+                || code == HttpURLConnection.HTTP_SEE_OTHER     // 303
+                || code == 307
+                || code == 308;
+    }
+
+    /** 读取 200 响应体落盘：含体积上限与「错误响应」识别 */
+    private String downloadBody(HttpURLConnection connection, Path localPath, String mediaType,
+                                String groupId, String dateFolder, String fileName, String finalUrl) throws IOException {
         long maxBytes = maxDownloadBytes(mediaType);
         long contentLength = connection.getContentLengthLong();
         if (contentLength > maxBytes) {
@@ -355,7 +394,7 @@ public class MediaDownloadService {
             }
         }
 
-        log.info("媒体下载完成: type={}, bytes={}, url={}", mediaType, fileSize, mediaUrl);
+        log.info("媒体下载完成: type={}, bytes={}, url={}", mediaType, fileSize, finalUrl);
         return finishLocalFile(localPath, groupId, mediaType, dateFolder, fileName);
     }
 

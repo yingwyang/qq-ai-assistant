@@ -53,6 +53,9 @@ public class SubscriptionsController {
     @Autowired
     private SecurityHelper securityHelper;
 
+    @Autowired
+    private com.qqai.common.ClientIpResolver clientIpResolver;
+
     @Autowired(required = false)
     private AuditLogService auditLogService;
 
@@ -324,18 +327,11 @@ public class SubscriptionsController {
         return orderMapper.toUserView(o);
     }
 
+    /**
+     * 客户端 IP：统一走 {@link com.qqai.common.ClientIpResolver}。
+     * 原实现无条件采信 X-Forwarded-For，客户端可伪造 → 审计记录里的 IP 不可信。
+     */
     private String getClientIp(HttpServletRequest request) {
-        if (request == null) return "127.0.0.1";
-        String ip = request.getHeader("X-Forwarded-For");
-        if (ip == null || ip.isEmpty() || "unknown".equalsIgnoreCase(ip)) {
-            ip = request.getHeader("X-Real-IP");
-        }
-        if (ip == null || ip.isEmpty() || "unknown".equalsIgnoreCase(ip)) {
-            ip = request.getRemoteAddr();
-        }
-        if (ip != null && ip.contains(",")) {
-            ip = ip.split(",")[0].trim();
-        }
-        return (ip == null || ip.isBlank()) ? "127.0.0.1" : ip;
+        return clientIpResolver.resolve(request);
     }
 }

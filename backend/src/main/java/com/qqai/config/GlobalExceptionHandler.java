@@ -26,6 +26,8 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.multipart.MultipartException;
+import org.springframework.web.servlet.NoHandlerFoundException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.util.NoSuchElementException;
 import java.util.UUID;
@@ -164,6 +166,22 @@ public class GlobalExceptionHandler {
         log.warn("[traceId={}] Method not supported: {}", traceId, msg);
         return ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED)
                 .body(ApiResponse.errorWithTrace(405, "METHOD_NOT_ALLOWED", msg, traceId));
+    }
+
+    /**
+     * 静态资源 / 未知路径找不到 → 404，且不打 ERROR 堆栈。
+     *
+     * <p>Spring 6.1 起静态资源未命中会抛 {@link NoResourceFoundException}，此前落到兜底 handler 变成
+     * 500 + ERROR 堆栈：媒体被清理后前端仍引用旧地址、头像兜底图等正常场景都会刷满错误日志，
+     * 既污染排障又给了"刷日志"的可乘之机。</p>
+     */
+    @ExceptionHandler({NoResourceFoundException.class, NoHandlerFoundException.class})
+    public ResponseEntity<ApiResponse<Void>> handleNoResourceFound(Exception e,
+                                                                  HttpServletRequest request) {
+        String traceId = ensureTraceId();
+        log.debug("[traceId={}] No resource/handler: {}", traceId, request.getRequestURI());
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(ApiResponse.error(404, "NOT_FOUND", "资源不存在"));
     }
 
     // ==================== 413 文件上传 ====================

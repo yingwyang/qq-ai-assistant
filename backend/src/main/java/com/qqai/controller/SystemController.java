@@ -1,5 +1,6 @@
 package com.qqai.controller;
 
+import com.qqai.common.RateLimiterService;
 import com.qqai.common.SecurityHelper;
 import com.qqai.dto.common.ApiResponse;
 import com.qqai.security.AuthPrincipal;
@@ -150,6 +151,69 @@ public class SystemController {
     @Autowired
     private SecurityHelper securityHelper;
 
+    @Autowired
+    private RateLimiterService rateLimiterService;
+
+    /** 二维码接口限流：同一用户每分钟最多 20 次（正常使用是打开弹窗/点刷新，远低于此值） */
+    private static final int QR_MAX_PER_MINUTE = 20;
+
+    /**
+     * 二维码接口守卫：区分「登录」与「换号」。
+     *
+     * <p>产品约束：扫码登录 QQ 是普通用户也要用的功能，不能整体收成 ADMIN
+     * （2026-09-24 曾收成 ADMIN-only，直接导致普通用户登录不了 QQ）。</p>
+     *
+     * <p>但两者风险不同：机器人<b>未登录</b> QQ 时拉二维码 = 正常登录（放行）；
+     * 机器人<b>已登录</b>时再拉二维码 = 顶掉当前账号换号，属于敏感操作 → 仅管理员。
+     * 顺带补上审计与限流：此前这三个接口既无痕迹也无频次约束，出事后无从追查。</p>
+     *
+     * @param action       审计动作名
+     * @param auditSuccess 成功是否也记审计（仅 /qrcode：它会触发 NapCat 重新生成二维码，是顶号起点）
+     * @return null 表示放行，否则返回应直接回给前端的响应
+     */
+    private ResponseEntity<?> guardQrCodeAccess(String action, boolean auditSuccess) {
+        String actor = currentUsername();
+
+        if (!rateLimiterService.isAllowed("napcat-qrcode:" + actor, QR_MAX_PER_MINUTE, 1)) {
+            log.warn("【安全】用户 {} 二维码接口调用过于频繁，已限流", actor);
+            auditLogService.log(actor, action, "napcat", "FAIL", "二维码接口调用过于频繁");
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                    .body(ApiResponse.error(429, "二维码获取过于频繁，请稍后重试"));
+        }
+
+        boolean loggedIn = isNapCatLoggedIn();
+        if (loggedIn && !securityHelper.isAdmin()) {
+            log.warn("【安全】机器人已登录 QQ，普通用户 {} 尝试重新获取登录二维码（换号），已拒绝", actor);
+            auditLogService.log(actor, action, "napcat", "FAIL",
+                    "机器人已登录 QQ，更换登录账号需管理员权限");
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(ApiResponse.error(403, "机器人当前已登录 QQ，更换登录账号需要管理员权限"));
+        }
+
+        if (auditSuccess) {
+            auditLogService.log(actor, action, "napcat", "SUCCESS",
+                    loggedIn ? "已登录状态下重新生成二维码（管理员换号）" : "获取登录二维码（机器人未登录）");
+        }
+        return null;
+    }
+
+    /**
+     * NapCat 当前是否已登录 QQ。
+     *
+     * <p>刻意不加缓存：这是「是否允许换号」的判定依据，缓存会让判定滞后（机器人刚登录后仍可能
+     * 被普通用户顶号）。该调用只打本机 NapCat，且本接口已按用户限流，代价可接受。</p>
+     *
+     * <p>判定失败按「已登录」从严处理（fail-closed）：宁可让普通用户去找管理员，也不放行顶号。</p>
+     */
+    private boolean isNapCatLoggedIn() {
+        try {
+            return napCatService.checkLoginStatus();
+        } catch (Exception e) {
+            log.warn("查询 NapCat 登录状态失败，按已登录从严处理: {}", e.getMessage());
+            return true;
+        }
+    }
+
     /**
      * 获取当前登录管理员用户名（用于审计）
      */
@@ -251,7 +315,12 @@ public class SystemController {
     }
 
     @GetMapping("/napcat/qrcode")
-    public ResponseEntity<ApiResponse<Map<String, String>>> getNapCatQrCode() throws Exception {
+    public ResponseEntity<?> getNapCatQrCode() throws Exception {
+        // 已登录状态下重新拉二维码 = 换号顶号，仅管理员；未登录状态普通用户可正常登录
+        ResponseEntity<?> denied = guardQrCodeAccess("NAPCAT_QRCODE_FETCH", true);
+        if (denied != null) {
+            return denied;
+        }
         Map<String, String> result = new HashMap<>();
         String qrCode = napCatService.getLoginQrCode();
         result.put("qrcode", qrCode);
@@ -271,7 +340,11 @@ public class SystemController {
     }
 
     @GetMapping("/napcat/qrcode-path")
-    public ResponseEntity<ApiResponse<Map<String, String>>> getNapCatQrCodePath() throws Exception {
+    public ResponseEntity<?> getNapCatQrCodePath() throws Exception {
+        ResponseEntity<?> denied = guardQrCodeAccess("NAPCAT_QRCODE_PATH", false);
+        if (denied != null) {
+            return denied;
+        }
         Map<String, String> result = new HashMap<>();
         String qrCodePath = napCatService.getQrCodePath();
         result.put("qrcodePath", qrCodePath);
@@ -279,7 +352,11 @@ public class SystemController {
     }
 
     @GetMapping("/napcat/qrcode-image")
-    public ResponseEntity<Resource> getNapCatQrCodeImage() throws Exception {
+    public ResponseEntity<?> getNapCatQrCodeImage() throws Exception {
+        ResponseEntity<?> denied = guardQrCodeAccess("NAPCAT_QRCODE_IMAGE", false);
+        if (denied != null) {
+            return denied;
+        }
         String qrCodePath = napCatService.getQrCodePath();
         File file = new File(qrCodePath);
         if (!file.exists()) {

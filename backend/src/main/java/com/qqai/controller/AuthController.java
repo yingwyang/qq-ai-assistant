@@ -1,6 +1,7 @@
 package com.qqai.controller;
 
 import com.qqai.common.AvatarResolver;
+import com.qqai.common.ClientIpResolver;
 import com.qqai.common.RateLimiterService;
 import com.qqai.config.AppCookieProperties;
 import com.qqai.config.AppRegistrationProperties;
@@ -81,6 +82,9 @@ public class AuthController {
 
     @Autowired
     private RateLimiterService rateLimiterService;
+
+    @Autowired
+    private ClientIpResolver clientIpResolver;
 
     @Autowired
     private PluginEnsureService pluginEnsureService;
@@ -330,7 +334,9 @@ public class AuthController {
             try {
                 if (jwtUtil.validateToken(token)) {
                     String jti = jwtUtil.getJtiFromToken(token);
-                    tokenBlacklistService.invalidateJti(jti);
+                    // 用 token 自身的过期时间作为黑名单条目寿命：
+                    // 否则「记住我」的 30 天 token 会在固定 24h 后从黑名单消失、重新可用
+                    tokenBlacklistService.invalidateJti(jti, jwtUtil.getExpirationFromToken(token));
                 }
             } catch (Exception ignored) {
                 // ignore
@@ -373,10 +379,11 @@ public class AuthController {
         return responseMap;
     }
 
+    /**
+     * 客户端 IP：统一走 {@link ClientIpResolver}。
+     * 直接取 X-Forwarded-For 会让登录/注册限流被一行伪造头绕过，故仅在来源是可信反代时才采信。
+     */
     private String resolveClientIp(HttpServletRequest request) {
-        String clientIp = request.getRemoteAddr();
-        String xff = request.getHeader("X-Forwarded-For");
-        if (xff != null && !xff.isBlank()) clientIp = xff.split(",")[0].trim();
-        return clientIp;
+        return clientIpResolver.resolve(request);
     }
 }

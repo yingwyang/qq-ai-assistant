@@ -144,6 +144,9 @@ python:
 file:
   upload:
     max-size: 100MB
+    # 上传类型白名单（UploadTypePolicy 执行）：支持 image/* video/* audio/* 通配与 .pdf 这类单扩展名。
+    # 不在白名单内的扩展名一律 400；文件的 Content-Type 由扩展名推导，不采信客户端声明的 MIME。
+    # 留空 = 不限制类型。
     allowed-types: image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip
   # 媒体下载体积上限(从 QQ/NapCat 拉取媒体时生效)
   download:
@@ -177,7 +180,13 @@ jwt:
   expiration: ${JWT_EXPIRATION:86400000}
 
 # 注册与账户安全配置
+# 出站 HTTP 超时（毫秒）。所有出站调用都必须有超时：下游卡死时无超时的客户端会永久占用调用线程，
+# 并发一高就把 Tomcat 线程池占满、整个服务无响应。
 app:
+  http:
+    connect-timeout-ms: ${HTTP_CONNECT_TIMEOUT_MS:10000}     # 连接超时
+    response-timeout-ms: ${HTTP_RESPONSE_TIMEOUT_MS:60000}   # 轻量内部调用（NapCat 等）读取超时
+    long-timeout-ms: ${HTTP_LONG_TIMEOUT_MS:300000}          # 大模型 / 语音合成等长耗时调用的读取超时
   registration:
     enabled: ${APP_REGISTRATION_ENABLED:true}
     rate-limit-per-ip: 5
@@ -190,6 +199,12 @@ app:
     # qqai_token Cookie 是否只在 HTTPS 下传输。本地 HTTP 开发保持 false；
     # **生产 HTTPS 部署必须设为 true**（环境变量 APP_COOKIE_SECURE=true），否则令牌会在明文 HTTP 上传输。
     secure: ${APP_COOKIE_SECURE:false}
+  security:
+    # 可信反向代理地址（逗号分隔，支持精确 IP 与 CIDR）。默认仅本机回环。
+    # 只有 TCP 来源属于该列表时，才采信 X-Forwarded-For / X-Real-IP 作为客户端 IP；
+    # 否则一律用 TCP 源地址——否则客户端伪造转发头即可绕过按 IP 的登录/注册限流。
+    # 部署在 nginx / 网关之后时，把网关地址（如 172.17.0.0/16）加进来。
+    trusted-proxies: "${TRUSTED_PROXIES:127.0.0.1,::1}"
 
 # AI 摘要（阶段 1 单条按需 / 阶段 2 批量 / 阶段 3 群日报）
 ai:
