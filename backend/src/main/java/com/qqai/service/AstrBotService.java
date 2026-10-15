@@ -33,6 +33,10 @@ public class AstrBotService {
     @Autowired
     private CloseableHttpClient httpClient;
 
+    /** 共享的带超时客户端（大模型/上传等；原先 new RestTemplate() 无超时） */
+    @Autowired
+    private org.springframework.web.client.RestTemplate restTemplate;
+
     @Autowired
     private ProcessManager processManager;
 
@@ -230,8 +234,7 @@ public class AstrBotService {
                 body.add("file", new org.springframework.core.io.FileSystemResource(f));
                 org.springframework.http.HttpEntity<org.springframework.util.MultiValueMap<String, Object>> entity =
                         new org.springframework.http.HttpEntity<>(body, headers);
-                org.springframework.web.client.RestTemplate rt = new org.springframework.web.client.RestTemplate();
-                String respBody = rt.postForObject(astrBotApiUrl + "/api/v1/file", entity, String.class);
+                String respBody = restTemplate.postForObject(astrBotApiUrl + "/api/v1/file", entity, String.class);
                 if (respBody != null) {
                     JsonNode node = objectMapper.readTree(respBody);
                     String id = node.path("data").path("attachment_id").asText(null);

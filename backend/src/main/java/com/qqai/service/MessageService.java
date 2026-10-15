@@ -145,6 +145,33 @@ public class MessageService {
         return messageRepository.findByGroupIdOrderBySendTimeDesc(groupId);
     }
 
+    /** 单次取群消息的默认条数 / 硬上限：超大群整群历史一次性进内存会 OOM */
+    public static final int DEFAULT_GROUP_MESSAGE_FETCH = 200;
+    public static final int MAX_GROUP_MESSAGE_FETCH = 500;
+
+    /** 只取最近 limit 条（不排除已归档/已删除，口径与 getMessagesByGroupIdAndUser 一致） */
+    public List<Message> getRecentMessages(String groupId, String selfQq, int limit) {
+        return messageRepository.findRecentByGroupIdAndSelfQq(groupId, selfQq, pageOf(limit));
+    }
+
+    /** 只取最近 limit 条（不排除已归档/已删除，口径与 getMessagesByGroupIdAndUserQqList 一致） */
+    public List<Message> getRecentMessages(String groupId, List<String> selfQqList, int limit) {
+        return messageRepository.findRecentByGroupIdAndSelfQqIn(groupId, selfQqList, pageOf(limit));
+    }
+
+    /**
+     * 只取最近 limit 条<b>有效</b>消息（排除已归档/已删除），供 AI 分析、群类型识别等抽取场景。
+     * 这些场景本来就只用末尾若干条样本，全量加载纯属浪费且会 OOM。
+     */
+    public List<Message> getRecentActiveMessages(String groupId, int limit) {
+        return messageRepository.findMessagesByGroupIdWithLimit(groupId, pageOf(limit));
+    }
+
+    private static Pageable pageOf(int limit) {
+        int size = Math.min(Math.max(limit, 1), MAX_GROUP_MESSAGE_FETCH);
+        return PageRequest.of(0, size);
+    }
+
     public List<Message> getMessagesByGroupIdPaged(String groupId, Pageable pageable) {
         return messageRepository.findMessagesByGroupIdWithLimit(groupId, pageable);
     }
@@ -434,6 +461,18 @@ public class MessageService {
 
     public Optional<Message> getMessageById(Long id) {
         return messageRepository.findById(id);
+    }
+
+    /**
+     * 按 ID 批量取消息（一次 IN 查询）。
+     * 替代调用方 for 循环里逐个 {@code getMessageById}——那是典型 N+1，选中 100 条消息就是 100 次往返。
+     * 注意：返回顺序不保证与入参一致，需要顺序的调用方请自行按入参重排。
+     */
+    public List<Message> getMessagesByIds(List<Long> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return List.of();
+        }
+        return messageRepository.findAllById(ids);
     }
 
     /** 取群类型（按需摘要接口复用，口径与 AI 分析消费者一致；取不到返回 null） */

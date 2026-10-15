@@ -102,7 +102,10 @@ public class AstrBotPersonaService {
     private PromptTemplateService promptTemplateService;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
-    private final RestTemplate restTemplate = new RestTemplate();
+
+    /** 共享的带超时客户端（原先 new RestTemplate() 无超时） */
+    @Autowired
+    private RestTemplate restTemplate;
 
     /** personaId → 档案是否已就绪，省掉每次请求都查库/打接口 */
     private final Map<String, Boolean> readyCache = new ConcurrentHashMap<>();

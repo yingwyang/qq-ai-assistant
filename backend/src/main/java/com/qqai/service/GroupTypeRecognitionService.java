@@ -99,16 +99,15 @@ public class GroupTypeRecognitionService {
             }
         }
 
-        // 1. 取最近消息样本
-        List<Message> messages = messageService.getMessagesByGroupId(groupId);
-        if (messages == null || messages.isEmpty()) {
+        // 1. 取最近消息样本（有界查询：只取最近 SAMPLE_COUNT 条）
+        //    原先查全量后 subList(size-N, size)，而查询是「新→旧」排序，尾部其实是最旧的 N 条，
+        //    与「取最近消息样本」的意图相反；改为有界查询后取到的才是真正最近的样本。
+        List<Message> recent = messageService.getRecentActiveMessages(groupId, SAMPLE_COUNT);
+        if (recent == null || recent.isEmpty()) {
             RecognitionResult result = new RecognitionResult("OTHER", 0.0, "群聊无消息，无法判断");
             cacheResult(groupId, result);
             return result;
         }
-
-        int fromIndex = Math.max(0, messages.size() - SAMPLE_COUNT);
-        List<Message> recent = messages.subList(fromIndex, messages.size());
 
         StringBuilder samples = new StringBuilder();
         for (Message m : recent) {

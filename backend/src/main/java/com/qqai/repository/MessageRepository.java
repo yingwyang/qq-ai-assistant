@@ -144,6 +144,15 @@ public interface MessageRepository extends JpaRepository<Message, Long>, JpaSpec
     List<Message> findByGroupIdAndSelfQqOrderBySendTimeDesc(@Param("groupId") String groupId, @Param("selfQq") String selfQq);
 
     /**
+     * 与 {@link #findByGroupIdAndSelfQqOrderBySendTimeDesc} 同口径，但只取最近 limit 条。
+     * 超大群里「整群历史一次性进内存」会 OOM，凡是给前端/LLM 用的列表都要走有界查询。
+     */
+    @Query("SELECT m FROM Message m WHERE m.groupId = :groupId AND m.selfQq = :selfQq ORDER BY m.serverRecvMs DESC, m.id DESC")
+    List<Message> findRecentByGroupIdAndSelfQq(@Param("groupId") String groupId,
+                                               @Param("selfQq") String selfQq,
+                                               org.springframework.data.domain.Pageable pageable);
+
+    /**
      * 根据群聊ID和登录者QQ查询未归档&未被用户删除的消息（分页）
      */
     @Query("SELECT m FROM Message m WHERE m.groupId = :groupId AND m.selfQq = :selfQq AND m.archived = false AND m.deleted = false ORDER BY m.serverRecvMs DESC, m.id DESC")
@@ -168,6 +177,14 @@ public interface MessageRepository extends JpaRepository<Message, Long>, JpaSpec
      */
     @Query("SELECT m FROM Message m WHERE m.groupId = :groupId AND m.selfQq IN :selfQqList ORDER BY m.serverRecvMs DESC, m.id DESC")
     List<Message> findByGroupIdAndSelfQqInOrderBySendTimeDesc(@Param("groupId") String groupId, @Param("selfQqList") List<String> selfQqList);
+
+    /**
+     * 与 {@link #findByGroupIdAndSelfQqInOrderBySendTimeDesc} 同口径，但只取最近 limit 条（有界，防 OOM）。
+     */
+    @Query("SELECT m FROM Message m WHERE m.groupId = :groupId AND m.selfQq IN :selfQqList ORDER BY m.serverRecvMs DESC, m.id DESC")
+    List<Message> findRecentByGroupIdAndSelfQqIn(@Param("groupId") String groupId,
+                                                 @Param("selfQqList") List<String> selfQqList,
+                                                 org.springframework.data.domain.Pageable pageable);
 
     /**
      * 根据群聊ID和多个登录者QQ查询未归档&未被用户删除的消息（分页）
@@ -216,6 +233,19 @@ public interface MessageRepository extends JpaRepository<Message, Long>, JpaSpec
      */
     @Query("SELECT m FROM Message m WHERE m.content LIKE %:path1% OR m.content LIKE %:path2%")
     List<Message> findByContentContainingPath(@Param("path1") String path1, @Param("path2") String path2);
+
+    /**
+     * 与 {@link #findByContentContainingPath} 同义，但先用 groupId 把范围收窄到单个群。
+     *
+     * <p>清理媒体时会「每删一个文件调一次」；不带群号过滤就是每删一个文件全表 LIKE 扫一遍，
+     * 批量清理 N 个文件 = N 次全表扫描。带 groupId 后可用 idx_group_time 的群号前缀，
+     * 只扫该群消息。</p>
+     */
+    @Query("SELECT m FROM Message m WHERE m.groupId = :groupId "
+            + "AND (m.content LIKE %:path1% OR m.content LIKE %:path2%)")
+    List<Message> findByGroupIdAndContentContainingPath(@Param("groupId") String groupId,
+                                                        @Param("path1") String path1,
+                                                        @Param("path2") String path2);
 
     /**
      * 统计消息最多的QQ账号（取前10）

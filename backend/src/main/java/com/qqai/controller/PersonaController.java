@@ -32,6 +32,10 @@ public class PersonaController {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
+    /** 共享的带超时客户端（调用 AstrBot 配置保存接口用） */
+    @org.springframework.beans.factory.annotation.Autowired
+    private org.springframework.web.client.RestTemplate restTemplate;
+
     private Connection getConnection() throws SQLException {
         String dbPath = astrbotDataPath + "/data_v4.db";
         return DriverManager.getConnection("jdbc:sqlite:" + dbPath);
@@ -298,8 +302,9 @@ public class PersonaController {
 
             org.springframework.http.HttpEntity<Map<String, Object>> entity = new org.springframework.http.HttpEntity<>(body, headers);
 
-            org.springframework.web.client.RestTemplate restTemplate = new org.springframework.web.client.RestTemplate();
-            org.springframework.http.ResponseEntity<String> response = restTemplate.postForEntity(url, entity, String.class);
+            // 共享的带超时客户端（原先 new RestTemplate() 无超时）
+            org.springframework.http.ResponseEntity<String> response =
+                    restTemplate.postForEntity(url, entity, String.class);
 
             log.debug("【调试】AstrBot 配置保存 API 响应: {}", response.getBody());
         } catch (Exception e) {

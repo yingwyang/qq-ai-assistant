@@ -1,9 +1,9 @@
 package com.qqai.config;
 
-import com.qqai.entity.User;
 import com.qqai.repository.UserRepository;
 import com.qqai.security.JwtUtil;
 import com.qqai.security.TokenBlacklistService;
+import io.jsonwebtoken.Claims;
 import jakarta.servlet.http.Cookie;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.server.ServerHttpRequest;
@@ -14,7 +14,6 @@ import org.springframework.web.socket.WebSocketHandler;
 import org.springframework.web.socket.server.HandshakeInterceptor;
 
 import java.util.Map;
-import java.util.Optional;
 
 /**
  * 前端下行 WebSocket (/ws/messages) 握手拦截器。
@@ -49,32 +48,38 @@ public class JwtHandshakeInterceptor implements HandshakeInterceptor {
         }
 
         String token = readToken(servletRequest);
-        if (token == null || token.isEmpty() || !jwtUtil.validateToken(token)) {
+        if (token == null || token.isEmpty()) {
             return false;
         }
 
-        String jti = jwtUtil.getJtiFromToken(token);
+        // 一次解析拿全部声明（原先 validateToken + 逐个 getXxxFromToken 会对同一 token 解析 4 遍）
+        Claims claims = jwtUtil.parseTokenSafely(token);
+        if (claims == null) {
+            return false;
+        }
+
+        String jti = claims.getId();
         if (jti == null || tokenBlacklistService.isJtiBlacklisted(jti)) {
             return false;
         }
 
-        Long userId = jwtUtil.getUserIdFromToken(token);
-        Integer tvClaim = jwtUtil.getTokenVersionFromToken(token);
+        Long userId = claims.get("uid", Long.class);
+        Integer tvClaim = claims.get("tv", Integer.class);
         if (userId == null) {
             return false;
         }
 
-        Optional<User> userOpt = userRepository.findById(userId);
-        if (userOpt.isEmpty() || !userOpt.get().isActive()) {
+        UserRepository.AuthSnapshot snapshot = userRepository.findAuthSnapshotById(userId).orElse(null);
+        if (snapshot == null || !Boolean.TRUE.equals(snapshot.getActive())) {
             return false;
         }
-        Integer dbTv = userOpt.get().getTokenVersion() != null ? userOpt.get().getTokenVersion() : 0;
+        Integer dbTv = snapshot.getTokenVersion() != null ? snapshot.getTokenVersion() : 0;
         if (!dbTv.equals(tvClaim)) {
             return false;
         }
 
         attributes.put(ATTR_USER_ID, userId);
-        attributes.put(ATTR_USERNAME, jwtUtil.getUsernameFromToken(token));
+        attributes.put(ATTR_USERNAME, claims.getSubject());
         return true;
     }
 

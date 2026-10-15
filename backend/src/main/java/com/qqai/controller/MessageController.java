@@ -213,10 +213,19 @@ public class MessageController {
         return ResponseEntity.ok(ApiResponse.success(saved));
     }
 
+    /**
+     * 取群消息（有界）。
+     *
+     * <p>此前是「整群历史全量返回」，超大群会把整个结果集拉进内存（OOM）。现在只返回最近
+     * {@code limit} 条，默认 {@value com.qqai.service.MessageService#DEFAULT_GROUP_MESSAGE_FETCH}、
+     * 上限 {@value com.qqai.service.MessageService#MAX_GROUP_MESSAGE_FETCH}。
+     * 需要翻页请用 {@code /group/{groupId}/paged}，增量请用 {@code /since}。</p>
+     */
     @GetMapping("/group/{groupId}")
     public ResponseEntity<ApiResponse<List<Message>>> getMessagesByGroupId(
             @PathVariable String groupId,
-            @RequestParam(required = false) String selfQq) {
+            @RequestParam(required = false) String selfQq,
+            @RequestParam(required = false) Integer limit) {
         Long userId = securityHelper.getCurrentUserId();
         if (userId == null) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
@@ -236,11 +245,12 @@ public class MessageController {
                     .body(ApiResponse.error(403, "无权访问该群聊"));
         }
 
+        int fetch = limit != null ? limit : com.qqai.service.MessageService.DEFAULT_GROUP_MESSAGE_FETCH;
         List<Message> messages;
         if (selfQq != null && !selfQq.isBlank() && userQqList.contains(selfQq)) {
-            messages = messageService.getMessagesByGroupIdAndUser(groupId, selfQq);
+            messages = messageService.getRecentMessages(groupId, selfQq, fetch);
         } else {
-            messages = messageService.getMessagesByGroupIdAndUserQqList(groupId, userQqList);
+            messages = messageService.getRecentMessages(groupId, userQqList, fetch);
         }
         return ResponseEntity.ok(ApiResponse.success(messages));
     }

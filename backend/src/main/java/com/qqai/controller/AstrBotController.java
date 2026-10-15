@@ -127,7 +127,13 @@ public class AstrBotController {
     @Value("${server.address:localhost}")
     private String serverAddress;
 
-    private final RestTemplate restTemplate = new RestTemplate();
+    /** 调试开关：true 时回调接口会打印完整载荷（含聊天正文），仅排查链路时临时打开 */
+    @Value("${app.debug.log-media-payload:false}")
+    private boolean logMediaPayload;
+
+    /** AstrBot 大模型调用统一走带超时的共享客户端（原先 new RestTemplate() 无超时，下游卡死会占满 Tomcat 线程） */
+    @Autowired
+    private RestTemplate restTemplate;
 
     private final ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
 
@@ -220,8 +226,8 @@ public class AstrBotController {
 
                 HttpEntity<MultiValueMap<String, Object>> uploadEntity = new HttpEntity<>(multipartBody, uploadHeaders);
 
-                RestTemplate uploadRestTemplate = new RestTemplate();
-                ResponseEntity<String> uploadResp = uploadRestTemplate.postForEntity(uploadUrl, uploadEntity, String.class);
+                // 复用共享客户端（带超时），不再每次 new 一个无超时实例
+                ResponseEntity<String> uploadResp = restTemplate.postForEntity(uploadUrl, uploadEntity, String.class);
 
                 if (uploadResp.getStatusCode().is2xxSuccessful() && uploadResp.getBody() != null) {
                     JsonNode respJson = objectMapper.readTree(uploadResp.getBody());
@@ -392,7 +398,13 @@ public class AstrBotController {
      */
     @PostMapping("/callback")
     public ResponseEntity<?> receiveFromAstrBot(@RequestBody String payload) {
-        log.info("【AstrBot回调】收到消息: {}", payload);
+        // 脱敏：不再打印完整载荷（含聊天正文）。与 RootWebhookController 同口径，只记长度；
+        // 需要排查时用 app.debug.log-media-payload=true 临时打开全文。
+        log.info("【AstrBot回调】收到消息, payload长度={}", payload != null ? payload.length() : 0);
+        if (logMediaPayload && payload != null) {
+            log.info("【AstrBot回调】完整载荷(调试开关已开): {}",
+                    payload.length() > 4000 ? payload.substring(0, 4000) : payload);
+        }
 
         try {
             JsonNode json = objectMapper.readTree(payload);
@@ -404,7 +416,16 @@ public class AstrBotController {
             String senderName = json.has("sender_name") ? json.get("sender_name").asText() : null;
             String groupId = json.has("group_id") ? json.get("group_id").asText() : null;
             String sessionId = json.has("session_id") ? json.get("session_id").asText() : null;
-            
+
+            // 归属校验：回调会把内容写进消息库，群消息必须落在调用者自己绑定 QQ 拥有的群（管理员豁免），
+            // 否则任何登录用户都能往别人的群里塞假消息。口径与 /analyze 一致。
+            if (groupId != null && !groupId.isBlank()
+                    && !securityHelper.isAdmin() && !securityHelper.hasGroupAccess(groupId)) {
+                log.warn("【安全】拒绝 AstrBot 回调写入无权访问的群: groupId={}", groupId);
+                return ResponseEntity.status(403)
+                        .body(Map.of("status", "error", "message", "无权写入该群聊"));
+            }
+
             // 如果是群消息或私聊消息，存入数据库
             if (groupId != null || sessionId != null) {
                 // 通过插件格式化 AstrBot 推送的内容
@@ -445,11 +466,38 @@ public class AstrBotController {
      * 让 AstrBot 分析群聊消息
      * 直接调用 AstrBot API 获取分析结果
      */
+    /**
+     * AI 分析取样条数：默认 {@value #DEFAULT_ANALYZE_MESSAGES}、上限 {@value #MAX_ANALYZE_MESSAGES}。
+     * 分析只用末尾样本，整群历史全量加载既无用又会 OOM。
+     */
+    private static final int DEFAULT_ANALYZE_MESSAGES = 50;
+    private static final int MAX_ANALYZE_MESSAGES = 200;
+
+    /** /analyze-selected 单次可携带的消息 ID 上限（防滥用；正常界面勾选远低于此值） */
+    private static final int MAX_ANALYZE_SELECTED_MESSAGES = 2000;
+
+    /** 解析 messageCount：兼容数字/数字字符串，非法或越界一律收敛到 [1, MAX_ANALYZE_MESSAGES]（包级可见便于单测） */
+    static int resolveAnalyzeMessageCount(Object raw) {
+        int value = DEFAULT_ANALYZE_MESSAGES;
+        if (raw instanceof Number number) {
+            value = number.intValue();
+        } else if (raw instanceof String str && !str.isBlank()) {
+            try {
+                value = Integer.parseInt(str.trim());
+            } catch (NumberFormatException ignored) {
+                // 保留默认值
+            }
+        }
+        return Math.min(Math.max(value, 1), MAX_ANALYZE_MESSAGES);
+    }
+
     @PostMapping("/analyze")
     public ResponseEntity<?> analyzeGroupMessages(@RequestBody Map<String, Object> request) {
         String groupId = (String) request.get("groupId");
-        Integer messageCount = (Integer) request.getOrDefault("messageCount", 50);
-        String analysisType = (String) request.getOrDefault("type", "summary");
+        // messageCount 此前被声明却未使用，实际按「整群历史」加载 → 大群 OOM。
+        // 现在真正生效并收敛到 [1, MAX_ANALYZE_MESSAGES]，分析本来就只吃末尾若干条样本。
+        int messageCount = resolveAnalyzeMessageCount(request.get("messageCount"));
+        String analysisType = request.get("type") instanceof String typeStr ? typeStr : "summary";
 
         if (groupId == null || groupId.trim().isEmpty()) {
             Map<String, Object> errorResult = new HashMap<>();
@@ -458,11 +506,11 @@ public class AstrBotController {
         }
 
         try {
-            // 1. 从数据库获取最近的消息
+            // 1. 从数据库获取最近的消息（有界：只取最近 messageCount 条有效消息）
             // 首先尝试用 groupId 查询，如果为空，再尝试用 group_name 查询
             String resolvedGroupId = groupId;
-            List<Message> messages = messageService.getMessagesByGroupId(groupId);
-            
+            List<Message> messages = messageService.getRecentActiveMessages(groupId, messageCount);
+
             // 如果 groupId 查询为空，尝试用 group_name 查询
             if (messages.isEmpty() && !groupId.matches("\\d+")) {
                 // 查询群号
@@ -476,7 +524,7 @@ public class AstrBotController {
                         String actualGroupId = result.toString();
                         log.debug("找到群号: {}", actualGroupId);
                         resolvedGroupId = actualGroupId;
-                        messages = messageService.getMessagesByGroupId(actualGroupId);
+                        messages = messageService.getRecentActiveMessages(actualGroupId, messageCount);
                     }
                 } catch (Exception e) {
                     log.warn("群名查询失败: {}", e.getMessage());
@@ -715,6 +763,13 @@ public class AstrBotController {
                 return ResponseEntity.badRequest().body(Map.of("status", "error", "message", "messageIds 包含非法值: " + o));
             }
         }
+        // 单次分析选中的消息数上限：防止一次请求携带巨量 ID 把库与应用内存打满
+        // （正常界面按范围勾选，远低于该值）
+        if (messageIds.size() > MAX_ANALYZE_SELECTED_MESSAGES) {
+            return ResponseEntity.badRequest().body(Map.of(
+                    "status", "error",
+                    "message", "一次最多分析 " + MAX_ANALYZE_SELECTED_MESSAGES + " 条消息，当前 " + messageIds.size() + " 条"));
+        }
 
         // 允许的 analysisType 白名单（对应 prompts.yml analysis.selected.* 的子键）
         java.util.Set<String> ALLOWED_TYPES = java.util.Set.of(
@@ -734,21 +789,26 @@ public class AstrBotController {
                         "status", "error", "message", "无权分析该群聊"));
             }
 
-            // 2. 按 ID 查消息（逐个查询，保证兼容）
+            // 2. 按 ID 批量查消息（原先逐个 getMessageById → N+1 查询；选中 100 条就是 100 次往返）
             List<Message> messages = new ArrayList<>();
             List<String> userQqBindings = securityHelper.getCurrentUserQqBindings();
             boolean isAdminUser = securityHelper.isAdmin();
+            Map<Long, Message> fetched = messageService.getMessagesByIds(messageIds).stream()
+                    .filter(m -> m.getId() != null)
+                    .collect(java.util.stream.Collectors.toMap(Message::getId, m -> m, (a, b) -> a));
+            // 按请求顺序遍历，保持原有的输出顺序与逐条归属校验语义
             for (Long mid : messageIds) {
-                messageService.getMessageById(mid).ifPresent(m -> {
-                    // 归属校验:消息必须属于当前用户绑定的 QQ(或管理员),且与 groupId 一致
-                    if (groupId != null && !groupId.isBlank() && !groupId.equals(m.getGroupId())) {
-                        return;
-                    }
-                    if (!isAdminUser && (m.getSelfQq() == null || !userQqBindings.contains(m.getSelfQq()))) {
-                        return;
-                    }
-                    messages.add(m);
-                });
+                Message m = fetched.get(mid);
+                if (m == null) {
+                    continue;
+                }
+                if (groupId != null && !groupId.isBlank() && !groupId.equals(m.getGroupId())) {
+                    continue;
+                }
+                if (!isAdminUser && (m.getSelfQq() == null || !userQqBindings.contains(m.getSelfQq()))) {
+                    continue;
+                }
+                messages.add(m);
             }
             if (messages.isEmpty()) {
                 return ResponseEntity.ok(Map.of("status", "error", "message", "未找到匹配的消息"));

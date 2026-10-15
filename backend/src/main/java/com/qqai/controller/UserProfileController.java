@@ -170,17 +170,20 @@ public class UserProfileController {
             return ResponseEntity.ok(Map.of("message", "验证码已发送，请检查QQ私信", "code", 200));
         }
 
-        // 发送验证码
-        boolean sent = qqVerificationService.sendVerificationCode(qqNumber);
-        if (sent) {
+        // 发送验证码（账号级 + 单 QQ 级每日限额在服务内校验）
+        QqVerificationService.SendResult result = qqVerificationService.sendVerificationCode(qqNumber, userId);
+        if (result == QqVerificationService.SendResult.SENT) {
             return ResponseEntity.ok(Map.of(
                 "message", "验证码已发送到您的QQ私信，请查收",
                 "expiresIn", 300  // 5分钟 = 300秒
             ));
-        } else {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(Map.of("error", "验证码发送失败，请检查QQ号是否正确或稍后重试", "code", 500));
         }
+        if (result == QqVerificationService.SendResult.RATE_LIMITED) {
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                    .body(Map.of("error", "今日验证码发送次数已达上限，请明天再试", "code", 429));
+        }
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(Map.of("error", "验证码发送失败，请检查QQ号是否正确或稍后重试", "code", 500));
     }
 
     /**

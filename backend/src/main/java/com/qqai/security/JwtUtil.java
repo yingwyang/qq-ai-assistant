@@ -89,11 +89,33 @@ public class JwtUtil {
         Claims claims = parseToken(token);
         return claims.getId();
     }
-    
-    public boolean validateToken(String token) {
+
+    /**
+     * 取 token 自身的过期时间（epoch millis）。
+     * 用于登出时把黑名单条目的寿命对齐到该 token 的真实有效期——否则「记住我」的 30 天 token
+     * 会在黑名单条目按固定 24h 过期后重新变成可用。
+     *
+     * @return 过期时间；解析失败返回 -1
+     */
+    public long getExpirationFromToken(String token) {
         try {
-            parseToken(token);
-            return true;
+            Date expiration = parseToken(token).getExpiration();
+            return expiration != null ? expiration.getTime() : -1L;
+        } catch (Exception e) {
+            log.debug("读取 token 过期时间失败: {}", e.getMessage());
+            return -1L;
+        }
+    }
+    
+    /**
+     * 安全解析：失败返回 {@code null} 并记录原因。
+     *
+     * <p>替代「先 {@link #validateToken} 再逐个 {@code getXxxFromToken}」的写法——那种写法每取一个声明
+     * 都要重新做一次签名校验（过滤器中一次请求要解析 6 遍）。这里解析一次，调用方从 {@link Claims} 里取全部字段。</p>
+     */
+    public Claims parseTokenSafely(String token) {
+        try {
+            return parseToken(token);
         } catch (ExpiredJwtException e) {
             log.warn("JWT token is expired: {}", e.getMessage());
         } catch (UnsupportedJwtException e) {
@@ -104,8 +126,15 @@ public class JwtUtil {
             log.warn("JWT signature validation failed: {}", e.getMessage());
         } catch (IllegalArgumentException e) {
             log.warn("JWT token is empty or null: {}", e.getMessage());
+        } catch (JwtException e) {
+            // 兜底：其它 JWT 校验异常（如声明类型不符），同样按无效处理
+            log.warn("JWT token is invalid: {}", e.getMessage());
         }
-        return false;
+        return null;
+    }
+
+    public boolean validateToken(String token) {
+        return parseTokenSafely(token) != null;
     }
     
     private Claims parseToken(String token) {

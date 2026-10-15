@@ -12,7 +12,6 @@ import org.apache.hc.client5.http.classic.methods.HttpGet;
 import org.apache.hc.client5.http.classic.methods.HttpPost;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpResponse;
-import org.apache.hc.client5.http.impl.classic.HttpClients;
 import org.apache.hc.core5.http.io.entity.StringEntity;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -62,6 +61,14 @@ public class GptSovitsService {
 
     @Autowired
     private GptSovitsConfig gptSovitsConfig;
+
+    /**
+     * 长耗时推理专用客户端（连接 10s / 读取 5min，见 HttpClientConfig）。
+     * 语音合成属重推理，等待时间放宽但仍有上界；共享实例，服务内不得 close。
+     */
+    @Autowired
+    @org.springframework.beans.factory.annotation.Qualifier("longRunningHttpClient")
+    private CloseableHttpClient httpClient;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -158,14 +165,12 @@ public class GptSovitsService {
 
     private void callSetWeights(String url, String weightsPath) throws Exception {
         String fullUrl = url + "?weights_path=" + URLEncoder.encode(weightsPath, StandardCharsets.UTF_8);
-        try (CloseableHttpClient client = HttpClients.createDefault()) {
-            HttpGet httpGet = new HttpGet(fullUrl);
-            try (CloseableHttpResponse resp = client.execute(httpGet)) {
-                int code = resp.getCode();
-                if (code != 200) {
-                    String body = new String(resp.getEntity().getContent().readAllBytes(), StandardCharsets.UTF_8);
-                    throw new IOException("切换权重失败 HTTP " + code + ": " + body);
-                }
+        HttpGet httpGet = new HttpGet(fullUrl);
+        try (CloseableHttpResponse resp = httpClient.execute(httpGet)) {
+            int code = resp.getCode();
+            if (code != 200) {
+                String body = new String(resp.getEntity().getContent().readAllBytes(), StandardCharsets.UTF_8);
+                throw new IOException("切换权重失败 HTTP " + code + ": " + body);
             }
         }
     }
@@ -212,7 +217,8 @@ public class GptSovitsService {
         // 限制文本长度，避免生成长文本耗时长
         String trimmedText = cleanedText.length() > 500 ? cleanedText.substring(0, 500) + "……" : cleanedText;
 
-        CloseableHttpClient httpClient = HttpClients.createDefault();
+        // 共享的长超时客户端：带连接/读取超时（原先 HttpClients.createDefault() 无超时，
+        // 每次调用还会新建一个连接池且 close 掉，既无上界又浪费）
         HttpPost httpPost = new HttpPost(gptSovitsApiUrl + "/tts");
         httpPost.setHeader("Content-Type", "application/json");
 
@@ -274,8 +280,6 @@ public class GptSovitsService {
 
             // 返回前端可访问的相对路径（Spring WebMvcConfig 配置了 /uploads/** 静态资源映射）
             return "/uploads/tts/" + userIdStr + "/" + dateStr + "/" + fileName;
-        } finally {
-            httpClient.close();
         }
     }
 

@@ -1,7 +1,7 @@
 package com.qqai.security;
 
-import com.qqai.entity.User;
 import com.qqai.repository.UserRepository;
+import io.jsonwebtoken.Claims;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.Cookie;
@@ -19,7 +19,6 @@ import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
 import java.util.List;
-import java.util.Optional;
 
 @Component
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
@@ -87,36 +86,38 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 return;
             }
 
-            // Token present but invalid - return 401 to trigger frontend re-login
-            if (!jwtUtil.validateToken(jwt)) {
+            // 一次解析拿全部声明：旧写法对同一 token 解析 6 遍（每遍都重做签名校验）
+            Claims claims = jwtUtil.parseTokenSafely(jwt);
+            if (claims == null) {
+                // Token present but invalid - return 401 to trigger frontend re-login
                 reject(response);
                 return;
             }
 
-            String jti = jwtUtil.getJtiFromToken(jwt);
+            String jti = claims.getId();
             if (tokenBlacklistService.isJtiBlacklisted(jti)) {
                 reject(response);
                 return;
             }
 
-            Long userId = jwtUtil.getUserIdFromToken(jwt);
-            Integer tvClaim = jwtUtil.getTokenVersionFromToken(jwt);
-            String username = jwtUtil.getUsernameFromToken(jwt);
-            String role = jwtUtil.getRoleFromToken(jwt);
+            Long userId = claims.get("uid", Long.class);
+            Integer tvClaim = claims.get("tv", Integer.class);
+            String username = claims.getSubject();
+            String role = claims.get("role", String.class);
 
-            Optional<User> userOpt = userRepository.findById(userId);
-            if (userOpt.isEmpty()) {
+            if (userId == null) {
                 reject(response);
                 return;
             }
 
-            User user = userOpt.get();
-            if (!user.isActive()) {
+            // 只查「是否启用 + tokenVersion」两个字段：鉴权每请求都要走这一步，用投影避免加载整实体
+            UserRepository.AuthSnapshot snapshot = userRepository.findAuthSnapshotById(userId).orElse(null);
+            if (snapshot == null || !Boolean.TRUE.equals(snapshot.getActive())) {
                 reject(response);
                 return;
             }
 
-            Integer dbTv = user.getTokenVersion() != null ? user.getTokenVersion() : 0;
+            Integer dbTv = snapshot.getTokenVersion() != null ? snapshot.getTokenVersion() : 0;
             if (!dbTv.equals(tvClaim)) {
                 reject(response);
                 return;
