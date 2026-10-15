@@ -6,7 +6,13 @@ spring:
     driver-class-name: org.h2.Driver
   jpa:
     hibernate:
-      ddl-auto: create-drop
+      # 用 create 而不是 create-drop：H2 是**共享命名库**（mem:testdb + DB_CLOSE_DELAY=-1），
+      # 而 create-drop 会在「上下文关闭」时 drop 掉整个 schema——被 drop 的可能是另一个仍在
+      # Spring 上下文缓存里、稍后会被复用的上下文正在用的表，表现为
+      # 「Table "USERS" not found (this database is empty)」这类偶发失败
+      # （2026-10-15 全量 mvn test 在 SecurityHardeningTest.setUp 上就是这么挂的，单独跑却全绿）。
+      # create 只在上下文**启动**时重建 schema，不再在关闭时删，跨上下文互踩即消失。
+      ddl-auto: create
     show-sql: false
     properties:
       hibernate:
@@ -51,6 +57,10 @@ file:
     archive-path: ./target/test-uploads/archive
   purge:
     base-dir: ./target/test-uploads
+  # 与主配置保持一致：上传类型白名单必须真实生效，否则测试环境会漏掉这层校验
+  upload:
+    max-size: 100MB
+    allowed-types: image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip
 
 app:
   plugin:
