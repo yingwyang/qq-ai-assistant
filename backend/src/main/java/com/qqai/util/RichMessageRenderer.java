@@ -8,6 +8,7 @@ import com.qqai.entity.Message;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 public class RichMessageRenderer {
@@ -486,14 +487,75 @@ public class RichMessageRenderer {
 
     private static void renderApp(StringBuilder sb, String nickname, String content, Message m) {
         sb.append(nickname).append(": ");
+
+        String redPacketWish = parseRedPacketWish(m.getMiniAppContent());
+        if (redPacketWish != null) {
+            // 红包与小程序共用 APP 类型。给模型「[QQ红包] 祝福语」即可：
+            // 红包的 content 就是 [CQ:json,data=…] 原文，塞进提示词纯属噪声（且很长）。
+            sb.append("[QQ红包]");
+            if (!redPacketWish.isEmpty()) {
+                sb.append(" ").append(redPacketWish);
+            }
+            return;
+        }
+
         String miniAppField = parseMiniAppField(m.getMiniAppContent());
         if (miniAppField != null) {
             sb.append("[小程序 ").append(miniAppField).append("]");
         } else {
             sb.append("[小程序]");
         }
-        if (content != null && !content.isEmpty()) {
+        // 小程序卡片的 content 同样是 [CQ:json,data=…] 原文，卡片信息已由 miniAppContent 表达
+        if (content != null && !content.isEmpty() && !content.contains("[CQ:json")) {
             sb.append(" ").append(content);
+        }
+    }
+
+    /** 红包卡片关键词：QQ 不同版本用过 redpacket / redpackage / redbag 等写法，不押单一值 */
+    private static final String[] RED_PACKET_KEYS = {"redpacket", "red_packet", "redpackage", "redbag", "hongbao"};
+
+    private static boolean containsRedPacketKey(String value) {
+        if (value == null || value.isEmpty()) {
+            return false;
+        }
+        String v = value.toLowerCase(Locale.ROOT);
+        for (String key : RED_PACKET_KEYS) {
+            if (v.contains(key)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 判定红包卡片并取出祝福语。
+     *
+     * <p>返回 null 表示「不是红包」；返回空串表示「是红包但没有文案」。</p>
+     *
+     * <p>判定用多信号，不押单一 app 值（线上红包样本极少，而 QQ 换过写法）：
+     * app/view 含红包关键词，或 prompt 以「[QQ红包]」/「【QQ红包】」开头
+     * （小程序分享卡片不会这么写，这条正好用来避免把「抢红包小游戏」误判成红包）。</p>
+     */
+    private static String parseRedPacketWish(String miniAppContentJson) {
+        if (miniAppContentJson == null || miniAppContentJson.isEmpty()) {
+            return null;
+        }
+        try {
+            JsonNode root = OBJECT_MAPPER.readTree(miniAppContentJson);
+            String app = root.path("app").asText("");
+            String view = root.path("view").asText("");
+            String prompt = root.path("prompt").asText("").trim();
+            boolean byPrompt = prompt.startsWith("[QQ红包]") || prompt.startsWith("【QQ红包】");
+            if (!containsRedPacketKey(app) && !containsRedPacketKey(view) && !byPrompt) {
+                return null;
+            }
+            String wish = findTextValue(root.path("meta"), "title", "wish");
+            if (wish == null || wish.isEmpty()) {
+                wish = prompt.replaceFirst("^[\\[【]QQ红包[\\]】]", "").trim();
+            }
+            return wish == null ? "" : wish;
+        } catch (Exception e) {
+            return null;
         }
     }
 

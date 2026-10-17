@@ -45,9 +45,12 @@ const scaleOf = async () => {
 
 // ---- 打开：管理端媒体 → 单图预览 → 点图进共享 lightbox ----
 await page.goto(BASE + '/admin?tab=media', { waitUntil: 'domcontentloaded' });
-const thumb = page.locator('.media-thumb').first();
-await thumb.waitFor({ state: 'visible', timeout: 20000 });
-await thumb.click();
+// 注意：视频/音频行的占位 span 也带 .media-thumb 这个 class（见 AdminMedia.vue），
+// 列表第一行若不是图片，点它什么也不会发生 —— 全量跑时曾因此偶发超时。
+// 所以按「含图片缩略图的行」定位，并用该行的「预览」按钮打开。
+const imageRow = page.locator('tbody tr').filter({ has: page.locator('img.media-thumb') }).first();
+await imageRow.waitFor({ state: 'visible', timeout: 25000 });
+await imageRow.locator('.btn-preview').click();
 const single = page.locator('.preview-img').first();
 await single.waitFor({ state: 'visible', timeout: 15000 });
 await single.click();

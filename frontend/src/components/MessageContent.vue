@@ -146,6 +146,22 @@
       <span class="face-text">[表情 {{ faceId }}]</span>
     </div>
     
+    <!-- 红包消息：只展示，不提供点击交互 —— 领取必须在 QQ 客户端里完成 -->
+    <div v-else-if="isRedPacketMessage" class="message-redpacket">
+      <div class="redpacket-card" role="group" :aria-label="'QQ 红包消息：' + redPacketTitle + '（需在 QQ 客户端领取）'">
+        <div class="redpacket-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="4" y="3" width="16" height="18" rx="3"/>
+            <path d="M4 9c2.5 2.5 5 3.5 8 3.5s5.5-1 8-3.5"/>
+          </svg>
+        </div>
+        <div class="redpacket-main">
+          <div class="redpacket-title">{{ redPacketTitle }}</div>
+          <div class="redpacket-sub">{{ miniAppData.desc || 'QQ红包' }}</div>
+        </div>
+      </div>
+    </div>
+
     <!-- 小程序分享消息 -->
     <div v-else-if="isMiniAppMessage" class="message-mini-app">
       <div class="mini-app-card" @click="openMiniAppUrl">
@@ -505,10 +521,50 @@ export default {
       return false;
     });
     
+    // 红包卡片识别用的 app/view 关键词（大小写不敏感）
+    const RED_PACKET_APP = /redpacket|red_packet|redpackage|redbag|hongbao/i;
+
+    /**
+     * 判定并提取红包卡片。
+     *
+     * 为什么用「多信号」而不是只认一个 app 值：红包卡片线上样本极少（本项目库里一条都没有），
+     * 而 QQ 在不同版本里用过 redpacket / redpackage 等写法，押单一字符串很容易永远不命中。
+     * 命中任一即可：
+     *  ① app 或 view 含红包关键词；
+     *  ② prompt 以「[QQ红包]」/「【QQ红包】」开头 —— QQ 红包卡片的固定文案，
+     *     小程序分享卡片不会这么写（那条兜底正是为了它不误判）。
+     * 命中后刻意不提供点击：领取要在 QQ 客户端完成，网页端点了没有意义。
+     */
+    const extractRedPacket = (json) => {
+      if (!json || typeof json !== 'object') return null;
+      const app = String(json.app || '');
+      const view = String(json.view || '');
+      const prompt = String(json.prompt || '').trim();
+      const byApp = RED_PACKET_APP.test(app) || RED_PACKET_APP.test(view);
+      const byPrompt = prompt.startsWith('[QQ红包]') || prompt.startsWith('【QQ红包】');
+      if (!byApp && !byPrompt) return null;
+
+      const meta = (json.meta && (json.meta.redpacket || json.meta.red_packet || json.meta.hongbao)) || {};
+      const wish = meta.title || meta.wish || prompt.replace(/^[\[【]QQ红包[\]】]/, '').trim();
+      return {
+        isRedPacket: true,
+        title: wish || '',
+        desc: meta.desc || '',
+        icon: '',
+        preview: '',
+        url: '',
+        appName: 'QQ红包',
+      };
+    };
+
     // 从 JSON 对象提取小程序信息
     const extractMiniAppInfo = (json) => {
       if (!json) return {};
-      
+
+      // 红包优先：它与小程序走同一份 json 卡片，但展示形态完全不同
+      const redPacket = extractRedPacket(json);
+      if (redPacket) return redPacket;
+
       let result = {};
       
       if (json.meta && json.meta.detail_1) {
@@ -634,6 +690,10 @@ export default {
       }
     });
     
+    // 红包消息：与小程序同为 APP 类型，靠 miniAppData.isRedPacket 区分
+    const isRedPacketMessage = computed(() => miniAppData.value.isRedPacket === true);
+    const redPacketTitle = computed(() => miniAppData.value.title || '恭喜发财，大吉大利');
+
     const openMiniAppUrl = () => {
       let url = miniAppData.value.url;
 
@@ -973,6 +1033,8 @@ export default {
       isFaceMessage,
       isMiniAppMessage,
       miniAppData,
+      isRedPacketMessage,
+      redPacketTitle,
       openMiniAppUrl,
       onMiniAppIconError,
       onMiniAppPreviewError,
@@ -1432,6 +1494,54 @@ export default {
 
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+/* 红包消息：只展示不可点（领取在 QQ 客户端） */
+.message-redpacket {
+  max-width: 320px;
+}
+
+.redpacket-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  color: #fff;
+  background: linear-gradient(135deg, #f5564a 0%, #e33b2e 55%, #cf2a1d 100%);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: 0 2px 8px rgba(207, 42, 29, 0.25);
+  /* 故意不设 cursor: pointer —— 这不是可点控件 */
+}
+
+.redpacket-icon {
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: rgba(255, 255, 255, 0.16);
+  color: #fff;
+}
+
+.redpacket-main {
+  min-width: 0;
+}
+
+.redpacket-title {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.35;
+  /* 祝福语可能很长，允许任意位置换行，别把卡片撑破 */
+  overflow-wrap: anywhere;
+}
+
+.redpacket-sub {
+  margin-top: 2px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.82);
 }
 
 /* 小程序分享消息 */

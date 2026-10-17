@@ -301,6 +301,55 @@ class RichMessageRendererTest {
         assertTrue(r.isHasValidContent());
     }
 
+    private Message appMessage(String miniAppJson, String content) {
+        Message m = new Message();
+        m.setUserNickname("发红包的人");
+        m.setUserQq("777");
+        m.setGroupId("10000");
+        m.setMessageType(Message.MessageType.APP);
+        m.setMiniAppContent(miniAppJson);
+        m.setContent(content);
+        m.setSendTime(java.time.LocalDateTime.now());
+        return m;
+    }
+
+    @Test
+    void testRedPacketByAppRendersAsRedPacket() {
+        // meta.redpacket.title 优先于 prompt 文案
+        String json = "{\"app\":\"com.tencent.mobileqq.redpacket\",\"view\":\"RedPacket\",\"prompt\":\"[QQ红包]恭喜发财\",\"meta\":{\"redpacket\":{\"title\":\"新年快乐\"}}}";
+        Message m = appMessage(json, "[CQ:json,data={}]");
+        assertEquals("发红包的人: [QQ红包] 新年快乐", RichMessageRenderer.renderSingle(m, null, null).getText());
+    }
+
+    @Test
+    void testRedPacketDetectedByPromptWhenAppUnknown() {
+        // 不押单一 app 值：app 认不出时，「[QQ红包]」前缀仍能命中
+        String json = "{\"app\":\"com.tencent.unknown.card\",\"prompt\":\"[QQ红包]大吉大利\"}";
+        Message m = appMessage(json, "");
+        assertEquals("发红包的人: [QQ红包] 大吉大利", RichMessageRenderer.renderSingle(m, null, null).getText());
+    }
+
+    @Test
+    void testMiniAppMentioningRedPacketIsNotRedPacket() {
+        // 反向守卫：小程序文案里出现「红包」不能被当成红包
+        String json = "{\"app\":\"com.tencent.miniapp_01\",\"prompt\":\"[QQ小程序]抢红包小游戏\",\"meta\":{\"detail_1\":{\"title\":\"抢红包小游戏\"}}}";
+        Message m = appMessage(json, "");
+        String text = RichMessageRenderer.renderSingle(m, null, null).getText();
+        assertFalse(text.contains("[QQ红包]"), text);
+        assertTrue(text.contains("[小程序 抢红包小游戏]"), text);
+    }
+
+    @Test
+    void testRedPacketRawCqJsonNotLeakedIntoPrompt() {
+        // 红包的 content 就是 [CQ:json,data=…] 原文，不能整个塞进提示词
+        String json = "{\"app\":\"com.tencent.mobileqq.redpacket\",\"prompt\":\"[QQ红包]恭喜发财\"}";
+        Message m = appMessage(json, "[CQ:json,data={\"app\":\"com.tencent.mobileqq.redpacket\"}]");
+        String text = RichMessageRenderer.renderSingle(m, null, null).getText();
+        assertFalse(text.contains("CQ:json"), text);
+        assertTrue(text.contains("[QQ红包] 恭喜发财"), text);
+    }
+
+
     @Test
     void testCompletelyEmptyMessage() {
         Message m = new Message();

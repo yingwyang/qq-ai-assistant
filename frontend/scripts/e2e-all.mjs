@@ -37,6 +37,7 @@ const CASES = [
   { file: 'check-error-state.mjs', needs: 'admin', label: '列表页错误态与重试' },
   { file: 'check-overlay-containment.mjs', needs: 'admin', label: '浮层不溢出容器' },
   { file: 'check-image-preview-zoom.mjs', needs: 'admin', label: '图片浏览缩放（放大/缩小/复位/滚轮/拖拽/禁用态）' },
+  { file: 'check-redpacket-message.mjs', needs: 'user', label: '红包消息渲染（不可点 + 小程序带「红包」不误判）' },
   { file: 'e2e-forward-to-group.mjs', needs: 'admin', label: 'AstrBot 转发到群（send 被拦截，不真发群消息）' },
 ];
 
@@ -97,6 +98,7 @@ function runCase(c, tokens) {
   const file = path.join(HERE, c.file);
   const args = [file];
   if (c.needs === 'admin+user') args.push(tokens.admin.token, API, tokens.user.token);
+  else if (c.needs === 'user') args.push(tokens.user.token, BASE);   // 打用户侧页面（如聊天页）
   else args.push(tokens.admin.token, BASE);
   const started = Date.now();
   const res = spawnSync(process.execPath, args, {

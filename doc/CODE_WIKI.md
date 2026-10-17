@@ -413,7 +413,7 @@ qq-web/
 | `groupName` | String | 群名称 |
 | `userQq` | String | 发送者 QQ |
 | `userNickname` | String | 发送者昵称 |
-| `messageType` | MessageType | 消息类型（TEXT/IMAGE/VIDEO/AUDIO/FILE/VOICE/AT/REPLY/FORWARD） |
+| `messageType` | MessageType | 消息类型（TEXT/IMAGE/VIDEO/AUDIO/FILE/VOICE/AT/REPLY/FORWARD/FACE/APP）。注意 **APP 是一个大类**：小程序卡片与 QQ 红包共用它，前端靠 `miniAppContent` 里的 `app`/`view`/`prompt` 区分 |
 | `content` | String | 文本内容或文件描述 |
 | `fileId` | String | 关联文件 ID |
 | `atQq` | String | @ 的用户 QQ |
@@ -630,6 +630,7 @@ Groovy 插件目录：`backend/plugins/`
 | `e2e-all.mjs` | 一站式验收：现签 JWT → 预检 8081/5173 → 串行跑上列全部浏览器脚本 → 汇总（`npm run e2e`，11/11） |
 | `lib/mint-jwt.mjs` | 等价于后端 `JwtUtil#generateToken` 的令牌签发（从 `.env` 取密钥、查库取 uid/tv，6 小时有效），供 e2e 复用 |
 | `check-image-preview-zoom.mjs` | 图片浏览缩放：放大/缩小/复位、滚轮、快捷键、拖拽平移、上下限禁用态、ESC 只关最上层（21 项） |
+| `check-redpacket-message.mjs` | 红包消息渲染：红包卡片形态与祝福语、不可点击/不可聚焦、小程序文案含「红包」不被误判（10 项；拦消息接口喂合成卡片，不写库） |
 
 #### 3.2.6 组合式函数
 
