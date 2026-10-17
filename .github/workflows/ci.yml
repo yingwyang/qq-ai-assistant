@@ -89,6 +89,11 @@ jobs:
       - name: 安装依赖
         run: npm ci
 
+      # 源码扫描守卫：只读 frontend/src，不需要服务端 / 浏览器 / JWT，所以能零成本进 CI。
+      # 这两个脚本在发现违规时会 exit 1（不是永远绿），本地可用 npm run guard 复跑。
+      - name: 源码扫描守卫（禁止原生弹窗 / 列表三态必须用 StatePanel）
+        run: npm run guard
+
       - name: 生产构建
         run: npm run build
 

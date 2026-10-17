@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "guard": "node scripts/check-no-native-dialogs.mjs && node scripts/check-shared-states.mjs",
     "preview": "vite preview"
   },
   "dependencies": {
