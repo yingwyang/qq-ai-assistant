@@ -60,10 +60,10 @@
 
 | 命令 | 基线 |
 |------|------|
-| `cd frontend && npx vite build && npm run budget` | exit 0；入口 `index` 包 **≤ 56KB**（实测 51.81 kB）。由 `scripts/check-bundle-budget.mjs` 硬断言并已接入 CI——此前「≤51KB」只是本文档里的一行字，没有断言，所以 echarts 被静态 import 进 1141KB 那次无人发现 |
+| `cd frontend && npx vite build && npm run budget` | exit 0；入口 `index` 包 **≤ 60KB**（实测 54.32 kB；2026-10-17 图片预览加缩放后从 51.81 涨到 54.32，阈值同步由 56 重标到 60，留约 10% 余量）。由 `scripts/check-bundle-budget.mjs` 硬断言并已接入 CI——此前「≤51KB」只是本文档里的一行字，没有断言，所以 echarts 被静态 import 进 1141KB 那次无人发现 |
 | `cd frontend && npm run guard` | exit 0（禁止原生弹窗 / 列表三态必须用 StatePanel；两个脚本均为纯源码扫描，已接入 CI） |
 | `cd backend && mvn -B -ntp test` | **299** 项 |
-| `cd frontend && npm run e2e` | **11/11**（自动签 JWT → 预检服务 → 串行跑全部浏览器脚本 → 汇总；实测 134s。前置：后端 8081 与前端 5173 已启动） |
+| `cd frontend && npm run e2e` | **12/12**（自动签 JWT → 预检服务 → 串行跑全部浏览器脚本 → 汇总；实测约 155s。前置：后端 8081 与前端 5173 已启动） |
 | `node scripts/check-security-hardening.mjs <ADMIN_JWT> <baseUrl> <USER_JWT>` | **13/13**。⚠️ 断言随机器人登录状态分支：未登录 → 普通用户可拉二维码（200）；已登录 → 403 换号守卫（两种状态都实测过） |
 | `node scripts/check-payment-flow.mjs <JWT>` | 18/18 |
 | `node scripts/check-admin-shell.mjs <JWT>` | 18/18（首屏请求数 4） |

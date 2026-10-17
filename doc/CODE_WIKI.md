@@ -607,6 +607,7 @@ Groovy 插件目录：`backend/plugins/`
 | `common/StatePanel.vue` | 列表页统一状态面板：`loading` / `empty` / `error` 三态，错误态可挂「重试」CTA |
 | `credits/PaymentDialog.vue` | 支付确认弹窗（按钮驱动、无二维码；协议门禁 + 下单结果态） |
 | `Toast.vue` | 提示消息组件 |
+| `ImagePreview.vue` | 全站唯一图片浏览弹窗（共享 lightbox）：ESC/←→ 切换、缩放 50%~500%、放大后拖拽平移、加载失败重试 |
 
 #### 3.2.6.1 前端验收脚本（`frontend/scripts/`）
 
@@ -628,6 +629,7 @@ Groovy 插件目录：`backend/plugins/`
 | `e2e-forward-to-group.mjs` | AstrBot 模块转发到群聊链路；`POST /api/groups/*/send` 被拦截 mock，**不真发群消息** |
 | `e2e-all.mjs` | 一站式验收：现签 JWT → 预检 8081/5173 → 串行跑上列全部浏览器脚本 → 汇总（`npm run e2e`，11/11） |
 | `lib/mint-jwt.mjs` | 等价于后端 `JwtUtil#generateToken` 的令牌签发（从 `.env` 取密钥、查库取 uid/tv，6 小时有效），供 e2e 复用 |
+| `check-image-preview-zoom.mjs` | 图片浏览缩放：放大/缩小/复位、滚轮、快捷键、拖拽平移、上下限禁用态、ESC 只关最上层（21 项） |
 
 #### 3.2.6 组合式函数
 

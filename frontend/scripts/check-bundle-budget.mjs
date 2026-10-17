@@ -10,8 +10,10 @@
  *    不能用 index-*.js 通配：modulepreload 引用的 echarts 等分包很大且是故意的，误纳入会误报。
  *  - 字节数按 bytes/1000 换算成 kB，与 Vite 构建输出里的 "51.81 kB" 同一口径。
  *
- * 阈值：56 kB。当前实测 51.81 kB，留约 8% 余量 —— 小改动不会误报，
- * 而历史上那次回归是 1141 kB 量级，任何合理上限都拦得住。
+ * 阈值：60 kB。当前实测 54.3 kB（2026-10-17 图片预览加缩放后从 51.8 涨到 54.3），
+ * 留约 10% 余量 —— 小功能改动不会误报，而历史上那次回归是 1141 kB 量级，任何合理上限都拦得住。
+ * 注：本守卫的目的是拦住「重库被静态 import 进入口」这类数量级回归，不是给每次功能增长设卡；
+ * 阈值若需上调，应在提交信息里写明原因与新的实测值（2026-10-17 从 56 调到 60 即为此例）。
  * 本地可用 BUNDLE_BUDGET_KB 覆盖（仅调试用，CI 走默认值）。
  *
  * 用法: npm run budget            （需先 npm run build）
@@ -23,7 +25,7 @@ import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 
 const DIST = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'dist');
-const DEFAULT_BUDGET_KB = 56;
+const DEFAULT_BUDGET_KB = 60;
 
 const override = process.env.BUNDLE_BUDGET_KB;
 const budgetKb = override ? Number(override) : DEFAULT_BUDGET_KB;

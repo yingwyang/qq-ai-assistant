@@ -5,6 +5,7 @@
         v-if="visible"
         class="lp-lightbox"
         @click.self="close"
+        @wheel.prevent="onWheel"
         role="dialog"
         aria-modal="true"
         aria-label="图片预览"
@@ -55,9 +56,15 @@
             :key="currentUrl + '#' + reloadKey"
             :src="currentUrl"
             class="lp-image"
+            :class="{ 'is-zoomed': scale !== 1, 'is-dragging': dragging }"
+            :style="imageStyle"
             alt="预览"
             draggable="false"
             @click.stop
+            @pointerdown="onPointerDown"
+            @pointermove="onPointerMove"
+            @pointerup="onPointerUp"
+            @pointercancel="onPointerUp"
             @load="loadFailed = false"
             @error="onImgError"
           />
@@ -74,6 +81,31 @@
           </div>
         </div>
 
+        <!-- 缩放工具条：小图看不清细节、长图一屏放不下，原来只能按窗口大小看 -->
+        <div class="lp-zoom" role="group" aria-label="缩放控制">
+          <button
+            class="lp-zoom-btn"
+            type="button"
+            aria-label="缩小"
+            :disabled="scale <= minScale"
+            @click.stop="zoomOut"
+          >−</button>
+          <button
+            class="lp-zoom-value"
+            type="button"
+            :aria-label="'当前缩放 ' + zoomPercent + '%，点击复位为原始大小'"
+            :title="'复位为原始大小（快捷键 0）'"
+            @click.stop="resetZoom"
+          >{{ zoomPercent }}%</button>
+          <button
+            class="lp-zoom-btn"
+            type="button"
+            aria-label="放大"
+            :disabled="scale >= maxScale"
+            @click.stop="zoomIn"
+          >+</button>
+        </div>
+
         <!-- 页码 -->
         <div v-if="hasMultiple()" class="lp-counter">
           {{ currentIndex + 1 }} / {{ imageList.length }}
@@ -81,7 +113,7 @@
 
         <!-- 提示 -->
         <div class="lp-hint">
-          ESC 关闭 · ← → 切换
+          ESC 关闭 · ← → 切换 · + − 缩放 · 0 复位 · 滚轮缩放
         </div>
       </div>
     </Transition>
@@ -89,7 +121,7 @@
 </template>
 
 <script>
-import { ref, watch } from 'vue';
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue';
 import { useImagePreview } from '../composables/useImagePreview';
 
 export default {
@@ -102,12 +134,77 @@ export default {
     const onImgError = () => { loadFailed.value = true; };
     const retry = () => { loadFailed.value = false; reloadKey.value += 1; };
 
+    // ===== 缩放 =====
+    // 此前 lightbox 只能按窗口大小看一张图：小图看不清细节、长图缩不到一屏、也不能局部看。
+    const MIN_SCALE = 0.5;
+    const MAX_SCALE = 5;
+    const STEP = 1.25;
+    const scale = ref(1);
+    const offset = ref({ x: 0, y: 0 });
+    const dragging = ref(false);
+    let dragStart = null;
+
+    const clampScale = (v) => Math.min(MAX_SCALE, Math.max(MIN_SCALE, Math.round(v * 100) / 100));
+    const zoomPercent = computed(() => Math.round(scale.value * 100));
+
+    const zoomIn = () => { scale.value = clampScale(scale.value * STEP); };
+    const zoomOut = () => {
+      scale.value = clampScale(scale.value / STEP);
+      if (scale.value <= 1) offset.value = { x: 0, y: 0 };  // 回到一屏内时消除平移
+    };
+    const resetZoom = () => { scale.value = 1; offset.value = { x: 0, y: 0 }; };
+
+    const imageStyle = computed(() => ({
+      transform: 'translate(' + offset.value.x + 'px, ' + offset.value.y + 'px) scale(' + scale.value + ')',
+      transition: dragging.value ? 'none' : 'transform 0.12s ease',
+      cursor: scale.value > 1 ? (dragging.value ? 'grabbing' : 'grab') : 'default',
+    }));
+
+    /** 滚轮缩放（lightbox 是全屏模态，滚动本来也无处可滚，直接用于缩放） */
+    const onWheel = (e) => {
+      if (e.deltaY < 0) zoomIn();
+      else if (e.deltaY > 0) zoomOut();
+    };
+
+    /** 放大后可拖动查看局部（pointer 事件，兼容鼠标与触摸） */
+    const onPointerDown = (e) => {
+      if (scale.value <= 1) return;
+      dragging.value = true;
+      dragStart = { x: e.clientX - offset.value.x, y: e.clientY - offset.value.y };
+      if (e.target && e.target.setPointerCapture) {
+        try { e.target.setPointerCapture(e.pointerId); } catch { /* 某些环境不支持捕获 */ }
+      }
+    };
+    const onPointerMove = (e) => {
+      if (!dragging.value || !dragStart) return;
+      offset.value = { x: e.clientX - dragStart.x, y: e.clientY - dragStart.y };
+    };
+    const onPointerUp = (e) => {
+      if (!dragging.value) return;
+      dragging.value = false;
+      dragStart = null;
+      if (e.target && e.target.releasePointerCapture) {
+        try { e.target.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
+      }
+    };
+
+    /** 快捷键 + / − / 0（与 composable 的 ESC、←→ 分工，互不覆盖） */
+    const onZoomKey = (e) => {
+      if (!visible.value) return;
+      if (e.key === '+' || e.key === '=') { e.preventDefault(); zoomIn(); }
+      else if (e.key === '-' || e.key === '_') { e.preventDefault(); zoomOut(); }
+      else if (e.key === '0') { e.preventDefault(); resetZoom(); }
+    };
+    onMounted(() => window.addEventListener('keydown', onZoomKey));
+    onBeforeUnmount(() => window.removeEventListener('keydown', onZoomKey));
+
     /**
      * 关键修复：切换图片时必须重置失败状态。
      * 原来 loadFailed 只在 @load 里重置，而失败后 <img> 被 v-if 移除、根本不会再触发 load →
      * 一张图失败后，后面每一张都停在"图片加载失败"，且左右切换也救不回来。
      */
-    watch(currentUrl, () => { loadFailed.value = false; });
+    watch(currentUrl, () => { loadFailed.value = false; resetZoom(); });
+    watch(visible, (v) => { if (!v) resetZoom(); });
 
     return {
       visible,
@@ -122,6 +219,20 @@ export default {
       reloadKey,
       onImgError,
       retry,
+      // 缩放
+      scale,
+      dragging,
+      zoomPercent,
+      minScale: MIN_SCALE,
+      maxScale: MAX_SCALE,
+      zoomIn,
+      zoomOut,
+      resetZoom,
+      imageStyle,
+      onWheel,
+      onPointerDown,
+      onPointerMove,
+      onPointerUp,
     };
   }
 };
@@ -137,6 +248,8 @@ export default {
   align-items: center;
   justify-content: center;
   padding: 60px 40px;
+  /* 放大后的图片靠 transform 超出布局尺寸，这里裁掉，避免出现页面级滚动条 */
+  overflow: hidden;
   user-select: none;
   -webkit-tap-highlight-color: transparent;
 }
@@ -240,6 +353,62 @@ export default {
   pointer-events: none;
 }
 
+/* 缩放工具条：放左下角，避开底部居中的页码与右下角的提示 */
+.lp-zoom {
+  position: absolute;
+  bottom: 32px;
+  left: 32px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+.lp-zoom-btn {
+  width: 34px;
+  height: 34px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: #fff;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s ease;
+}
+.lp-zoom-btn:hover:not(:disabled) { background: rgba(255, 255, 255, 0.18); }
+.lp-zoom-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.lp-zoom-value {
+  min-width: 58px;
+  height: 34px;
+  padding: 0 6px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.88);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.lp-zoom-value:hover { background: rgba(255, 255, 255, 0.12); }
+.lp-zoom-btn:focus-visible,
+.lp-zoom-value:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.7);
+  outline-offset: 2px;
+}
+
+/* 放大后可拖动查看局部 */
+.lp-image.is-zoomed { will-change: transform; }
+.lp-image.is-dragging { will-change: transform; }
+
 /* 过渡动画 */
 .lp-fade-enter-active,
 .lp-fade-leave-active {
@@ -261,5 +430,8 @@ export default {
   .lp-prev  { left: 8px;  }
   .lp-next  { right: 8px; }
   .lp-hint  { display: none; }
+  .lp-zoom { bottom: 20px; left: 12px; }
+  .lp-zoom-btn { width: 32px; height: 32px; font-size: 18px; }
+  .lp-zoom-value { min-width: 52px; font-size: 12px; }
 }
 </style>

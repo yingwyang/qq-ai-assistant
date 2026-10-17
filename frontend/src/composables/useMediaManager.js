@@ -1,8 +1,12 @@
 import { ref, computed } from 'vue';
 import { messageApi } from '../services/api';
 import logger from '../utils/logger';
+import { useImagePreview } from './useImagePreview';
 
 export function useMediaManager({ showSystemMsg, loadDiskUsage } = {}) {
+  // 共享图片 lightbox：它叠在媒体预览弹窗之上时，键盘（ESC/←→）归它管
+  const imgPreview = useImagePreview();
+
   // 媒体文件管理状态
   const mediaFiles = ref([]);
   const mediaFilesLoading = ref(false);
@@ -475,6 +479,9 @@ export function useMediaManager({ showSystemMsg, loadDiskUsage } = {}) {
   const onPreviewKeydown = (e) => {
     if (!showPreviewModal.value) return;
     if (previewMode.value !== 'single') return;
+    // 上层还叠着共享 lightbox 时让位：否则一对方向键会同时翻两层，
+    // ESC 会先把 lightbox 关掉、又顺手把这个媒体预览弹窗也关掉（用户失去浏览位置）。
+    if (imgPreview.visible.value) return;
     if (e.key === 'ArrowRight') previewNext();
     else if (e.key === 'ArrowLeft') previewPrev();
     else if (e.key === 'Escape') {

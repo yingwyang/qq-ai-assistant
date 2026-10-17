@@ -36,6 +36,7 @@ const CASES = [
   { file: 'check-dialog-a11y.mjs', needs: 'admin', label: '共享弹窗无障碍（aria/Esc/焦点）' },
   { file: 'check-error-state.mjs', needs: 'admin', label: '列表页错误态与重试' },
   { file: 'check-overlay-containment.mjs', needs: 'admin', label: '浮层不溢出容器' },
+  { file: 'check-image-preview-zoom.mjs', needs: 'admin', label: '图片浏览缩放（放大/缩小/复位/滚轮/拖拽/禁用态）' },
   { file: 'e2e-forward-to-group.mjs', needs: 'admin', label: 'AstrBot 转发到群（send 被拦截，不真发群消息）' },
 ];
 
