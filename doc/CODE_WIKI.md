@@ -617,12 +617,17 @@ Groovy 插件目录：`backend/plugins/`
 | `check-admin-last-admin.mjs` | 「最后一位可用管理员」守卫（网络拦截伪造响应，14 项） |
 | `e2e-admin-export.mjs` | 四类导出（含资金流水 CSV/JSON，26 项） |
 | `check-payment-flow.mjs` | 支付链路按钮化：弹窗/协议门禁/请求体/第二步订单号，且无二维码（18 项） |
-| `check-security-hardening.mjs` | 二维码接口鉴权边界（匿名 401、登录用户与 ADMIN 均可读）、越权 403、状态接口公开（10 项） |
+| `check-security-hardening.mjs` | 二维码接口鉴权边界（匿名 401）、越权 403、状态接口公开；**普通用户断言随机器人登录状态分支**：未登录→可拉（200）、已登录→403 换号守卫（13 项） |
 | `check-dashboard-charts.mjs` | 懒加载 echarts 后三个图表页仍渲染 canvas（6 项） |
 | `check-dialog-a11y.mjs` | 共享弹窗 role/aria/焦点/ Esc（8 项） |
 | `check-error-state.mjs` | 列表页错误态与「重试」（拦截接口伪造 500，4 项） |
 | `check-shared-states.mjs` | 列表页必须使用 StatePanel、旧状态 class 零残留 |
 | `check-no-native-dialogs.mjs` | 前端禁止 `window.confirm/alert/prompt` |
+| `check-overlay-containment.mjs` | 浮层不溢出容器（含暗色与窄屏） |
+| `check-bundle-budget.mjs` | 入口 chunk 体积硬断言（`npm run budget`，≤56 kB；入口取自 dist/index.html 的 module script） |
+| `e2e-forward-to-group.mjs` | AstrBot 模块转发到群聊链路；`POST /api/groups/*/send` 被拦截 mock，**不真发群消息** |
+| `e2e-all.mjs` | 一站式验收：现签 JWT → 预检 8081/5173 → 串行跑上列全部浏览器脚本 → 汇总（`npm run e2e`，11/11） |
+| `lib/mint-jwt.mjs` | 等价于后端 `JwtUtil#generateToken` 的令牌签发（从 `.env` 取密钥、查库取 uid/tv，6 小时有效），供 e2e 复用 |
 
 #### 3.2.6 组合式函数
 

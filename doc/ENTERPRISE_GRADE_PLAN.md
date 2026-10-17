@@ -63,7 +63,8 @@
 | `cd frontend && npx vite build && npm run budget` | exit 0；入口 `index` 包 **≤ 56KB**（实测 51.81 kB）。由 `scripts/check-bundle-budget.mjs` 硬断言并已接入 CI——此前「≤51KB」只是本文档里的一行字，没有断言，所以 echarts 被静态 import 进 1141KB 那次无人发现 |
 | `cd frontend && npm run guard` | exit 0（禁止原生弹窗 / 列表三态必须用 StatePanel；两个脚本均为纯源码扫描，已接入 CI） |
 | `cd backend && mvn -B -ntp test` | **299** 项 |
-| `node scripts/check-security-hardening.mjs <ADMIN_JWT> <baseUrl> <USER_JWT>` | 10/10 |
+| `cd frontend && npm run e2e` | **11/11**（自动签 JWT → 预检服务 → 串行跑全部浏览器脚本 → 汇总；实测 134s。前置：后端 8081 与前端 5173 已启动） |
+| `node scripts/check-security-hardening.mjs <ADMIN_JWT> <baseUrl> <USER_JWT>` | **13/13**。⚠️ 断言随机器人登录状态分支：未登录 → 普通用户可拉二维码（200）；已登录 → 403 换号守卫（两种状态都实测过） |
 | `node scripts/check-payment-flow.mjs <JWT>` | 18/18 |
 | `node scripts/check-admin-shell.mjs <JWT>` | 18/18（首屏请求数 4） |
 | `node scripts/check-admin-dark-theme.mjs <JWT>` | 14 页无问题 |
@@ -75,7 +76,7 @@
 | `node scripts/check-shared-states.mjs` / `check-no-native-dialogs.mjs` | 通过（源码扫描类守卫） |
 | `GET /actuator/health`（ADMIN cookie） | 200 且 `components.db`/`components.rabbit` 为 UP |
 
-> 环境：`CHROME_PATH='C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe'`；ADMIN JWT 见技能 `qqai-verify`（技能已同步本节全部脚本与坑）。
+> 环境：`CHROME_PATH='C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe'`；ADMIN JWT 与浏览器路径现在都由 `npm run e2e` 自动处理（现签令牌 + 自动查找 Edge/Chrome），只有单独手跑某个脚本时才需要按技能 `qqai-verify` 手工准备。
 
 ## 五、程序收尾（批次 0~G 全部完成）
 

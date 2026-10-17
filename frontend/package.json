@@ -8,6 +8,7 @@
     "build": "vite build",
     "guard": "node scripts/check-no-native-dialogs.mjs && node scripts/check-shared-states.mjs",
     "budget": "node scripts/check-bundle-budget.mjs",
+    "e2e": "node scripts/e2e-all.mjs",
     "preview": "vite preview"
   },
   "dependencies": {
