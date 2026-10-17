@@ -60,8 +60,9 @@
 
 | 命令 | 基线 |
 |------|------|
-| `cd frontend && npx vite build` | exit 0；入口 `index` 包 ≤ **51KB** |
-| `cd backend && mvn -B -ntp test` | **210** 项 |
+| `cd frontend && npx vite build && npm run budget` | exit 0；入口 `index` 包 **≤ 56KB**（实测 51.81 kB）。由 `scripts/check-bundle-budget.mjs` 硬断言并已接入 CI——此前「≤51KB」只是本文档里的一行字，没有断言，所以 echarts 被静态 import 进 1141KB 那次无人发现 |
+| `cd frontend && npm run guard` | exit 0（禁止原生弹窗 / 列表三态必须用 StatePanel；两个脚本均为纯源码扫描，已接入 CI） |
+| `cd backend && mvn -B -ntp test` | **299** 项 |
 | `node scripts/check-security-hardening.mjs <ADMIN_JWT> <baseUrl> <USER_JWT>` | 10/10 |
 | `node scripts/check-payment-flow.mjs <JWT>` | 18/18 |
 | `node scripts/check-admin-shell.mjs <JWT>` | 18/18（首屏请求数 4） |

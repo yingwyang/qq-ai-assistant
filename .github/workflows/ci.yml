@@ -97,6 +97,11 @@ jobs:
       - name: 生产构建
         run: npm run build
 
+      # 入口包体积硬断言：<=51KB 此前只是文档里的一条基线，没有断言，
+      # 历史上 echarts 被静态 import 进入口（1141KB）就是这样无人发现的。
+      - name: 入口包体积守卫（入口 chunk <= 56 kB）
+        run: npm run budget
+
       - name: 上传构建产物
         uses: actions/upload-artifact@v4
         with:
