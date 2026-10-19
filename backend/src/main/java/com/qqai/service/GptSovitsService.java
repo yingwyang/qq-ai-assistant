@@ -364,6 +364,10 @@ public class GptSovitsService {
         // 去除文本中间的破折号列表标记（如 " - "）
         result = result.replaceAll("\\s+[\\-•▪▫◦]\\s+", "，");
 
+        // 项目符号（- * +）在句中出现时必须去掉：GPT-SoVITS 会把 '-' 读成「减」
+        // （线上日志实证：'群聊速览，- 近期主题' → 前端处理后成 '群聊速览,减近期主题'）
+        result = result.replaceAll("(?m)^\\s*[-*+]\\s+", "");
+        result = result.replaceAll("([，。！？；：,])\\s*[-*+]\\s+", "$1");
         // 去除引号（TTS 会把引号读成停顿或杂音；英文直引号/中文弯引号都要去）
         result = result.replaceAll("[\"'\u201C\u201D\u2018\u2019]", "");
         // 项目符号 · 转为逗号（比直接删掉更保停顿）

@@ -45,6 +45,15 @@ class TtsTextCleaningTest {
     }
 
     @Test
+    @DisplayName("项目符号 - 必须去掉，否则会被读成「减」")
+    void stripsHyphenBullets() {
+        String out = service.cleanTextForTTS("群聊速览，- 近期主题，群友们讨论。\n- 群氛围，活跃");
+        assertFalse(out.contains("- "), "句中项目符号应被去除: " + out);
+        assertFalse(out.contains("减"), "不应出现「减」: " + out);
+        assertTrue(out.contains("近期主题") && out.contains("群氛围"), out);
+    }
+
+    @Test
     @DisplayName("真实摘要文本：清洗后不含引号/实体/列表符，且保留正文")
     void cleansRealSummary() {
         String raw = "&#91;TOC&#93;\n群聊速览\n· 近期主题：群友们围绕电竞展开讨论。\n"

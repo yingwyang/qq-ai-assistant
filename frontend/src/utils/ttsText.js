@@ -1,85 +1,58 @@
 /**
- * 把聊天消息（Markdown / 富文本）转成适合语音合成的口语化文本。
+ * 朗读文本规范化（最终形态）。
  *
- * 背景：TTS 会把标点当停顿、把引号/列表符读成怪音。线上实测摘要文本进来时是
- * 「情况。 · 群氛围，活跃…大量"草！给我杀！"等」这种形态，合成结果断句很碎。
+ * 分工：
+ *   markdownText.js —— Markdown/HTML → 结构化文本（块级语义、表格、代码块）
+ *   ttsText.js      —— 结构化文本 → 可朗读语流（引号、列表符、连用标点、emoji）
  *
- * 处理顺序（顺序很重要）：
- *   实体解码 → 富文本取文本 → 去 Markdown 结构 → 去引号/括号 → 列表符归一
- *   → 去标点两侧空格 → 标点收敛 → 空白归一 → 去 emoji
+ * 顺序约束（有单测锁住）：
+ *   实体解码必须最先（否则 &#91; 会被去 # 规则切成 &91;）
+ *   标点收敛必须在去标点两侧空格之后（否则 ' ， ' 不匹配连续逗号规则）
  */
+import { decodeEntities, markdownToSpeech } from './markdownText.js';
 
-const ENTITY_MAP = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
 const CJK_PUNCT = '，。！？、；：';
 
-function decodeEntities(text) {
-  return text
-    .replace(/&#(\d+);/g, (_, d) => String.fromCharCode(Number(d)))
-    .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCharCode(parseInt(h, 16)))
-    .replace(/&([a-z]+);/gi, (m, name) => ENTITY_MAP[name.toLowerCase()] ?? m);
-}
+/** 把「结构化文本」规范成适合 TTS 的语流 */
+export function normalizeSpeech(input) {
+  let text = decodeEntities(String(input ?? ''));
 
-function htmlToText(html) {
-  const temp = document.createElement('div');
-  temp.innerHTML = html;
-  temp.querySelectorAll('summary').forEach((el) => el.insertAdjacentText('afterend', '\n'));
-  temp.querySelectorAll('br, p, div, li').forEach((el) => el.insertAdjacentText('afterend', '\n'));
-  return temp.innerText || temp.textContent || '';
-}
-
-/**
- * @param {string} raw 消息原文（Markdown 或富文本）
- * @returns {string} 可直接交给 /api/system/tts 的口语化文本
- */
-export function toSpeechText(raw) {
-  if (!raw) return '';
-
-  // 1) 先解码实体，否则 '&#91;' 会被后面的 '#' 规则切成 '&91;'
-  let text = decodeEntities(String(raw));
-
-  // 2) 富文本取纯文本
-  if (/<[a-z][^>]*>/i.test(text)) {
-    text = htmlToText(text);
-  }
-
-  // 3) Markdown 结构
-  text = text
-    .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')      // 图片
-    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')     // 链接保留文字
-    .replace(/^\s*[-*_]{3,}\s*$/gm, ' ')            // 分割线
-    .replace(/^\s*\d+[.)、]\s*/gm, '')              // 行首编号
-    .replace(/[#>*_~`]/g, '');                       // 其余标记符
-
-  // 4) 引号 / 括号类包裹符（TTS 会读成停顿或杂音）
+  // Markdown 残留符号（兜底，正常已由 markdownToSpeech 处理）
+  text = text.replace(/[#>*_~`]/g, '');
+  // 引号 / 括号类包裹符
   text = text.replace(/["'“”‘’「」『』\[\]【】]/g, '');
-
-  // 5) 列表符号 → 逗号（· 常被读成「点」）
+  // 列表符 → 逗号
   text = text.replace(/[·•▪▫◦]/g, '，');
-
-  // 5.1) 括号只去符号保留内容；TOC 这类目录标记无朗读意义
+  // 括号只去符号
   text = text.replace(/[（）()]/g, '');
+  // 目录标记
   text = text.replace(/\bTOC\b/gi, '');
-  // 5.2) 冒号 → 逗号（TTS 对冒号的停顿处理不稳定）
+  // 冒号 → 逗号
   text = text.replace(/[：:]/g, '，');
-
-  // 6) 去掉标点两侧空白（· 换逗号后会残留空格，不先清就出现「 ， 」）
-  text = text.replace(new RegExp('\\s*([，。！？、；：])\\s*', 'g'), '$1');
-
-  // 7) 标点收敛：去掉「。，」「！，」「，。」这类连用
+  // 标点两侧空白（必须在收敛之前）
+  text = text.replace(/\s*([，。！？、；：])\s*/g, '$1');
+  // 连用标点收敛
   text = text
     .replace(/[。！？；]+[，、]/g, (m) => m[0])
     .replace(/[，、][。！？；]/g, (m) => m[1])
     .replace(/[，、]{2,}/g, '，');
-
-  // 7.1) 换行 → 逗号（列表项之间要有停顿，否则会连读成一串）
+  // 换行 → 逗号（列表项之间要停顿）
   text = text.replace(/\n+/g, '，');
-
-  // 8) 空白归一
+  // 空白归一
   text = text.replace(/\s+/g, ' ').trim();
-
-  // 9) 去 emoji / 装饰符号
+  // emoji / 装饰符号
   text = text.replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}\u{2B00}-\u{2BFF}]/gu, '');
+  // 去首尾孤立标点：句号保留（是正常句末），只去掉首尾多余的逗号类分隔符
+  return text
+    .replace(new RegExp('^[' + CJK_PUNCT + '\\s]+'), '')
+    .replace(/[，、；：\s]+$/, '');
+}
 
-  // 10) 去掉首尾的孤立标点
-  return text.replace(new RegExp('^[' + CJK_PUNCT + '\\s]+'), '').replace(new RegExp('[' + CJK_PUNCT + '\\s]+$'), '');
+/**
+ * 消息原文（Markdown / 富文本 / 纯文本）→ 可直接交给 TTS 的语流。
+ * 纯文本走 markdown-it 渲染也无副作用（会包成 <p>），因此无需区分来源。
+ */
+export function toSpeechText(raw) {
+  if (!raw) return '';
+  return normalizeSpeech(markdownToSpeech(raw));
 }

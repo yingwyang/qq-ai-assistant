@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "guard": "node scripts/check-no-native-dialogs.mjs && node scripts/check-shared-states.mjs",
+    "guard": "node scripts/check-no-native-dialogs.mjs && node scripts/check-shared-states.mjs && node scripts/check-markdown-text.mjs",
     "budget": "node scripts/check-bundle-budget.mjs",
     "e2e": "node scripts/e2e-all.mjs",
     "preview": "vite preview"

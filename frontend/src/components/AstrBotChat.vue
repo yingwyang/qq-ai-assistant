@@ -739,6 +739,7 @@ import PersonaManager from './PersonaManager.vue';
 import ForwardToGroupDialog from './ForwardToGroupDialog.vue';
 import { formatMessageTime } from '../utils/formatTime';
 import { toSpeechText } from '../utils/ttsText';
+import { markdownToPlain } from '../utils/markdownText';
 import logger from '../utils/logger';
 export default {
   name: 'AstrBotChat',
@@ -1794,20 +1795,10 @@ export default {
       }
     };
 
-    // 将 HTML 内容转为纯文本（用于复制）
-    const htmlToPlainText = (html) => {
-      if (!html) return '';
-      const temp = document.createElement('div');
-      temp.innerHTML = html;
-      // 保留 details/summary 结构可读性：summary 后换行
-      temp.querySelectorAll('summary').forEach(el => {
-        el.insertAdjacentText('afterend', '\n');
-      });
-      temp.querySelectorAll('br, p, div, li').forEach(el => {
-        el.insertAdjacentText('afterend', '\n');
-      });
-      return temp.innerText || temp.textContent || '';
-    };
+    // 消息原文（Markdown / 富文本）→ 纯文本，用于复制与转发。
+    // 注意：这里必须走 Markdown 渲染再摊平，不能把源码当 HTML 塞进 innerHTML，
+    // 否则 '# 标题'、'- 列表' 会原样留在文本里（转发出去就是一堆符号）。
+    const htmlToPlainText = (text) => markdownToPlain(text);
 
     // 复制 AI 回复内容
     const copyMessageText = async (text) => {
