@@ -236,7 +236,8 @@ POST /api/system/tts {text, character:"Eustia", ...}
 ```
 
 ⚠️ `/set_gpt_weights`、`/set_sovits_weights` 是 **api_v2 的全局状态**：并发切音色会互相覆盖
-（声音串台）。目前后端未加锁，属于已知缺陷。
+（声音串台）。**该竞态已修复**（提交 579d864）：`GptSovitsService.generateVoice` 用
+`ReentrantLock` 把「切换权重 → 合成」整段串行化，代价是 TTS 请求排队（单次 1~5 秒）。
 
 ---
 
