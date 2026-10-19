@@ -122,6 +122,13 @@ gpt-sovits:
       ref-audio: reference/katou_ref.wav
       prompt-text: 別に泣き芸をバカにしてるわけじゃないよ。本当だよ。
       prompt-lang: ja
+    - name: Eustia
+      label: 尤斯蒂娅（秽翼的尤斯蒂娅）
+      gpt-path: GPT_weights_v2Pro/eustia-e15.ckpt
+      sovits-path: SoVITS_weights_v2Pro/eustia_e4_s5800.pth
+      ref-audio: reference/Eustia_ref.wav
+      prompt-text: 本名はユースティアと言うらしいのですが、よくわかりません。
+      prompt-lang: ja
 
 # MinIO配置
 minio:
