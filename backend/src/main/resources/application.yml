@@ -129,6 +129,13 @@ gpt-sovits:
       ref-audio: reference/Eustia_ref.wav
       prompt-text: 本名はユースティアと言うらしいのですが、よくわかりません。
       prompt-lang: ja
+    - name: Hazel
+      label: 灰泽满（直播回放）
+      gpt-path: GPT_weights_v2Pro/hazel-e12.ckpt
+      sovits-path: SoVITS_weights_v2Pro/hazel_e6_s3306.pth
+      ref-audio: reference/Hazel_ref.wav
+      prompt-text: 肯定是暖的，怎么处理情感问题呢？
+      prompt-lang: zh
 
 # MinIO配置
 minio:
