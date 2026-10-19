@@ -35,6 +35,20 @@ public class GptSovitsService {
 
     private static final Logger log = LoggerFactory.getLogger(GptSovitsService.class);
 
+    /**
+     * TTS 合成互斥锁。
+     *
+     * <p>GPT-SoVITS 的 /set_gpt_weights、/set_sovits_weights 是**服务端全局状态**，
+     * 而「切换权重 → 调用 /tts 合成」是两步。若两个用户并发要不同音色：
+     * A 切到 Eustia → B 切到 Kisaki → A 的合成请求用的是 Kisaki 的权重（声音串台）。
+     * switchCharacter 上的 synchronized 只保证切换本身互斥，挡不住这个跨步竞态，
+     * 所以这里把「解析角色 → 切换 → 合成 → 落盘」整段串行化。</p>
+     *
+     * <p>代价：TTS 请求被串行处理（单次约 1~5 秒）。对本项目这种单实例、
+     * 低频语音合成的场景是正确性优先的合理取舍。</p>
+     */
+    private final java.util.concurrent.locks.ReentrantLock ttsLock = new java.util.concurrent.locks.ReentrantLock();
+
     @Value("${gpt-sovits.api-url}")
     private String gptSovitsApiUrl;
 
@@ -182,6 +196,18 @@ public class GptSovitsService {
      * @param characterName 指定角色名（null 则用用户偏好/默认）
      */
     public String generateVoice(String text, Long userId, String characterName) throws Exception {
+        ttsLock.lock();
+        try {
+            return generateVoiceLocked(text, userId, characterName);
+        } finally {
+            ttsLock.unlock();
+        }
+    }
+
+    /**
+     * generateVoice 的实际实现；**调用方必须持有 ttsLock**（见该字段注释）。
+     */
+    private String generateVoiceLocked(String text, Long userId, String characterName) throws Exception {
         if (text == null || text.trim().isEmpty()) {
             throw new IllegalArgumentException("合成文本不能为空");
         }
