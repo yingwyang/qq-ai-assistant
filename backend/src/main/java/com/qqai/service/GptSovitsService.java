@@ -372,6 +372,10 @@ public class GptSovitsService {
         result = result.replaceAll("[\"'\u201C\u201D\u2018\u2019]", "");
         // 项目符号 · 转为逗号（比直接删掉更保停顿）
         result = result.replace("·", "，");
+        // 工具调用信封残留（<toolcall…>、被去符号后只剩 toolcall 开头的形态）：
+        // 不清掉会被读成 "toolcall"
+        result = result.replaceAll("(?i)</?(?:tool_?call|function_call)[^>]*>", "");
+        result = result.replaceAll("(?i)^\\s*(?:tool_?call|function_call)\\b[\\s:：-]*", "");
         // 去除各类括号，保留内容
         result = result.replaceAll("[【】「」『』《》\\[\\]（）()]", "");
         // 斜杠替换为"或"（如"编号/选项" → "编号或选项"）

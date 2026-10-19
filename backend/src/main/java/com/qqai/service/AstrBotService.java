@@ -462,8 +462,9 @@ public class AstrBotService {
         // 2) 未闭合的 <tool_call> 起始（截到末尾）
         int idx = s.indexOf("<tool_call>");
         if (idx >= 0) s = s.substring(0, idx);
-        // 3) 遗留标签
-        s = s.replaceAll("</?(?:think|thinking|tool_call|arg_key|arg_value|tool_result)>", "");
+        // 3) 遗留标签（含无下划线变体 toolcall / function_call）
+        s = s.replaceAll("</?(?:think|thinking|tool_?call|function_call|arg_key|arg_value|tool_result)[^>]*>", "");
+        s = s.replaceAll("(?i)^\\s*(?:tool_?call|function_call)\\b[\\s:：-]*", "");
         // 3.5) 特殊 token：GLM 视觉模型会把答案包成 <|begin_of_box|>…<|end_of_box|>，
         //      留着会让结构化 JSON 解析失败（tags/sentiment 全空，原始 JSON 当正文存库）
         s = s.replaceAll("<\\|[^|>]*\\|>", "");

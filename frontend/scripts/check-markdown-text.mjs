@@ -78,6 +78,11 @@ check('复制/转发保留结构换行', markdownToPlain('- 一\n- 二'), [
   ['不含连字符', (s) => !s.includes('- ')],
 ]);
 
+check('工具调用信封被剥离', toSpeechText('<toolcall 群聊速览。近期主题，活跃'), [
+  ['不含 toolcall', (s) => !/tool_?call|function_call/i.test(s)],
+  ['保留正文', (s) => s.includes('群聊速览')],
+]);
+
 check('代码块不朗读', markdownToSpeech('```\nsecret()\n```\n正文'), [
   ['不含 secret', (s) => !s.includes('secret')],
   ['保留正文', (s) => s.includes('正文')],

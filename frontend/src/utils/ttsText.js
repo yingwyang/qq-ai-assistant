@@ -17,6 +17,14 @@ const CJK_PUNCT = '，。！？、；：';
 export function normalizeSpeech(input) {
   let text = decodeEntities(String(input ?? ''));
 
+  // 工具调用信封（AstrBot Agent 管线残留）：
+  //   <toolcall ...> / <tool_call>…</tool_call> / <function_call>，以及被去符号后只剩
+  //   「toolcall 正文」的形态。它们不是内容，必须整段剥掉，否则会被念成 "toolcall"。
+  text = text
+    .replace(/<\/?(?:tool_?call|function_call)[^>]*>/gi, '')
+    .replace(/^\s*(?:tool_?call|function_call)\b[\s:：-]*/i, '')
+    .replace(/\b(?:tool_?call|function_call)\b[\s:：-]*/gi, '');
+
   // Markdown 残留符号（兜底，正常已由 markdownToSpeech 处理）
   text = text.replace(/[#>*_~`]/g, '');
   // 引号 / 括号类包裹符
