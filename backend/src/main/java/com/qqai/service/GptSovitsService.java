@@ -314,8 +314,9 @@ public class GptSovitsService {
      * 去除 emoji、Markdown 符号、特殊标点等不适合语音合成的字符
      * 将 markdown 结构转为自然口语化文本，避免 TTS 断句混乱
      */
-    private String cleanTextForTTS(String text) {
-        String result = text;
+    String cleanTextForTTS(String text) {
+        // HTML 实体必须最先解码：否则下面的 `#` 规则会把 &#91; 切成 &91;
+        String result = decodeHtmlEntities(text);
         // 去除 Markdown 代码块
         result = result.replaceAll("```[\\s\\S]*?```", "");
         // 去除 HTML 标签
@@ -363,6 +364,10 @@ public class GptSovitsService {
         // 去除文本中间的破折号列表标记（如 " - "）
         result = result.replaceAll("\\s+[\\-•▪▫◦]\\s+", "，");
 
+        // 去除引号（TTS 会把引号读成停顿或杂音；英文直引号/中文弯引号都要去）
+        result = result.replaceAll("[\"'\u201C\u201D\u2018\u2019]", "");
+        // 项目符号 · 转为逗号（比直接删掉更保停顿）
+        result = result.replace("·", "，");
         // 去除各类括号，保留内容
         result = result.replaceAll("[【】「」『』《》\\[\\]（）()]", "");
         // 斜杠替换为"或"（如"编号/选项" → "编号或选项"）
@@ -384,6 +389,10 @@ public class GptSovitsService {
         result = result.replaceAll("\\.{3,}", "……");
         // 多个连续逗号 → 单个逗号
         result = result.replaceAll("[，,]{2,}", "，");
+        // 「。，」「！，」「？，」这类连用：去掉后面的逗号（否则 TTS 会在句末多停一拍）
+        result = result.replaceAll("([。！？；])[，、]", "$1");
+        // 「，。」这类反序连用：保留句号
+        result = result.replaceAll("[，、]([。！？；])", "$1");
         // 破折号 → 逗号
         result = result.replace("——", "，");
         result = result.replace("—", "，");
@@ -402,6 +411,28 @@ public class GptSovitsService {
         result = result.replaceAll("，+$", "。");
         result = result.trim();
         return result;
+    }
+
+    /**
+     * 解码常见 HTML 实体（数字实体 + 少量命名实体）。
+     * 消息内容来自 Web 渲染链路，常带 &#91;TOC&#93; 这类残留。
+     */
+    private String decodeHtmlEntities(String text) {
+        String decoded = text
+                .replace("&amp;", "&")
+                .replace("&lt;", "<")
+                .replace("&gt;", ">")
+                .replace("&quot;", "\"")
+                .replace("&apos;", "'")
+                .replace("&nbsp;", " ");
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("&#(\\d+);").matcher(decoded);
+        StringBuilder sb = new StringBuilder();
+        while (m.find()) {
+            int cp = Integer.parseInt(m.group(1));
+            m.appendReplacement(sb, java.util.regex.Matcher.quoteReplacement(String.valueOf((char) cp)));
+        }
+        m.appendTail(sb);
+        return sb.toString();
     }
 
     private Process gptSovitsProcess;

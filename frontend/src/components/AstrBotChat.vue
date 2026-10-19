@@ -738,6 +738,7 @@ import { showToast } from './Toast.vue';
 import PersonaManager from './PersonaManager.vue';
 import ForwardToGroupDialog from './ForwardToGroupDialog.vue';
 import { formatMessageTime } from '../utils/formatTime';
+import { toSpeechText } from '../utils/ttsText';
 import logger from '../utils/logger';
 export default {
   name: 'AstrBotChat',
@@ -1869,31 +1870,6 @@ export default {
       showToast(`已转发到「${groupName}」${parts > 1 ? `（${parts} 条）` : ''}`, 'success');
     };
 
-    // 将 HTML/Markdown 内容转换为纯文本（用于语音合成）
-    const contentToPlainText = (html) => {
-      if (!html) return '';
-      // 先通过 DOM 解析 HTML 内容
-      const temp = document.createElement('div');
-      temp.innerHTML = html;
-      // 处理 summary/br/p/div/li，保留换行
-      temp.querySelectorAll('summary').forEach(el => {
-        el.insertAdjacentText('afterend', '\n');
-      });
-      temp.querySelectorAll('br, p, div, li').forEach(el => {
-        el.insertAdjacentText('afterend', '\n');
-      });
-      let text = temp.innerText || temp.textContent || '';
-      // 移除 Markdown 图片语法
-      text = text.replace(/!\[[^\]]*\]\([^)]*\)/g, ' ');
-      // 移除 Markdown 链接 [text](url) -> text
-      text = text.replace(/\[([^\]]+)\]\([^)]*\)/g, '$1');
-      // 移除 Markdown 格式符
-      text = text.replace(/[#>*_~`]/g, '');
-      // 合并连续的空白
-      text = text.replace(/\s+/g, ' ').trim();
-      return text;
-    };
-
     // 处理语音生成/播放
     const handleVoiceAction = async (message) => {
       if (message.voiceGenerating) return;
@@ -1906,7 +1882,7 @@ export default {
 
       message.voiceGenerating = true;
       try {
-        const plainText = contentToPlainText(message.text);
+        const plainText = toSpeechText(message.text);
         if (!plainText.trim()) {
           showToast('没有可合成的文本内容', 'warning');
           return;
