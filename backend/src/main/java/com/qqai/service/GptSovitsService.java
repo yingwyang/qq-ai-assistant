@@ -70,6 +70,18 @@ public class GptSovitsService {
     @Value("${gpt-sovits.output-dir}")
     private String outputDir;
 
+    /** 是否启用合成缓存（同一角色 + 同一文本复用已合成音频） */
+    @Value("${gpt-sovits.cache-enabled:true}")
+    private boolean cacheEnabled;
+
+    /** 单次合成最大字数；超过则按句切分再拼接。&lt;=0 表示不分片 */
+    @Value("${gpt-sovits.chunk-max-chars:400}")
+    private int chunkMaxChars;
+
+    /** 分片之间的静音间隔（毫秒），0 表示不留间隔 */
+    @Value("${gpt-sovits.fragment-interval-ms:120}")
+    private int fragmentIntervalMs;
+
     @Autowired
     private ProcessManager processManager;
 
@@ -240,9 +252,60 @@ public class GptSovitsService {
             throw new IllegalArgumentException("清理后文本为空");
         }
 
-        // 限制文本长度，避免生成长文本耗时长
-        String trimmedText = cleanedText.length() > 500 ? cleanedText.substring(0, 500) + "……" : cleanedText;
+        String fullText = cleanedText;
+        String userIdStr = userId != null ? userId.toString() : "anonymous";
+        String dateStr = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd"));
+        File userDir = new File(outputDir, userIdStr);
 
+        // ---- 缓存：同一角色 + 同一文本只合成一次 ----
+        // 文件按内容寻址，且放在该用户目录下，保证 MediaAccessFilter 的所有权校验仍成立
+        String cacheKey = sha256Hex((targetChar == null ? "default" : targetChar) + "|" + fullText);
+        File cacheDir = new File(userDir, "cache");
+        File cacheFile = new File(cacheDir, cacheKey + ".wav");
+        if (cacheEnabled && cacheFile.isFile() && cacheFile.length() > 0) {
+            log.info("TTS 命中缓存 key={} 字数={}", cacheKey.substring(0, 8), fullText.length());
+            return "/uploads/tts/" + userIdStr + "/cache/" + cacheKey + ".wav";
+        }
+
+        // ---- 长文本分片：超过阈值才切，按句末标点切分，逐段合成后拼接 ----
+        List<String> segments = TtsAudioUtil.splitIntoChunks(fullText, chunkMaxChars);
+        List<byte[]> parts = new ArrayList<>(segments.size());
+        for (int i = 0; i < segments.size(); i++) {
+            if (segments.size() > 1) {
+                log.info("TTS 合成片段 {}/{}（{} 字）", i + 1, segments.size(), segments.get(i).length());
+            }
+            parts.add(synthesize(segments.get(i), useRefAudio, usePromptText, usePromptLang));
+        }
+        byte[] audio = parts.size() == 1 ? parts.get(0) : TtsAudioUtil.concatWav(parts, fragmentIntervalMs);
+
+        // 缓存开启时统一按内容寻址存储并返回该 URL：
+        // 同一文本第一次与后续调用拿到的是同一个地址，前端也能直接复用。
+        if (cacheEnabled) {
+            try {
+                if (!cacheDir.exists() && !cacheDir.mkdirs()) {
+                    throw new IOException("无法创建 TTS 缓存目录");
+                }
+                Files.write(cacheFile.toPath(), audio);
+                return "/uploads/tts/" + userIdStr + "/cache/" + cacheKey + ".wav";
+            } catch (Exception e) {
+                log.warn("写入 TTS 缓存失败，回退为按日期存储: {}", e.getMessage());
+            }
+        }
+
+        File dateDir = new File(userDir, dateStr);
+        if (!dateDir.exists() && !dateDir.mkdirs()) {
+            throw new IOException("无法创建 TTS 输出目录: " + dateDir.getAbsolutePath());
+        }
+        String fileName = UUID.randomUUID().toString() + ".wav";
+        File outFile = new File(dateDir, fileName);
+        Files.write(outFile.toPath(), audio);
+        return "/uploads/tts/" + userIdStr + "/" + dateStr + "/" + fileName;
+    }
+
+    /**
+     * 单段合成：调用 GPT-SoVITS /tts，返回 wav 字节（不分片、不落盘）。
+     */
+    private byte[] synthesize(String text, String refAudio, String promptText, String promptLangForRequest) throws Exception {
         // 共享的长超时客户端：带连接/读取超时（原先 HttpClients.createDefault() 无超时，
         // 每次调用还会新建一个连接池且 close 掉，既无上界又浪费）
         HttpPost httpPost = new HttpPost(gptSovitsApiUrl + "/tts");
@@ -250,12 +313,12 @@ public class GptSovitsService {
 
         // 构建请求体 - 参考 GPT-SoVITS api_v2.py 的接口规范
         ObjectNode requestBody = objectMapper.createObjectNode();
-        requestBody.put("text", trimmedText);
+        requestBody.put("text", text);
         requestBody.put("text_lang", textLang);
-        requestBody.put("ref_audio_path", useRefAudio);
+        requestBody.put("ref_audio_path", refAudio);
         // 训练好的模型传 prompt_text 帮助对齐音色
-        requestBody.put("prompt_text", usePromptText);
-        requestBody.put("prompt_lang", usePromptLang);
+        requestBody.put("prompt_text", promptText);
+        requestBody.put("prompt_lang", promptLangForRequest);
         requestBody.put("media_type", "wav");
         requestBody.put("streaming_mode", false);
         requestBody.put("speed_factor", 1.0);
@@ -282,31 +345,21 @@ public class GptSovitsService {
                 throw new IOException("GPT-SoVITS 返回错误 (HTTP " + statusCode + "): " + sb);
             }
 
-            String userIdStr = userId != null ? userId.toString() : "anonymous";
-
-            // 确保输出目录存在：uploads/tts/{userId}/{date}
-            File outDir = new File(outputDir, userIdStr);
-            if (!outDir.exists()) {
-                outDir.mkdirs();
-            }
-
-            String dateStr = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd"));
-            File dateDir = new File(outDir, dateStr);
-            if (!dateDir.exists()) {
-                dateDir.mkdirs();
-            }
-
-            String fileName = UUID.randomUUID().toString() + ".wav";
-            File outFile = new File(dateDir, fileName);
-
-            // 直接将响应流保存为 wav 文件
             try (InputStream is = response.getEntity().getContent()) {
-                Files.copy(is, outFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
+                return is.readAllBytes();
             }
-
-            // 返回前端可访问的相对路径（Spring WebMvcConfig 配置了 /uploads/** 静态资源映射）
-            return "/uploads/tts/" + userIdStr + "/" + dateStr + "/" + fileName;
         }
+    }
+
+    /** 内容寻址用的 SHA-256 十六进制（取前 32 位足够避免碰撞） */
+    private static String sha256Hex(String input) throws Exception {
+        java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
+        byte[] digest = md.digest(input.getBytes(StandardCharsets.UTF_8));
+        StringBuilder sb = new StringBuilder();
+        for (byte b : digest) {
+            sb.append(String.format("%02x", b));
+        }
+        return sb.substring(0, 32);
     }
 
     /**

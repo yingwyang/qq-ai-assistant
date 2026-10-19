@@ -103,6 +103,12 @@ gpt-sovits:
   prompt-lang: ${GPT_SOVITS_PROMPT_LANG:zh}
   text-lang: ${GPT_SOVITS_TEXT_LANG:zh}
   output-dir: ${GPT_SOVITS_OUTPUT_DIR:D:/ai/Documents/qq-web/qq-ai-assistant/backend/uploads/tts}
+  # 合成缓存：同一角色 + 同一文本只合成一次（按内容寻址存到该用户目录下）
+  cache-enabled: ${GPT_SOVITS_CACHE_ENABLED:true}
+  # 长文本分片：超过该字数才按句切分、逐段合成后拼接；<=0 关闭分片
+  chunk-max-chars: ${GPT_SOVITS_CHUNK_MAX_CHARS:400}
+  # 分片之间的静音间隔（毫秒）
+  fragment-interval-ms: ${GPT_SOVITS_FRAGMENT_INTERVAL_MS:120}
   # 训练好的音色模型根目录
   model-root: ${GPT_SOVITS_MODEL_ROOT:D:/ai/Documents/qq-web/GPT-SoVITS-v2pro-20250604-nvidia50}
   default-character: ${GPT_SOVITS_DEFAULT_CHARACTER:Kisaki}
