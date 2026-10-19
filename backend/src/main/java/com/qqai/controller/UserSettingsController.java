@@ -21,8 +21,13 @@ import java.util.Optional;
 @RequestMapping("/api/user")
 public class UserSettingsController {
 
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(UserSettingsController.class);
+
     @Autowired
     private UserSettingsService userSettingsService;
+
+    @Autowired
+    private org.springframework.web.client.RestTemplate restTemplate;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -134,6 +139,106 @@ public class UserSettingsController {
             error.put("status", "error");
             error.put("message", e.getMessage());
             return ResponseEntity.ok(error);
+        }
+    }
+
+    /**
+     * 从提供商拉取模型列表（服务端执行）。
+     *
+     * <p>为什么必须在服务端做：GET /settings 只返回掩码后的 apiKey（sk-4****100e），
+     * 前端拿掩码当 Bearer 去请求 /models 必然 401——这就是「刷新后获取不到模型」的根因。
+     * 真实密钥只存在服务端，所以拉取也必须由服务端完成，并把结果持久化到 llm_models，
+     * 避免「拉取到的列表刷新就没了」。</p>
+     *
+     * <p>安全：baseUrl 来自用户设置，属于出站请求。这里只允许 http/https，
+     * 且拒绝回环/内网地址（防 SSRF）。</p>
+     */
+    @PostMapping("/provider-models/fetch")
+    public ResponseEntity<?> fetchProviderModels(@RequestBody Map<String, Object> request) {
+        ObjectNode result = objectMapper.createObjectNode();
+        try {
+            String resolvedUserId = resolveUserId((String) request.get("userId"));
+            String providerName = (String) request.get("provider");
+            Optional<UserSettings> opt = userSettingsService.findByUserId(resolvedUserId);
+            if (opt.isEmpty()) {
+                result.put("status", "error");
+                result.put("message", "尚未保存任何提供商配置");
+                return ResponseEntity.ok(result);
+            }
+            UserSettings settings = opt.get();
+            Map<String, Object> provider = null;
+            for (Map<String, Object> p : parseProviders(settings.getProviders())) {
+                if (providerName != null && providerName.equals(String.valueOf(p.get("name")))) {
+                    provider = p;
+                    break;
+                }
+            }
+            if (provider == null) {
+                result.put("status", "error");
+                result.put("message", "未找到提供商：" + providerName);
+                return ResponseEntity.ok(result);
+            }
+            String apiKey = provider.get("apiKey") == null ? "" : String.valueOf(provider.get("apiKey"));
+            String baseUrl = provider.get("baseUrl") == null ? "" : String.valueOf(provider.get("baseUrl"));
+            if (apiKey.isBlank() || baseUrl.isBlank()) {
+                result.put("status", "error");
+                result.put("message", "该提供商的 API Key 或 Base URL 为空");
+                return ResponseEntity.ok(result);
+            }
+            String url = baseUrl.endsWith("/") ? baseUrl + "models" : baseUrl + "/models";
+            assertOutboundUrlAllowed(url);
+
+            org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
+            headers.setBearerAuth(apiKey);
+            org.springframework.http.ResponseEntity<String> resp = restTemplate.exchange(
+                    url, org.springframework.http.HttpMethod.GET,
+                    new org.springframework.http.HttpEntity<>(headers), String.class);
+            if (!resp.getStatusCode().is2xxSuccessful() || resp.getBody() == null) {
+                result.put("status", "error");
+                result.put("message", "提供商返回 " + resp.getStatusCode().value());
+                return ResponseEntity.ok(result);
+            }
+            com.fasterxml.jackson.databind.JsonNode root = objectMapper.readTree(resp.getBody());
+            com.fasterxml.jackson.databind.JsonNode arr = root.path("data");
+            List<String> ids = new ArrayList<>();
+            if (arr.isArray()) {
+                for (com.fasterxml.jackson.databind.JsonNode m : arr) {
+                    com.fasterxml.jackson.databind.JsonNode id = m.path("id");
+                    if (id.isTextual() && !id.asText().isBlank()) {
+                        ids.add(id.asText());
+                    }
+                }
+            }
+            // 持久化：刷新页面后仍能看到这份列表
+            settings.setLlmModels(objectMapper.writeValueAsString(ids));
+            userSettingsService.save(settings);
+
+            result.put("status", "ok");
+            result.putPOJO("models", ids);
+            result.put("persisted", true);
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            log.warn("从提供商拉取模型失败: {}", e.getMessage());
+            result.put("status", "error");
+            result.put("message", "拉取失败：" + e.getMessage());
+            return ResponseEntity.ok(result);
+        }
+    }
+
+    /** 出站请求安全校验：只允许 http/https，且拒绝回环/内网地址（防 SSRF） */
+    private void assertOutboundUrlAllowed(String url) throws Exception {
+        java.net.URI uri = java.net.URI.create(url);
+        String scheme = uri.getScheme();
+        if (scheme == null || (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme))) {
+            throw new IllegalArgumentException("只支持 http/https 地址");
+        }
+        String host = uri.getHost();
+        if (host == null) {
+            throw new IllegalArgumentException("无效的地址");
+        }
+        java.net.InetAddress addr = java.net.InetAddress.getByName(host);
+        if (addr.isLoopbackAddress() || addr.isSiteLocalAddress() || addr.isLinkLocalAddress()) {
+            throw new IllegalArgumentException("不允许访问内网地址");
         }
     }
 

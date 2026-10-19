@@ -411,24 +411,6 @@
                     <input v-model="currentProvider.baseUrl" type="text" class="form-input" placeholder="输入 API 地址，例如 https://api.openai.com/v1">
                   </div>
 
-                  <!-- 助手名称 -->
-                  <div class="form-item">
-                    <label class="form-label">助手名称</label>
-                    <span class="form-hint">对话中显示的助手名称</span>
-                    <input v-model="botName" type="text" class="form-input" placeholder="输入助手显示名称">
-                  </div>
-
-                  <!-- AstrBot API Key -->
-                  <div class="form-item">
-                    <label class="form-label">AstrBot API Key</label>
-                    <span class="form-hint">AstrBot 服务 API 密钥</span>
-                    <div class="password-field">
-                      <input v-model="astrbotApiKey" :type="showAstrbotKey ? 'text' : 'password'" class="form-input" placeholder="输入 AstrBot API Key">
-                      <button class="toggle-key-btn" @click="showAstrbotKey = !showAstrbotKey">
-                        {{ showAstrbotKey ? '隐藏' : '显示' }}
-                      </button>
-                    </div>
-                  </div>
                 </div>
 
                 <!-- 模型配置 -->
@@ -1223,22 +1205,26 @@ export default {
       }
     };
 
-    // 加载模型列表：仅显示在设置面板里，不再持久化到 llmModels
+    // 从提供商拉取模型列表：必须走服务端。
+    // 前端只拿到掩码后的 apiKey（sk-4****100e），拿它当 Bearer 必然 401——
+    // 这就是「刷新后获取不到模型」的根因；真实密钥只在服务端，且拉取结果要持久化。
     const fetchModels = async () => {
       const provider = currentProvider.value;
-      if (!provider || !provider.apiKey || !provider.baseUrl) {
-        showToast('请先配置 API Key 和 Base URL', 'error');
+      if (!provider || !provider.baseUrl) {
+        showToast('请先选择提供商并填写 Base URL', 'error');
         return;
       }
-      showToast('正在获取模型列表...', 'info');
+      showToast('正在从提供商拉取模型...', 'info');
       try {
-        const response = await fetch(`${provider.baseUrl}/models`, {
-          headers: { 'Authorization': `Bearer ${provider.apiKey}` }
+        const response = await fetch('/api/user/provider-models/fetch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ userId: props.userId, provider: provider.name })
         });
-        if (response.ok) {
-          const data = await response.json();
-          const newModels = (data.data || []).map(m => m.id || m.name);
-          // 仅写入 llmModels 变量用于设置面板展示，不再保存到后端
+        const result = await response.json();
+        if (result.status === 'ok') {
+          const newModels = result.models || [];
           llmModels.value = newModels;
           // 同步到聊天界面的下拉框（{id, label} 格式）
           const toModelObj = (fullId) => {
@@ -1260,9 +1246,9 @@ export default {
           }
           // 清空本地缓存中 llmModels 字段
           localStorage.removeItem('llm_models');
-          showToast(`成功获取 ${newModels.length} 个模型（未持久化）`, 'success');
+          showToast(`成功拉取 ${newModels.length} 个模型（已保存）`, 'success');
         } else {
-          showToast('获取模型列表失败', 'error');
+          showToast(result.message || '拉取失败', 'error');
         }
       } catch (error) {
         logger.error('获取模型列表失败:', error);
@@ -1308,6 +1294,10 @@ export default {
           botName.value = data.botName || botName.value;
           astrbotApiKey.value = data.astrbotApiKey || astrbotApiKey.value;
           llmModel.value = data.llmModel || llmModel.value;
+          // 恢复上次从提供商拉取并持久化的模型列表（刷新后仍在）
+          if (Array.isArray(data.llmModels) && data.llmModels.length > 0 && llmModels.value.length === 0) {
+            llmModels.value = data.llmModels;
+          }
           // 从后端恢复 providers（掩码值）
           if (data.providers && Array.isArray(data.providers) && data.providers.length > 0) {
             providers.value = data.providers.map(p => ({
@@ -1339,7 +1329,7 @@ export default {
           llmApiKey: provider?.apiKey || '',
           llmBaseUrl: provider?.baseUrl || '',
           llmModel: llmModel.value,
-          llmModels: [], // 废弃 llmModels 存储，清空数据库
+          llmModels: llmModels.value, // 拉取到的列表要随设置一起持久化（否则刷新就丢）
           providers: providers.value.map(p => ({
             name: p.name,
             apiKey: p.apiKey,
