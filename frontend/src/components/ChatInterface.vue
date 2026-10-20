@@ -421,7 +421,14 @@
         </div>
       </div>
 
-      <div class="composer-row">
+      <div
+        class="composer-row"
+        :class="{ 'is-drop-target': dropActive }"
+        @dragenter.prevent="onDropDragEnter"
+        @dragover.prevent="onDropDragOver"
+        @dragleave.prevent="onDropDragLeave"
+        @drop.prevent="onDropAttach"
+      >
         <button class="composer-icon-btn" :class="{ active: showAtPicker }" title="提及群成员" @click="toggleAtPicker">
           <Icon name="person" :size="15" />
         </button>
@@ -798,9 +805,8 @@ export default {
       fileInputRef.value?.click();
     };
 
-    const onAttachChange = async (e) => {
-      const file = e?.target?.files?.[0];
-      if (e?.target) e.target.value = '';   // 允许重复选同一个文件
+    /** 上传并发送一个文件/图片（选文件与拖放共用） */
+    const sendAttachFile = async (file) => {
       if (!file || !groupId.value) return;
       if (file.size > MAX_UPLOAD_BYTES) {
         showToast(`文件过大（${(file.size / 1024 / 1024).toFixed(1)}MB），最大 20MB`, 'warning');
@@ -824,6 +830,80 @@ export default {
         showToast(err?.message || '发送失败', 'error');
       } finally {
         attachUploading.value = false;
+      }
+    };
+
+    const onAttachChange = async (e) => {
+      const file = e?.target?.files?.[0];
+      if (e?.target) e.target.value = '';   // 允许重复选同一个文件
+      await sendAttachFile(file);
+    };
+
+    // ===== 拖放图片/文件进输入区 =====
+    // 不处理 drop 时，浏览器会把被拖 <img> 的 src 当文本插进输入框（用户看到的是图片路径）。
+    const dropActive = ref(false);
+    const onDropDragEnter = () => { dropActive.value = true; };
+    const onDropDragLeave = () => { dropActive.value = false; };
+    const onDropDragOver = (e) => { if (e && e.dataTransfer) e.dataTransfer.dropEffect = 'copy'; };
+
+    const onDropAttach = async (e) => {
+      dropActive.value = false;
+      if (attachUploading.value || composerSending.value) return;
+      const dt = e && e.dataTransfer;
+      if (!dt) return;
+
+      // 1) 系统拖入的真实文件
+      const files = Array.from(dt.files || []);
+      if (files.length) {
+        await sendAttachFile(files[0]);
+        return;
+      }
+
+      // 2) 从页面拖来的图片链接（text/html 的 <img src>、uri-list、纯文本 URL）
+      let url = '';
+      const html = dt.getData('text/html');
+      if (html) {
+        const m = /<img[^>]+src=["']([^"']+)["']/i.exec(html);
+        if (m) url = m[1];
+      }
+      if (!url) {
+        url = (dt.getData('text/uri-list') || '')
+          .split('\n')
+          .map((s) => s.trim())
+          .find((s) => s && !s.startsWith('#')) || '';
+      }
+      if (!url) url = (dt.getData('text/plain') || '').trim();
+      if (!url) return;
+      if (!url.startsWith('/') && !/^https?:\/\//i.test(url)) {
+        showToast('无法读取本地文件路径，请用「图片/文件」按钮选择', 'warning');
+        return;
+      }
+
+      // 后端绝对地址（localhost:8081/images/...）还原成相对路径，走 Vite 代理，避免 CORS
+      try {
+        const parsed = new URL(url, window.location.origin);
+        const isBackend = ['localhost', '127.0.0.1'].includes(parsed.hostname) && parsed.port === '8081';
+        if (parsed.origin === window.location.origin || isBackend) {
+          url = parsed.pathname + parsed.search;
+        }
+      } catch {
+        // 解析失败按原样试
+      }
+
+      try {
+        const resp = await fetch(url, { credentials: 'include' });
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const blob = await resp.blob();
+        const type = String(blob.type || '');
+        if (!type.startsWith('image/') && !type.startsWith('video/') && !type.startsWith('audio/')) {
+          showToast('拖入的内容不是图片/音视频，请改用「图片/文件」按钮选择', 'warning');
+          return;
+        }
+        const ext = (type.split('/')[1] || 'png').replace('jpeg', 'jpg');
+        await sendAttachFile(new File([blob], '拖入文件.' + ext, { type }));
+      } catch (err) {
+        logger.warn('拖入文件读取失败:', err);
+        showToast('无法读取拖入的文件（可能受跨域限制），请改用「图片/文件」按钮选择', 'error');
       }
     };
 
@@ -1643,6 +1723,11 @@ export default {
       membersLoading,
       filteredMembers,
       attachUploading,
+      dropActive,
+      onDropDragEnter,
+      onDropDragOver,
+      onDropDragLeave,
+      onDropAttach,
       fileInputRef,
       composerPlaceholder,
       startReply,
@@ -1793,6 +1878,12 @@ export default {
   background: var(--card-bg, #fff);
 }
 .composer-row { display: flex; align-items: flex-end; gap: 8px; }
+.composer-row.is-drop-target {
+  outline: 2px dashed #6366f1;
+  outline-offset: 2px;
+  background: #eef2ff;
+  border-radius: 8px;
+}
 
 /* 回复 / @ 提示条 */
 .composer-chips { display: flex; flex-wrap: wrap; gap: 6px; }
