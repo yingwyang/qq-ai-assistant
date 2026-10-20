@@ -1588,7 +1588,7 @@ export default {
         if (newConv) {
           conversations.value.unshift(newConv);
           currentConversationId.value = newConv.conversationId;
-          currentConversationTitle.value = newConv.title || (titleOverride || '新对话');
+          currentConversationTitle.value = String(newConv.title || titleOverride || '新对话');
           messages.value = [];
           localStorage.setItem('astrbot_current_conversation', newConv.conversationId);
         }
@@ -1866,7 +1866,9 @@ export default {
      * 没有会话时才退回当前群名 —— 两者不要拼在一起，容易张冠李戴。
      */
     const headerSubtitle = computed(() => {
-      const conv = (currentConversationTitle.value || '').trim();
+      // 标题可能来自接口（历史数据里出现过非字符串），统一转成字符串再 trim，
+      // 否则渲染期抛错会让整个组件白屏、按钮全部点不动。
+      const conv = String(currentConversationTitle.value ?? '').trim();
       if (conv && conv !== '新对话') return conv;
       const group = (props.groupName || '').trim();
       return group || '新对话';
@@ -2264,6 +2266,9 @@ export default {
       newProviderName,
       currentProvider,
       filteredModels,
+      modelProviderFilter,
+      modelProviderTabs,
+      visibleModels,
       modelSourceLabel,
       showInsufficientCredits,
       insufficientNeed,
