@@ -442,9 +442,22 @@
                     <button class="btn-model-cancel" @click="showCustomModel = false; newModelName = ''">取消</button>
                   </div>
 
+                  <!-- 按厂商分选项卡：模型列表混排时看不出哪些来自哪个提供商 -->
+                  <div v-if="modelProviderTabs.length > 1" class="model-provider-tabs">
+                    <button
+                      v-for="tab in modelProviderTabs"
+                      :key="tab.key"
+                      class="model-provider-tab"
+                      :class="{ active: modelProviderFilter === tab.key }"
+                      @click="modelProviderFilter = tab.key"
+                    >
+                      {{ tab.label }}<span class="tab-count">{{ tab.count }}</span>
+                    </button>
+                  </div>
+
                   <div class="model-config-list">
                     <div 
-                      v-for="(model, idx) in filteredModels" 
+                      v-for="(model, idx) in visibleModels" 
                       :key="idx" 
                       class="model-config-item"
                       :class="{ 'is-current': model.current }"
@@ -471,7 +484,7 @@
                         </button>
                       </div>
                     </div>
-                    <div v-if="filteredModels.length === 0" class="empty-models">
+                    <div v-if="visibleModels.length === 0" class="empty-models">
                       <Icon name="inbox" :size="32" />
                       <p v-if="modelError">{{ modelError }}</p>
                       <p v-else-if="modelSearch">没有匹配「{{ modelSearch }}」的模型</p>
@@ -1039,6 +1052,40 @@ export default {
         (m.name || '').toLowerCase().includes(keyword)
         || (m.id || '').toLowerCase().includes(keyword)
         || (m.provider || '').toLowerCase().includes(keyword));
+    });
+
+    /** 当前选中的厂商选项卡（'all' = 全部） */
+    const modelProviderFilter = ref('all');
+
+    /** 模型的厂商 key：优先用后端给的 provider，其次取完整 ID 的第一段 */
+    const modelProviderKey = (m) => {
+      const raw = (m.provider || (m.fullName || '').split('/')[0] || '其他').toString().trim();
+      return raw.toLowerCase();
+    };
+
+    /** 厂商选项卡：全部 + 各厂商（按数量降序） */
+    const modelProviderTabs = computed(() => {
+      const counts = new Map();
+      for (const m of filteredModels.value) {
+        const key = modelProviderKey(m);
+        counts.set(key, (counts.get(key) || 0) + 1);
+      }
+      const tabs = [{ key: 'all', label: '全部', count: filteredModels.value.length }];
+      for (const [key, count] of [...counts.entries()].sort((a, b) => b[1] - a[1])) {
+        tabs.push({ key, label: key, count });
+      }
+      return tabs;
+    });
+
+    /** 当前厂商选项卡下的模型 */
+    const visibleModels = computed(() => {
+      if (modelProviderFilter.value === 'all') return filteredModels.value;
+      return filteredModels.value.filter((m) => modelProviderKey(m) === modelProviderFilter.value);
+    });
+
+    // 搜索时回到「全部」，否则在某厂商页签下搜别的厂商会显示空
+    watch(modelSearch, () => {
+      if (modelProviderFilter.value !== 'all') modelProviderFilter.value = 'all';
     });
 
     /** 面板头部说明：数据来源与启用数量，避免"看不到模型"时无从判断 */
@@ -3200,6 +3247,57 @@ export default {
   border-radius: 4px;
   font-size: 13px;
   cursor: pointer;
+}
+
+/* 厂商选项卡：模型列表混排时，用页签把来源分开 */
+.model-provider-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0 4px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #eef0f3;
+}
+
+.model-provider-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+  background: #fff;
+  color: #4b5563;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.model-provider-tab:hover {
+  border-color: #a5b4fc;
+  color: #4338ca;
+}
+
+.model-provider-tab.active {
+  background: #eef2ff;
+  border-color: #6366f1;
+  color: #4338ca;
+  font-weight: 600;
+}
+
+.model-provider-tab .tab-count {
+  min-width: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: #f3f4f6;
+  color: #6b7280;
+  font-size: 11px;
+  text-align: center;
+}
+
+.model-provider-tab.active .tab-count {
+  background: #fff;
+  color: #4338ca;
 }
 
 /* 模型配置列表 */
