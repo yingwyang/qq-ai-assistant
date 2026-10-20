@@ -78,6 +78,14 @@ public class GptSovitsService {
     @Value("${gpt-sovits.infer-config:}")
     private String inferConfig;
 
+    /** 是否开启并行推理（默认开启：关闭时合成会提前结束） */
+    @Value("${gpt-sovits.parallel-infer:true}")
+    private boolean parallelInfer;
+
+    /** 是否按输入文本自动识别合成语言（默认开启：纯汉字用 zh、含假名用 ja） */
+    @Value("${gpt-sovits.auto-detect-text-lang:true}")
+    private boolean autoDetectTextLang;
+
     /** 是否开启分桶处理（默认关闭：实测长文本会提前截断） */
     @Value("${gpt-sovits.split-bucket:false}")
     private boolean splitBucket;
@@ -279,6 +287,12 @@ public class GptSovitsService {
         String dateStr = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd"));
         File userDir = new File(outputDir, userIdStr);
 
+        // 语言按输入文本判定，角色配置只作兜底：
+        // 否则日文角色收到中文会被当成日文 G2P（实测 Eustia 中文只出 2.4s 且发音错乱）。
+        if (autoDetectTextLang) {
+            useTextLang = resolveTextLang(cleanedText, useTextLang);
+        }
+
         // ---- 缓存：同一角色 + 同一文本只合成一次 ----
         // 文件按内容寻址，且放在该用户目录下，保证 MediaAccessFilter 的所有权校验仍成立
         // 缓存 key 必须包含「会改变音频的所有参数」：角色、权重文件、合成语言、语速。
@@ -356,7 +370,8 @@ public class GptSovitsService {
         // 分桶会把文本按长度切成桶并行推理；实测（2026-10-20）开启时长文本
         // 经常提前结束、音频明显短于文本，按用户要求默认关闭。
         requestBody.put("split_bucket", splitBucket);
-        requestBody.put("parallel_infer", false); // 关闭并行执行推理
+        // 并行推理必须开启：实测关闭时合成会提前结束（同一句中文 3.08s → 1.84s）
+        requestBody.put("parallel_infer", parallelInfer);
         requestBody.put("fragment_interval", 0.0); // 片段间不添加静音间隔
 
         httpPost.setEntity(new StringEntity(requestBody.toString(), StandardCharsets.UTF_8));
@@ -381,6 +396,28 @@ public class GptSovitsService {
                 return is.readAllBytes();
             }
         }
+    }
+
+    /**
+     * 按输入文本推断合成语言。
+     *
+     * <p>规则：含假名（平假名/片假名）→ ja；无假名但含汉字 → zh；
+     * 其它（纯英文/数字）→ 用角色配置的兜底语言。</p>
+     *
+     * <p>依据：日文句子几乎必含假名，中文句子不含假名，这条判据够用且可解释。</p>
+     */
+    String resolveTextLang(String text, String fallbackLang) {
+        String base = (fallbackLang == null || fallbackLang.isBlank()) ? textLang : fallbackLang;
+        if (text == null || text.isBlank()) {
+            return base;
+        }
+        if (text.matches("(?s).*[\\u3040-\\u30ff\\u31f0-\\u31ff].*")) {
+            return "ja";
+        }
+        if (text.matches("(?s).*[\\u4e00-\\u9fff].*")) {
+            return "zh";
+        }
+        return base;
     }
 
     /** 内容寻址用的 SHA-256 十六进制（取前 32 位足够避免碰撞） */

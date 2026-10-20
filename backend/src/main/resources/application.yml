@@ -108,6 +108,10 @@ gpt-sovits:
   # 长文本分片：超过该字数才按句切分、逐段合成后拼接；<=0 关闭分片
   # 实测：单段超过约 120 字时，GPT-SoVITS 会提前结束、音频明显短于文本（Hazel 200 字只出 17.8s）
   chunk-max-chars: ${GPT_SOVITS_CHUNK_MAX_CHARS:120}
+  # 合成语言按输入文本自动识别（含假名→ja，纯汉字→zh）；角色上的 text-lang 只作兜底
+  auto-detect-text-lang: ${GPT_SOVITS_AUTO_DETECT_TEXT_LANG:true}
+  # 并行推理：必须开启（实测关闭时合成立刻提前结束）
+  parallel-infer: ${GPT_SOVITS_PARALLEL_INFER:true}
   # 分桶处理：默认关闭（实测开启时长文本会提前结束）
   split-bucket: ${GPT_SOVITS_SPLIT_BUCKET:false}
   # 分片之间的静音间隔（毫秒）
