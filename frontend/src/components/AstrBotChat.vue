@@ -1719,15 +1719,28 @@ export default {
       if (!url) url = (dt.getData('text/plain') || '').trim();
       if (!url) return;
 
-      const isRelative = url.startsWith('/');
-      if (!isRelative && !/^https?:\/\//i.test(url)) {
+      if (!url.startsWith('/') && !/^https?:\/\//i.test(url)) {
         // 本地磁盘路径（file:// 或 D:/...）浏览器不让读，明确提示比默默插入路径好
         showToast('无法读取本地文件路径，请用「图片」按钮选择，或从页面中拖动图片', 'warning');
         return;
       }
 
+      // 页面跑在 5173，而群聊图片地址是 http://localhost:8081/images/...
+      // 直接 fetch 属于跨域，会被 CORS 拦掉。这里把「指向后端的绝对地址」还原成
+      // 相对路径，交给 Vite 的 /images、/uploads 代理（生产环境同源，同样成立）。
       try {
-        const resp = await fetch(url, { credentials: isRelative ? 'include' : 'omit' });
+        const parsed = new URL(url, window.location.origin);
+        const backendHosts = ['localhost', '127.0.0.1'];
+        const isBackend = backendHosts.includes(parsed.hostname) && parsed.port === '8081';
+        if (parsed.origin === window.location.origin || isBackend) {
+          url = parsed.pathname + parsed.search;
+        }
+      } catch {
+        // URL 解析失败就按原样试
+      }
+
+      try {
+        const resp = await fetch(url, { credentials: 'include' });
         if (!resp.ok) throw new Error('HTTP ' + resp.status);
         const blob = await resp.blob();
         if (!String(blob.type || '').startsWith('image/')) {
