@@ -685,7 +685,14 @@
           <span v-else>暂无可用模型，请在 AstrBot 中配置后刷新</span>
         </div>
       </div>
-      <div class="input-wrapper">
+      <div
+        class="input-wrapper"
+        :class="{ 'is-drop-target': dropActive }"
+        @dragenter.prevent="onDropDragEnter"
+        @dragover.prevent="onDropDragOver"
+        @dragleave.prevent="onDropDragLeave"
+        @drop.prevent="onDropImage"
+      >
         <!-- 待发送图片预览（选图或粘贴后出现） -->
         <div v-if="pendingImage" class="pending-image">
           <img :src="pendingImagePreview" class="pending-image-thumb" alt="待发送图片" />
@@ -1674,6 +1681,67 @@ export default {
       pendingImagePreview.value = URL.createObjectURL(file);
     };
 
+    // ===== 拖放图片进输入区 =====
+    // 此前输入区没有 drop 处理，浏览器默认行为是把 <img> 的 src 当文本插入，
+    // 结果发出去的是「图片路径」，bot 既分析不了、又把文件地址留在对话里。
+    const dropActive = ref(false);
+
+    const onDropDragEnter = () => { dropActive.value = true; };
+    const onDropDragLeave = () => { dropActive.value = false; };
+    const onDropDragOver = (e) => { if (e && e.dataTransfer) e.dataTransfer.dropEffect = 'copy'; };
+
+    const onDropImage = async (e) => {
+      dropActive.value = false;
+      if (isLoading.value || imageUploading.value) return;
+      const dt = e && e.dataTransfer;
+      if (!dt) return;
+
+      // 1) 从系统拖入的真实文件
+      const file = Array.from(dt.files || []).find((f) => String(f.type || '').startsWith('image/'));
+      if (file) {
+        setPendingImage(file);
+        return;
+      }
+
+      // 2) 从页面/其它应用拖来的图片链接：text/html 里的 <img src>、uri-list 或纯文本
+      let url = '';
+      const html = dt.getData('text/html');
+      if (html) {
+        const m = /<img[^>]+src=["']([^"']+)["']/i.exec(html);
+        if (m) url = m[1];
+      }
+      if (!url) {
+        url = (dt.getData('text/uri-list') || '')
+          .split('\n')
+          .map((s) => s.trim())
+          .find((s) => s && !s.startsWith('#')) || '';
+      }
+      if (!url) url = (dt.getData('text/plain') || '').trim();
+      if (!url) return;
+
+      const isRelative = url.startsWith('/');
+      if (!isRelative && !/^https?:\/\//i.test(url)) {
+        // 本地磁盘路径（file:// 或 D:/...）浏览器不让读，明确提示比默默插入路径好
+        showToast('无法读取本地文件路径，请用「图片」按钮选择，或从页面中拖动图片', 'warning');
+        return;
+      }
+
+      try {
+        const resp = await fetch(url, { credentials: isRelative ? 'include' : 'omit' });
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const blob = await resp.blob();
+        if (!String(blob.type || '').startsWith('image/')) {
+          showToast('拖入的内容不是图片', 'warning');
+          return;
+        }
+        const ext = (blob.type.split('/')[1] || 'png').replace('jpeg', 'jpg');
+        setPendingImage(new File([blob], '拖入图片.' + ext, { type: blob.type }));
+      } catch (err) {
+        logger.warn('拖入图片读取失败:', err);
+        showToast('无法读取拖入的图片（可能受跨域限制），请改用「图片」按钮选择', 'error');
+      }
+    };
+
     const triggerImagePick = () => {
       if (isLoading.value || imageUploading.value) return;
       imageInputRef.value?.click();
@@ -2214,6 +2282,11 @@ export default {
       triggerImagePick,
       onImagePicked,
       onPasteImage,
+      dropActive,
+      onDropDragEnter,
+      onDropDragOver,
+      onDropDragLeave,
+      onDropImage,
       clearPendingImage,
       botAvatarInput,
       isLoading,
@@ -4269,6 +4342,12 @@ export default {
 
 .model-tip b {
   font-weight: 600;
+}
+
+.input-wrapper.is-drop-target {
+  outline: 2px dashed #6366f1;
+  outline-offset: 2px;
+  background: #eef2ff;
 }
 
 .input-wrapper {
