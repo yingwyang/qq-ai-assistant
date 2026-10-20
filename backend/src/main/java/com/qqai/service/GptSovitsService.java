@@ -546,7 +546,7 @@ public class GptSovitsService {
             String projectRoot = System.getProperty("user.dir");
             // 安装目录走配置（instances: v2Pro / v5），未配置时回退到旧硬编码路径
             String gptSovitsPath = (installDir == null || installDir.isBlank())
-                    ? projectRoot + File.separator + ".." + File.separator + ".." + File.separator + "GPT-SoVITS-v2pro-20250604-nvidia50"
+                    ? projectRoot + File.separator + ".." + File.separator + ".." + File.separator + "GPT-SoVITS-v5"
                     : installDir;
             File gptSovitsDir = new File(gptSovitsPath).getCanonicalFile();
             String pythonPath = gptSovitsDir.getAbsolutePath() + File.separator + "runtime" + File.separator + "python.exe";

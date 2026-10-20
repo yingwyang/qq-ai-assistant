@@ -174,7 +174,7 @@ minio:
 
 # FFmpeg配置
 ffmpeg:
-  path: ${FFMPEG_PATH:D:/ai/Documents/qq-web/GPT-SoVITS-v2pro-20250604-nvidia50/runtime/ffmpeg.exe}
+  path: ${FFMPEG_PATH:D:/ai/Documents/qq-web/GPT-SoVITS-v5/runtime/ffmpeg.exe}
 
 # Python 配置（用于 QQ SILK 语音解码）
 python:
