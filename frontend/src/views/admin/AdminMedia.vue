@@ -64,6 +64,25 @@
             <span>共 {{ mediaFilesTotal }} 个文件（本页占用 {{ formatBytes(currentFilesTotalSize) }}）</span>
             <span v-if="selectedMediaFilesCount > 0" class="media-selected">已选 {{ selectedMediaFilesCount }} 个，{{ formatBytes(selectedMediaFilesTotalSize) }}</span>
             <span v-else class="media-selected">已选 0 个，0 B</span>
+            <span class="media-select-actions">
+              <button
+                v-if="mediaFilesTotal > mediaFiles.length"
+                class="btn-action"
+                :disabled="mediaSelectingAll || mediaFilesLoading || isPurging"
+                :title="'把当前筛选下的全部 ' + mediaFilesTotal + ' 个文件都选中（跨页）'"
+                @click="onSelectAllMatching"
+              >
+                {{ mediaSelectingAll ? '选择中…' : '全选全部（' + mediaFilesTotal + '）' }}
+              </button>
+              <button
+                v-if="selectedMediaFilesCount > 0"
+                class="btn-action"
+                :disabled="mediaSelectingAll || isPurging"
+                @click="clearMediaFileSelection"
+              >
+                取消选择
+              </button>
+            </span>
           </div>
 
           <div v-if="mediaFilesLoading" class="media-loading">
@@ -272,6 +291,12 @@ export default {
   directives: { lazySrc },
   setup() {
     const media = inject('adminMedia');
+
+  /** 全选「当前筛选下的全部文件」（跨页），完成后给出明确反馈 */
+  const onSelectAllMatching = async () => {
+    const n = await media.selectAllMatchingMediaFiles();
+    showMsg(n > 0 ? `已选中全部 ${n} 个文件` : '没有可选择的文件', n > 0 ? 'success' : 'warning');
+  };
     const formatDate = inject('adminFormatDate');
     const formatFileSize = inject('adminFormatFileSize');
     const openMediaImagePreview = inject('adminOpenMediaImagePreview');
@@ -474,6 +499,8 @@ export default {
     });
 
     return {
+      onSelectAllMatching,
+      mediaSelectingAll: media.mediaSelectingAll,
       mediaFiles: media.mediaFiles,
       mediaFilesLoading: media.mediaFilesLoading,
       mediaFilesError: media.mediaFilesError,
@@ -553,6 +580,7 @@ export default {
 .media-table th, .media-table td { padding: 8px; border-bottom: 1px solid var(--border-color, #f0f0f0); text-align: left; color: var(--text-primary, #333); }
 .media-table th { font-weight: 600; color: var(--text-primary, #333); background: var(--bg-tertiary, #fafafa); }
 .media-table tbody tr:hover { background: var(--bg-tertiary, #fafafa); }
+.media-select-actions { display: inline-flex; gap: 8px; margin-left: auto; }
 .media-table .col-checkbox { width: 36px; text-align: center; }
 .media-table .col-thumb { width: 56px; }
 .media-table input[type="checkbox"] { width: 14px; height: 14px; cursor: pointer; }

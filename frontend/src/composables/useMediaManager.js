@@ -201,6 +201,46 @@ export function useMediaManager({ showSystemMsg, loadDiskUsage } = {}) {
     selectedMediaFileIds.value = set;
   };
 
+  /** 是否正在「全选筛选结果」（跨页拉取全部 id） */
+  const mediaSelectingAll = ref(false);
+
+  /**
+   * 全选当前筛选条件下的**所有**文件（不只当前页）。
+   * 表格页大小上限 200（后端 PageLimits），所以按 200/页翻页拉取 id。
+   * 7308 个文件约 37 次请求，只在用户显式点击时执行。
+   */
+  const selectAllMatchingMediaFiles = async () => {
+    const total = mediaFilesTotal.value;
+    if (!total) return 0;
+    mediaSelectingAll.value = true;
+    try {
+      const pageSize = 200;
+      const pages = Math.ceil(total / pageSize);
+      const newSet = new Set(selectedMediaFileIds.value);
+      const newCache = new Map(mediaFileCache.value);
+      for (let p = 0; p < pages; p += 1) {
+        const res = await messageApi.getMediaFiles({
+          ...mediaQuery.value,
+          page: p,
+          size: pageSize,
+        });
+        const content = (res && res.content) || [];
+        content.forEach((file) => {
+          if (file.id != null) {
+            newSet.add(file.id);
+            newCache.set(file.id, file);
+          }
+        });
+        if (content.length < pageSize) break;
+      }
+      selectedMediaFileIds.value = newSet;
+      mediaFileCache.value = newCache;
+      return newSet.size;
+    } finally {
+      mediaSelectingAll.value = false;
+    }
+  };
+
   const selectAllMediaFiles = () => {
     const newSet = new Set(selectedMediaFileIds.value);
     const newCache = new Map(mediaFileCache.value);
@@ -506,6 +546,7 @@ export function useMediaManager({ showSystemMsg, loadDiskUsage } = {}) {
     loadMediaFiles, setMediaFileFilter, setMediaKeyword, setMediaRange, setMediaSort,
     setMediaPageSize, resetMediaFilters, goToMediaPage,
     toggleMediaFileSelection, selectAllMediaFiles, clearMediaFileSelection,
+    mediaSelectingAll, selectAllMatchingMediaFiles,
     deleteSelectedMediaFiles, loadAllMediaFilesForPreview, confirmPurgeMedia,
     // 预览
     showPreviewModal, previewFiles, currentPreviewIndex, currentPreviewFile, previewMode,
