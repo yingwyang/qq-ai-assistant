@@ -78,6 +78,10 @@ public class GptSovitsService {
     @Value("${gpt-sovits.infer-config:}")
     private String inferConfig;
 
+    /** 是否开启分桶处理（默认关闭：实测长文本会提前截断） */
+    @Value("${gpt-sovits.split-bucket:false}")
+    private boolean splitBucket;
+
     /** 语速系数（v5turbo 原生模型需要约 1.4 校准；v2Pro 权重保持 1.0） */
     @Value("${gpt-sovits.speed-factor:1.0}")
     private double speedFactor;
@@ -283,7 +287,8 @@ public class GptSovitsService {
                 targetChar == null ? "default" : targetChar,
                 cc == null ? "" : String.valueOf(cc.getGptPath()),
                 cc == null ? "" : String.valueOf(cc.getSovitsPath()),
-                useTextLang, String.valueOf(speedFactor), fullText));
+                useTextLang, String.valueOf(speedFactor),
+                String.valueOf(chunkMaxChars), String.valueOf(splitBucket), fullText));
         File cacheDir = new File(userDir, "cache");
         File cacheFile = new File(cacheDir, cacheKey + ".wav");
         if (cacheEnabled && cacheFile.isFile() && cacheFile.length() > 0) {
@@ -348,7 +353,9 @@ public class GptSovitsService {
         requestBody.put("streaming_mode", false);
         requestBody.put("speed_factor", speedFactor);
         requestBody.put("text_split_method", "cut0"); // 不切分文本
-        requestBody.put("split_bucket", true); // 打开分桶处理
+        // 分桶会把文本按长度切成桶并行推理；实测（2026-10-20）开启时长文本
+        // 经常提前结束、音频明显短于文本，按用户要求默认关闭。
+        requestBody.put("split_bucket", splitBucket);
         requestBody.put("parallel_infer", false); // 关闭并行执行推理
         requestBody.put("fragment_interval", 0.0); // 片段间不添加静音间隔
 

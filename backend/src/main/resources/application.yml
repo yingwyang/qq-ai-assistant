@@ -106,7 +106,10 @@ gpt-sovits:
   # 合成缓存：同一角色 + 同一文本只合成一次（按内容寻址存到该用户目录下）
   cache-enabled: ${GPT_SOVITS_CACHE_ENABLED:true}
   # 长文本分片：超过该字数才按句切分、逐段合成后拼接；<=0 关闭分片
-  chunk-max-chars: ${GPT_SOVITS_CHUNK_MAX_CHARS:400}
+  # 实测：单段超过约 120 字时，GPT-SoVITS 会提前结束、音频明显短于文本（Hazel 200 字只出 17.8s）
+  chunk-max-chars: ${GPT_SOVITS_CHUNK_MAX_CHARS:120}
+  # 分桶处理：默认关闭（实测开启时长文本会提前结束）
+  split-bucket: ${GPT_SOVITS_SPLIT_BUCKET:false}
   # 分片之间的静音间隔（毫秒）
   fragment-interval-ms: ${GPT_SOVITS_FRAGMENT_INTERVAL_MS:120}
   # 安装目录（v2Pro / v5）；启动 GPT-SoVITS 时使用
