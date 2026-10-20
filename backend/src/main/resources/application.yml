@@ -128,7 +128,7 @@ gpt-sovits:
   # 角色列表
   characters:
     - name: Kisaki
-      label: Kisaki（妃那）
+      label: 妃
       gpt-path: GPT_weights_v2Pro/Kisaki-e15.ckpt
       sovits-path: SoVITS_weights_v2Pro/Kisaki_e8_s5104.pth
       ref-audio: reference/Kisaki_ref.wav
@@ -144,7 +144,7 @@ gpt-sovits:
       prompt-lang: ja
       text-lang: ja
     - name: Eustia
-      label: 尤斯蒂娅（秽翼的尤斯蒂娅）
+      label: 尤斯蒂娅
       gpt-path: GPT_weights_v2Pro/eustia-e15.ckpt
       sovits-path: SoVITS_weights_v2Pro/eustia_e4_s5800.pth
       ref-audio: reference/Eustia_ref.wav
@@ -152,7 +152,7 @@ gpt-sovits:
       prompt-lang: ja
       text-lang: ja
     - name: Hazel
-      label: 灰泽满（直播回放）
+      label: 灰泽满
       gpt-path: GPT_weights_v2Pro/hazel-e12.ckpt
       sovits-path: SoVITS_weights_v2Pro/hazel_e6_s3306.pth
       ref-audio: reference/Hazel_ref.wav
@@ -160,7 +160,7 @@ gpt-sovits:
       prompt-lang: zh
       text-lang: zh
     - name: Kago
-      label: 籠女（废村少女）
+      label: 笼女
       gpt-path: GPT_weights_v2Pro/kago-e10.ckpt
       sovits-path: SoVITS_weights_v5turbo/kago_e2_s2414_l32.pth
       ref-audio: reference/Kago_ref.wav
