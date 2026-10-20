@@ -127,6 +127,7 @@ gpt-sovits:
       ref-audio: reference/Kisaki_ref.wav
       prompt-text: どうして皆さんそこに物語性を求めるのでしょうか。
       prompt-lang: ja
+      text-lang: ja
     - name: 加藤惠
       label: 加藤惠
       gpt-path: GPT_weights_v2Pro/加藤惠-e15.ckpt
@@ -134,6 +135,7 @@ gpt-sovits:
       ref-audio: reference/katou_ref.wav
       prompt-text: 別に泣き芸をバカにしてるわけじゃないよ。本当だよ。
       prompt-lang: ja
+      text-lang: ja
     - name: Eustia
       label: 尤斯蒂娅（秽翼的尤斯蒂娅）
       gpt-path: GPT_weights_v2Pro/eustia-e15.ckpt
@@ -141,6 +143,7 @@ gpt-sovits:
       ref-audio: reference/Eustia_ref.wav
       prompt-text: 本名はユースティアと言うらしいのですが、よくわかりません。
       prompt-lang: ja
+      text-lang: ja
     - name: Hazel
       label: 灰泽满（直播回放）
       gpt-path: GPT_weights_v2Pro/hazel-e12.ckpt
@@ -148,6 +151,15 @@ gpt-sovits:
       ref-audio: reference/Hazel_ref.wav
       prompt-text: 肯定是暖的，怎么处理情感问题呢？
       prompt-lang: zh
+      text-lang: zh
+    - name: Kago
+      label: 籠女（废村少女）
+      gpt-path: GPT_weights_v2Pro/kago-e10.ckpt
+      sovits-path: SoVITS_weights_v5turbo/kago_e2_s2414_l32.pth
+      ref-audio: reference/Kago_ref.wav
+      prompt-text: これはもはや、実行力のある結界、と言って良いでしょう。
+      prompt-lang: ja
+      text-lang: ja
 
 # MinIO配置
 minio:

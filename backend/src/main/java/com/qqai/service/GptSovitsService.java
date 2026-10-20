@@ -251,11 +251,17 @@ public class GptSovitsService {
         String useRefAudio = refAudioPath;
         String usePromptText = "";
         String usePromptLang = promptLang;
+        // 每个角色可以有自己的合成语言：日文角色用 ja，中文角色用 zh。
+        // 用全局 text-lang（默认 zh）会把日文当中文处理，音频明显变短、发音错乱。
+        String useTextLang = textLang;
         if (cc != null) {
             String modelRoot = gptSovitsConfig.getModelRoot();
             useRefAudio = modelRoot + "/" + cc.getRefAudio();
             usePromptText = cc.getPromptText() != null ? cc.getPromptText() : "";
             usePromptLang = cc.getPromptLang() != null ? cc.getPromptLang() : promptLang;
+            if (cc.getTextLang() != null && !cc.getTextLang().isBlank()) {
+                useTextLang = cc.getTextLang();
+            }
         }
 
         // 清理文本：去除 emoji、特殊符号、Markdown 标记
@@ -271,7 +277,13 @@ public class GptSovitsService {
 
         // ---- 缓存：同一角色 + 同一文本只合成一次 ----
         // 文件按内容寻址，且放在该用户目录下，保证 MediaAccessFilter 的所有权校验仍成立
-        String cacheKey = sha256Hex((targetChar == null ? "default" : targetChar) + "|" + fullText);
+        // 缓存 key 必须包含「会改变音频的所有参数」：角色、权重文件、合成语言、语速。
+        // 只按角色+文本做 key 会命中历史坏音频（例如修好 text_lang 后仍返回旧结果）。
+        String cacheKey = sha256Hex(String.join("|",
+                targetChar == null ? "default" : targetChar,
+                cc == null ? "" : String.valueOf(cc.getGptPath()),
+                cc == null ? "" : String.valueOf(cc.getSovitsPath()),
+                useTextLang, String.valueOf(speedFactor), fullText));
         File cacheDir = new File(userDir, "cache");
         File cacheFile = new File(cacheDir, cacheKey + ".wav");
         if (cacheEnabled && cacheFile.isFile() && cacheFile.length() > 0) {
@@ -286,7 +298,7 @@ public class GptSovitsService {
             if (segments.size() > 1) {
                 log.info("TTS 合成片段 {}/{}（{} 字）", i + 1, segments.size(), segments.get(i).length());
             }
-            parts.add(synthesize(segments.get(i), useRefAudio, usePromptText, usePromptLang));
+            parts.add(synthesize(segments.get(i), useRefAudio, usePromptText, usePromptLang, useTextLang));
         }
         byte[] audio = parts.size() == 1 ? parts.get(0) : TtsAudioUtil.concatWav(parts, fragmentIntervalMs);
 
@@ -317,7 +329,8 @@ public class GptSovitsService {
     /**
      * 单段合成：调用 GPT-SoVITS /tts，返回 wav 字节（不分片、不落盘）。
      */
-    private byte[] synthesize(String text, String refAudio, String promptText, String promptLangForRequest) throws Exception {
+    private byte[] synthesize(String text, String refAudio, String promptText, String promptLangForRequest,
+                              String textLangForRequest) throws Exception {
         // 共享的长超时客户端：带连接/读取超时（原先 HttpClients.createDefault() 无超时，
         // 每次调用还会新建一个连接池且 close 掉，既无上界又浪费）
         HttpPost httpPost = new HttpPost(gptSovitsApiUrl + "/tts");
@@ -326,7 +339,7 @@ public class GptSovitsService {
         // 构建请求体 - 参考 GPT-SoVITS api_v2.py 的接口规范
         ObjectNode requestBody = objectMapper.createObjectNode();
         requestBody.put("text", text);
-        requestBody.put("text_lang", textLang);
+        requestBody.put("text_lang", textLangForRequest);
         requestBody.put("ref_audio_path", refAudio);
         // 训练好的模型传 prompt_text 帮助对齐音色
         requestBody.put("prompt_text", promptText);

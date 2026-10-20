@@ -46,6 +46,8 @@ public class GptSovitsConfig {
         private String refAudio;
         private String promptText;
         private String promptLang = "ja";
+        /** 合成文本语言（ja / zh / en…）；为空则用全局 gpt-sovits.text-lang */
+        private String textLang;
 
         public String getName() { return name; }
         public void setName(String name) { this.name = name; }
@@ -58,6 +60,9 @@ public class GptSovitsConfig {
 
         public String getSovitsPath() { return sovitsPath; }
         public void setSovitsPath(String sovitsPath) { this.sovitsPath = sovitsPath; }
+
+        public String getTextLang() { return textLang; }
+        public void setTextLang(String textLang) { this.textLang = textLang; }
 
         public String getRefAudio() { return refAudio; }
         public void setRefAudio(String refAudio) { this.refAudio = refAudio; }
