@@ -98,7 +98,7 @@ napcat:
 gpt-sovits:
   api-url: ${GPT_SOVITS_API_URL:http://127.0.0.1:8000}
   token: ${GPT_SOVITS_TOKEN:}
-  ref-audio-path: ${GPT_SOVITS_REF_AUDIO_PATH:D:/ai/Documents/qq-web/GPT-SoVITS-v2pro-20250604-nvidia50/reference/ref_01.wav}
+  ref-audio-path: ${GPT_SOVITS_REF_AUDIO_PATH:D:/ai/Documents/qq-web/GPT-SoVITS-v5/reference/ref_01.wav}
   prompt-text: ${GPT_SOVITS_PROMPT_TEXT:大家好，今天是个美好的日子。}
   prompt-lang: ${GPT_SOVITS_PROMPT_LANG:zh}
   text-lang: ${GPT_SOVITS_TEXT_LANG:zh}
@@ -109,8 +109,14 @@ gpt-sovits:
   chunk-max-chars: ${GPT_SOVITS_CHUNK_MAX_CHARS:400}
   # 分片之间的静音间隔（毫秒）
   fragment-interval-ms: ${GPT_SOVITS_FRAGMENT_INTERVAL_MS:120}
-  # 训练好的音色模型根目录
-  model-root: ${GPT_SOVITS_MODEL_ROOT:D:/ai/Documents/qq-web/GPT-SoVITS-v2pro-20250604-nvidia50}
+  # 安装目录（v2Pro / v5）；启动 GPT-SoVITS 时使用
+  install-dir: ${GPT_SOVITS_INSTALL_DIR:D:/ai/Documents/qq-web/GPT-SoVITS-v5}
+  # 启动时使用的推理配置（相对安装目录）；v5 必须显式指定，否则会用默认 v2 配置
+  infer-config: ${GPT_SOVITS_INFER_CONFIG:GPT_SoVITS/configs/tts_infer_v5turbo.yaml}
+  # 语速系数：v5turbo 原生模型语速偏慢需约 1.4；v2Pro 权重保持 1.0
+  speed-factor: ${GPT_SOVITS_SPEED_FACTOR:1.0}
+  # 音色权重根目录（角色权重与参考音频都在这里）
+  model-root: ${GPT_SOVITS_MODEL_ROOT:D:/ai/Documents/qq-web/GPT-SoVITS-v5}
   default-character: ${GPT_SOVITS_DEFAULT_CHARACTER:Kisaki}
   # 角色列表
   characters:

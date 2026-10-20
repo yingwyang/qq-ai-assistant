@@ -70,6 +70,18 @@ public class GptSovitsService {
     @Value("${gpt-sovits.output-dir}")
     private String outputDir;
 
+    /** GPT-SoVITS 安装目录（v2Pro / v5 均可；为空则回退到旧硬编码路径） */
+    @Value("${gpt-sovits.install-dir:}")
+    private String installDir;
+
+    /** 启动时使用的推理配置（相对安装目录）；v5 必须显式指定，否则用默认 v2 配置 */
+    @Value("${gpt-sovits.infer-config:}")
+    private String inferConfig;
+
+    /** 语速系数（v5turbo 原生模型需要约 1.4 校准；v2Pro 权重保持 1.0） */
+    @Value("${gpt-sovits.speed-factor:1.0}")
+    private double speedFactor;
+
     /** 是否启用合成缓存（同一角色 + 同一文本复用已合成音频） */
     @Value("${gpt-sovits.cache-enabled:true}")
     private boolean cacheEnabled;
@@ -321,7 +333,7 @@ public class GptSovitsService {
         requestBody.put("prompt_lang", promptLangForRequest);
         requestBody.put("media_type", "wav");
         requestBody.put("streaming_mode", false);
-        requestBody.put("speed_factor", 1.0);
+        requestBody.put("speed_factor", speedFactor);
         requestBody.put("text_split_method", "cut0"); // 不切分文本
         requestBody.put("split_bucket", true); // 打开分桶处理
         requestBody.put("parallel_infer", false); // 关闭并行执行推理
@@ -512,7 +524,10 @@ public class GptSovitsService {
 
         try {
             String projectRoot = System.getProperty("user.dir");
-            String gptSovitsPath = projectRoot + File.separator + ".." + File.separator + ".." + File.separator + "GPT-SoVITS-v2pro-20250604-nvidia50";
+            // 安装目录走配置（instances: v2Pro / v5），未配置时回退到旧硬编码路径
+            String gptSovitsPath = (installDir == null || installDir.isBlank())
+                    ? projectRoot + File.separator + ".." + File.separator + ".." + File.separator + "GPT-SoVITS-v2pro-20250604-nvidia50"
+                    : installDir;
             File gptSovitsDir = new File(gptSovitsPath).getCanonicalFile();
             String pythonPath = gptSovitsDir.getAbsolutePath() + File.separator + "runtime" + File.separator + "python.exe";
             String apiScriptPath = gptSovitsDir.getAbsolutePath() + File.separator + "api_v2.py";
@@ -522,10 +537,18 @@ public class GptSovitsService {
                 throw new IOException("GPT-SoVITS python.exe not found at: " + pythonPath);
             }
 
-            ProcessBuilder processBuilder = new ProcessBuilder(
-                    "cmd.exe", "/c", "start", "cmd.exe", "/k",
-                    pythonPath, "-I", apiScriptPath, "-a", "127.0.0.1", "-p", "8000"
-            );
+            // 注意：不能用 python -I。v5 的 api_v2 依赖脚本目录下的 tools 包，
+            // 隔离模式不会把脚本目录加入 sys.path，会直接 ModuleNotFoundError。
+            java.util.List<String> cmd = new java.util.ArrayList<>();
+            cmd.add("cmd.exe"); cmd.add("/c"); cmd.add("start"); cmd.add("cmd.exe"); cmd.add("/k");
+            cmd.add(pythonPath);
+            cmd.add(apiScriptPath);
+            if (inferConfig != null && !inferConfig.isBlank()) {
+                cmd.add("-c");
+                cmd.add(inferConfig);
+            }
+            cmd.add("-a"); cmd.add("127.0.0.1"); cmd.add("-p"); cmd.add("8000");
+            ProcessBuilder processBuilder = new ProcessBuilder(cmd);
             processBuilder.directory(gptSovitsDir);
             processBuilder.inheritIO();
 
