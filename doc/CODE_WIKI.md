@@ -1298,8 +1298,11 @@ curl -X POST http://localhost:9880 \
 
 ### 11.3 GPT-SoVITS
 
-- **当前版本**: v2Pro（默认）
-- **支持版本**: v1, v2, v2Pro, v2ProPlus, v3, v4
+- **当前版本**: v5turbo（运行时已从 v2Pro 迁移；安装目录、推理配置由 gpt-sovits.install-dir / infer-config 配置）
+- **支持版本**: v1, v2, v2Pro, v2ProPlus, v3, v4, v5dev, v5turbo
+- **权重兼容性**: v5 的 init_vits_weights 会按 checkpoint（hash / 文件头 / 体积）自动识别架构，
+  v2Pro 架构的 SoVITS 权重可直接加载（实测输出 32kHz）；v5turbo 架构输出 48kHz
+- **关键参数**: parallel-infer 必须开启（关闭会提前截断合成）；长文本按 120 字分片；split-bucket 默认关闭
 - **模型文件**: 需单独下载预训练权重
 
 ---

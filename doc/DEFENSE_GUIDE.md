@@ -31,7 +31,7 @@
 | 对象存储 | MinIO | - | 兼容 S3，存储聊天媒体文件 |
 | 安全认证 | JWT + Spring Security | - | 无状态认证，支持细粒度权限 |
 | AI 引擎 | AstrBot | - | 多平台 AI 聊天机器人框架 |
-| 语音合成 | GPT-SoVITS | v2pro | 少样本语音克隆与 TTS |
+| 语音合成 | GPT-SoVITS | v5（原 v2Pro 运行时已迁移） | 少样本语音克隆与 TTS；v5 可自动识别并加载 v2Pro 架构权重 |
 | QQ 协议 | NapCat | OneBot 11 | 官方协议实现，稳定性好 |
 | 动态脚本 | Groovy | - | 插件引擎，热部署扩展逻辑 |
 

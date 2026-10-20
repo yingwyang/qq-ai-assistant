@@ -71,8 +71,13 @@ curl.exe -s -o NUL -w "%{http_code}`n" http://localhost:6185
 
 **现象**：组件显示已停止；语音合成（TTS）失败或没有声音；启动报 `GPT-SoVITS python.exe not found at: …`。
 
-**原因**：启动依赖自带 Python 运行时与 API 脚本
-（`<GPT-SoVITS 目录>\runtime\python.exe -I api_v2.py -a 127.0.0.1 -p 8000`）。目录/文件缺失、CUDA 环境异常、音色权重路径不对都会导致起不来或合成无响应。后端地址由 `GPT_SOVITS_API_URL` 决定（默认 `http://localhost:8000`）。
+**原因**：启动依赖自带 Python 运行时与 API 脚本。当前运行时是 **v5**，启动命令由配置拼装
+（`<GPT-SoVITS 目录>\runtime\python.exe api_v2.py -c <infer-config> -a 127.0.0.1 -p 8000`）。
+**注意不要再加 `-I`**：v5 的 api_v2.py 依赖脚本目录下的 tools 包，隔离模式不会把它加进 sys.path，
+会直接报 `ModuleNotFoundError: No module named tools.portable_runtime`。
+目录/文件缺失、CUDA 环境异常、音色权重路径不对都会导致起不来或合成无响应。
+安装目录由 `GPT_SOVITS_INSTALL_DIR` 决定，推理配置由 `GPT_SOVITS_INFER_CONFIG` 决定，
+后端地址由 `GPT_SOVITS_API_URL` 决定（默认 `http://localhost:8000`）。
 
 **处理步骤**
 
@@ -82,8 +87,9 @@ curl.exe -s -o NUL -w "%{http_code}`n" http://localhost:6185
 4. 核对音色权重是否真实存在（根目录由 `GPT_SOVITS_MODEL_ROOT` 指定）：
 
 ```powershell
-Test-Path "D:\ai\Documents\qq-web\GPT-SoVITS-v2pro-20250604-nvidia50\GPT_weights_v2Pro\Kisaki-e15.ckpt"
-Test-Path "D:\ai\Documents\qq-web\GPT-SoVITS-v2pro-20250604-nvidia50\SoVITS_weights_v2Pro\Kisaki_e8_s5104.pth"
+Test-Path "D:\ai\Documents\qq-web\GPT-SoVITS-v5\GPT_weights_v2Pro\Kisaki-e15.ckpt"
+Test-Path "D:\ai\Documents\qq-web\GPT-SoVITS-v5\SoVITS_weights_v2Pro\Kisaki_e8_s5104.pth"
+Test-Path "D:\ai\Documents\qq-web\GPT-SoVITS-v5\SoVITS_weights_v5turbo\kago_e2_s2414_l32.pth"  # v5 LoRA 音色
 ```
 
 5. 日志：组件控制台窗口（用 `cmd /k` 启动，窗口不关就能看到）；后端 `backend/logs/application.log` 有 TTS 调用失败记录。

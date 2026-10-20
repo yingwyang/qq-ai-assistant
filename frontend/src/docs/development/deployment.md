@@ -100,8 +100,10 @@ cd AstrBot && python main.py          # 或 Windows: .\Astrbot\AstrBot.exe（在
 ```
 
 ```powershell
-cd D:\ai\Documents\qq-web\GPT-SoVITS-v2pro-20250604-nvidia50
-runtime\python.exe api_v2.py -a 127.0.0.1 -p 8000    # 模型路径与音色列表见 application.yml 的 gpt-sovits.*
+cd D:\ai\Documents\qq-web\GPT-SoVITS-v5
+runtime\python.exe api_v2.py -c GPT_SoVITS\configs\tts_infer_v5turbo.yaml -a 127.0.0.1 -p 8000
+# 安装目录/推理配置/音色列表见 application.yml 的 gpt-sovits.*（install-dir / infer-config / characters）
+# 注意：v5 的 api_v2.py 不能加 -I（隔离模式会丢脚本目录，导致 tools 包导入失败）
 ```
 
 ### 3. 后端（8081）与前端（5173）
