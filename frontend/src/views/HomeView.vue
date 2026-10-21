@@ -125,7 +125,7 @@
                 title="展开 AstrBot 聊天框"
                 @click="expandRightPanel"
               >
-                <Icon name="chevron-left" :size="20" />
+                <Icon name="arrow-left" :size="18" />
                 <span>AI</span>
               </button>
             </div>
@@ -146,6 +146,16 @@
               :class="{ collapsed: rightWidth <= 0, resizing: isResizing }"
               :style="{ flex: `0 0 ${rightWidth > 0 ? rightWidth : 0}%` }"
             >
+              <!-- 左侧收起时显示恢复按钮：与「右侧收起后」的按钮对称 -->
+              <button
+                v-if="centerWidth <= 0"
+                class="panel-expand-btn panel-expand-btn--left"
+                title="展开群聊面板"
+                @click="expandCenterPanel"
+              >
+                <Icon name="arrow-right" :size="18" />
+                <span>群聊</span>
+              </button>
               <AstrBotChat
                 ref="astrBotChatRef"
                 :groupId="selectedGroup?.groupId"
@@ -269,6 +279,12 @@ export default {
     const expandRightPanel = () => {
       // 恢复右侧默认宽度 30%，中间占 70%
       centerWidth.value = 70;
+      localStorage.setItem('home_center_width', String(centerWidth.value));
+    };
+
+    /** 左侧（群聊面板）收起后恢复：与 expandRightPanel 对称 */
+    const expandCenterPanel = () => {
+      centerWidth.value = 50;
       localStorage.setItem('home_center_width', String(centerWidth.value));
     };
 
@@ -545,6 +561,7 @@ export default {
       isResizing,
       startResize,
       expandRightPanel,
+      expandCenterPanel,
       // 方法
       handleLoginSuccess,
       handleNapCatStatusChanged,
@@ -628,6 +645,8 @@ html, body {
   flex: 0 0 50%;
   overflow: hidden;
   transition: flex-basis 0.15s ease;
+  /* 左侧收起时的恢复按钮要相对它定位 */
+  position: relative;
 }
 
 .right-panel.collapsed {
@@ -680,6 +699,16 @@ html, body {
   background-color: var(--bg-tertiary, #e8f4fc);
   color: var(--accent-color, #3498db);
   width: 32px;
+}
+
+/* 左侧（群聊面板）收起后的恢复按钮：贴右面板左缘，样式与右侧按钮镜像 */
+.panel-expand-btn--left {
+  right: auto;
+  left: 0;
+  border: 1px solid var(--border-color, #e0e0e0);
+  border-left: none;
+  border-radius: 0 8px 8px 0;
+  box-shadow: 2px 0 8px var(--card-shadow, rgba(0, 0, 0, 0.08));
 }
 
 .panel-expand-btn span {
