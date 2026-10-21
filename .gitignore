@@ -56,3 +56,6 @@ frontend/login-page.design/
 /(1)*.md
 SESSION_FULL_*.md
 .git-filter-replacements.txt
+
+# ==================== 本地启动器（仓库内但忽略） ====================
+/qqai-launcher/
