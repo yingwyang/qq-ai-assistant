@@ -51,7 +51,9 @@ Copy-Item .env.example backend\.env    # 在项目根目录执行，然后填入
 | `FILE_DOWNLOAD_MAX_MB` / `FILE_DOWNLOAD_MAX_VIDEO_MB` | 媒体/视频下载上限，默认 100 / 300 |
 | `JWT_REMEMBER_ME_EXPIRATION`、`APP_REGISTRATION_ENABLED` | 「记住我」有效期（默认 30 天）、是否开放注册 |
 
-> ⚠️ `CORS_ALLOWED_ORIGINS` 目前**不生效**：`application.yml` 里 `app.cors.allowed-origins` 是硬编码列表（默认 `localhost` / `127.0.0.1` 的 5173–5176）。改白名单请直接改这一行。
+> `CORS_ALLOWED_ORIGINS` **可以生效**（2026-10-22 实测）：`application.yml` 里写的是 `${CORS_ALLOWED_ORIGINS:默认列表}`，
+> 在 `.env` 里设置即可覆盖，例如 `CORS_ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173,http://heyanjue.me`。
+> 改完要重启后端，启动日志会打印解析后的白名单，可据此核对。
 
 ## 三、启动顺序与命令
 
@@ -241,7 +243,7 @@ Get-Content backup_qq_chat.sql | mysql -u root -p qq_chat
 | 4 | `JWT_SECRET` 轮换 | 更换即所有登录态失效（签名不匹配 → 401），属预期；只需让单个用户下线时改用「改密码」（`tokenVersion+1`），不必换全局密钥 |
 | 5 | NapCat 令牌轮换 | `NAPCAT_TOKEN` / `NAPCAT_WEBHOOK_TOKEN` 必须在 `.env` 与 NapCat 配置中**同时**更新，否则消息立刻中断（Webhook 401） |
 | 6 | MinIO 凭据轮换 | MinIO Console 改密钥后同步 `.env` 的 `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` 并重启后端 |
-| 7 | CORS 白名单 | 改 `application.yml` 的 `app.cors.allowed-origins`（硬编码，环境变量无效），只允许真实前端来源；不要加 `*`（已开 `allowCredentials`） |
+| 7 | CORS 白名单 | 用 `CORS_ALLOWED_ORIGINS` 环境变量（`.env`）覆盖，或改 `application.yml` 的 `app.cors.allowed-origins`；只允许真实前端来源，不要加 `*`（已开 `allowCredentials`）。**自定义域名/端口必须加进白名单**：浏览器对 POST 会带 `Origin`，即使前端与后端同源（反代场景）也一样，不在白名单会返回 403「权限不足」而不是 401 |
 | 8 | HTTPS 与 Cookie | 生产走 HTTPS 后把 `AuthController` 中 Cookie 的 `secure(false)` 改为 `true` |
 | 9 | 数据库 schema 策略 | 首次部署可用 `ddl-auto=update`，稳定后改 `validate`；需要版本化时启用 Flyway（`FLYWAY_ENABLED=true`） |
 | 10 | 中间件暴露面 | `guest` 账号仅允许本机登录，远程部署另建用户；管理台与 3306/5672 不要暴露公网，后端与前端统一走反向代理 |
