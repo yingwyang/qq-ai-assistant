@@ -608,44 +608,18 @@ public class AstrBotService {
         return astrBotApiUrl;
     }
 
+    @Autowired
+    private com.qqai.component.ComponentOrchestrator componentOrchestrator;
+
+    /** @deprecated 统一走 ComponentOrchestrator；保留仅为兼容旧调用方。 */
+    @Deprecated
     public void startAstrBot() throws Exception {
-        // 幂等性检查 1：进程引用仍存活
-        if (astrbotProcess != null && astrbotProcess.isAlive()) {
-            log.info("AstrBot 进程已存在（PID={}），跳过启动", astrbotProcess.pid());
-            return;
-        }
-        // 幂等性检查 2：后端重启后进程引用丢失，但插件可能仍在运行（端口检测）
-        if (processManager.isPortOpen("localhost", 6185)) {
-            log.info("AstrBot 端口 6185 已监听，跳过启动（后端重启场景）");
-            return;
-        }
-
-        String projectRoot = System.getProperty("user.dir");
-        String astrbotPath = projectRoot + File.separator + ".." + File.separator + ".." + File.separator + "astrbot";
-        File astrbotDir = new File(astrbotPath).getCanonicalFile();
-
-        if (!astrbotDir.exists()) {
-            throw new IOException("AstrBot directory not found at: " + astrbotDir.getAbsolutePath());
-        }
-
-        ProcessBuilder processBuilder = new ProcessBuilder("cmd.exe", "/c", "start", "cmd.exe", "/k", "astrbot", "run");
-        processBuilder.directory(astrbotDir);
-        processBuilder.inheritIO();
-
-        astrbotProcess = processBuilder.start();
-        Thread.sleep(3000);
-        log.info("AstrBot started from: {}", astrbotDir.getAbsolutePath());
+        componentOrchestrator.start("astrbot", false);
     }
 
+    /** @deprecated 统一走 ComponentOrchestrator；保留仅为兼容旧调用方。 */
+    @Deprecated
     public void stopAstrBot() throws Exception {
-        // 方式 1：杀存储的进程引用
-        if (astrbotProcess != null && astrbotProcess.isAlive()) {
-            processManager.destroyProcess(astrbotProcess);
-            astrbotProcess = null;
-            log.info("AstrBot 进程引用已销毁");
-        }
-        // 方式 2：通过端口找残留 PID（后端重启场景 / cmd 分离窗口场景）
-        processManager.killProcessByPort(6185, "AstrBot");
-        log.info("AstrBot stopped");
+        componentOrchestrator.stop("astrbot", true);
     }
 }

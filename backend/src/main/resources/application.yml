@@ -271,6 +271,56 @@ ai:
     # 媒体链路排查手册见 doc/MEDIA_TROUBLESHOOTING.md
     log-media-payload: ${APP_DEBUG_LOG_MEDIA_PAYLOAD:false}
 
+
+# 组件插件化描述符：启动命令/端口/探测/顺序，默认值与改造前一致
+component:
+  health-interval-ms: ${COMPONENT_HEALTH_INTERVAL_MS:5000}
+  state-file: ${COMPONENT_STATE_FILE:data/components-state.json}
+  components:
+    - id: napcat
+      legacy-key: napcat
+      display-name: NapCat
+      capability: im
+      launch-mode: DETACHED_LAUNCHER
+      command: [cmd.exe, /c, launcher.bat]
+      workdir: ${NAPCAT_HOME:../../napcat/NapCat.Shell}
+      ports: [6099, 6100]
+      probe: { type: tcp, port: 6099, timeout-ms: 1000 }
+      startup-timeout-ms: 120000
+      stop-strategy: PROCESS_NAMES
+      process-names: [NapCatWinBootMain, QQ]
+      adopt-external: true
+      order: 10
+      web-ui: ${NAPCAT_WEBUI_URL:http://127.0.0.1:6099/webui}
+    - id: astrbot
+      legacy-key: astrbot
+      display-name: AstrBot
+      capability: chat
+      launch-mode: SUPERVISED
+      command: [cmd.exe, /c, astrbot, run]
+      workdir: ${ASTRBOT_HOME:../../Astrbot}
+      ports: [6185]
+      probe: { type: tcp, port: 6185, timeout-ms: 1000 }
+      startup-timeout-ms: 90000
+      stop-strategy: PROCESS_TREE
+      adopt-external: true
+      order: 20
+      web-ui: ${ASTRBOT_API_URL:http://127.0.0.1:6185}
+    - id: gpt-sovits
+      legacy-key: gptsovits
+      display-name: GPT-SoVITS
+      capability: tts
+      launch-mode: SUPERVISED
+      command: ["${GPT_SOVITS_INSTALL_DIR:D:/ai/Documents/qq-web/GPT-SoVITS-v5}/runtime/python.exe", api_v2.py, -c, "${GPT_SOVITS_INFER_CONFIG:GPT_SoVITS/configs/tts_infer_v5turbo.yaml}", -a, 127.0.0.1, -p, 8000]
+      workdir: ${GPT_SOVITS_INSTALL_DIR:D:/ai/Documents/qq-web/GPT-SoVITS-v5}
+      ports: [8000]
+      probe: { type: tcp, port: 8000, timeout-ms: 1000 }
+      startup-timeout-ms: 300000
+      stop-strategy: PROCESS_TREE
+      adopt-external: true
+      order: 30
+      web-ui: http://localhost:9874
+
 ---
 # Dev profile: 开发环境覆盖
 # 启用: java -jar app.jar --spring.profiles.active=dev
@@ -310,3 +360,4 @@ napcat:
 minio:
   access-key: ${MINIO_ACCESS_KEY:}
   secret-key: ${MINIO_SECRET_KEY:}
+

@@ -1,83 +1,55 @@
 import { showToast } from '../components/Toast.vue';
-import { useComponentControl } from './useComponentControl';
+import { systemApi } from '../services/api';
 import logger from '../utils/logger';
-
-const COMPONENTS = [
-  {
-    key: 'napcat',
-    name: 'NapCat',
-    startMethod: 'startNapCat',
-  },
-  {
-    key: 'astrbot',
-    name: 'AstrBot',
-    startMethod: 'startAstrBot',
-  },
-  {
-    key: 'gptsovits',
-    name: 'GPT-SoVITS',
-    startMethod: 'startGptSovits',
-  },
-];
 
 const ATTEMPTED_KEY = 'auto_start_attempted';
 
+/**
+ * 登录后自动启动：组件清单/顺序由服务端返回（按 descriptor order），
+ * 不再维护前端 COMPONENTS 常量。
+ */
 export function useAutoStartAfterLogin() {
   const defaultShowMsg = (msg, type = 'info') => {
     showToast(msg, type);
   };
 
   const runSequence = async ({ showSystemMsg, force = false } = {}) => {
-    // session-level 去重：同一标签页登录后只自动尝试一次，避免反复调用导致
-    // 频繁刷新 / 退出登录 / 表单丢失。force=true 供用户手动触发时使用。
     if (!force && sessionStorage.getItem(ATTEMPTED_KEY) === '1') {
       return;
     }
     sessionStorage.setItem(ATTEMPTED_KEY, '1');
 
     const showMsg = showSystemMsg || defaultShowMsg;
-    const componentCtrl = useComponentControl({ showSystemMsg: showMsg });
-
+    let components = [];
     try {
-      await componentCtrl.getComponentStatus();
-    } catch (e) {
-      logger.warn('刷新组件状态失败，继续执行启动流程:', e);
+      const res = await systemApi.getComponents();
+      components = (res && res.components) || [];
+    } catch (error) {
+      logger.warn('读取组件列表失败，跳过自动启动:', error);
+      showMsg('读取组件列表失败，跳过自动启动: ' + error.message, 'warning');
+      return;
     }
 
-    const total = COMPONENTS.length;
+    const pending = components.filter((c) => c.enabled !== false && !c.running);
+    if (pending.length === 0) {
+      showMsg('组件已全部在运行', 'info');
+      return;
+    }
 
-    for (let i = 0; i < COMPONENTS.length; i++) {
-      const comp = COMPONENTS[i];
-      const step = i + 1;
-
-      const isRunning =
-        componentCtrl.componentStatus.value &&
-        componentCtrl.componentStatus.value[comp.key] &&
-        componentCtrl.componentStatus.value[comp.key].running;
-
-      if (isRunning) {
-        showMsg(`启动组件 (${step}/${total}): ${comp.name} 已在运行`, 'info');
-        continue;
-      }
-
-      showMsg(`启动组件 (${step}/${total}): ${comp.name}...`, 'info');
-
+    const total = pending.length;
+    for (let i = 0; i < pending.length; i += 1) {
+      const comp = pending[i];
+      const name = comp.displayName || comp.id;
+      showMsg('启动组件 (' + (i + 1) + '/' + total + '): ' + name + '...', 'info');
       try {
-        const startFn = componentCtrl[comp.startMethod];
-        if (typeof startFn === 'function') {
-          await startFn();
-          showMsg(`启动组件 (${step}/${total}): ${comp.name} 成功`, 'success');
-        } else {
-          showMsg(`启动组件 (${step}/${total}): ${comp.name} 方法不存在`, 'warning');
-        }
+        await systemApi.startComponent(comp.id);
+        showMsg('启动组件 (' + (i + 1) + '/' + total + '): ' + name + ' 成功', 'success');
       } catch (error) {
         const errMsg = (error && error.message) || String(error);
-        showMsg(`启动组件 (${step}/${total}): ${comp.name} 失败 - ${errMsg}`, 'error');
+        showMsg('启动组件 (' + (i + 1) + '/' + total + '): ' + name + ' 失败 - ' + errMsg, 'error');
       }
     }
   };
 
-  return {
-    runSequence,
-  };
+  return { runSequence };
 }

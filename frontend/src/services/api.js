@@ -432,6 +432,13 @@ export const systemApi = {
     body: JSON.stringify({ path }),
   }),
   getComponentStatus: () => systemRequest('/system/component-status'),
+  // 统一组件 API（组件中心数据驱动）
+  getComponents: () => systemRequest('/system/components'),
+  startComponent: (id) => systemRequest('/system/components/' + encodeURIComponent(id) + '/start', { method: 'POST' }),
+  stopComponent: (id, body = {}) => systemRequest('/system/components/' + encodeURIComponent(id) + '/stop', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  }),
   getNapCatWebUiUrl: () => systemRequest('/system/napcat/webui-url'),
   getNapCatQrCode: () => systemRequest('/system/napcat/qrcode'),
   getNapCatQrCodePath: () => systemRequest('/system/napcat/qrcode-path'),

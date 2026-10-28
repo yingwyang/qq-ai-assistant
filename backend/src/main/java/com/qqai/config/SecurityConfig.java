@@ -159,6 +159,8 @@ public class SecurityConfig implements WebSocketConfigurer {
                 .requestMatchers("/actuator/**").hasRole("ADMIN")
                 // 组件启停/配置:统一收口为 ADMIN,避免逐接口枚举遗漏
                 .requestMatchers("/api/system/start-*", "/api/system/stop-*", "/api/system/restart-*").hasRole("ADMIN")
+                // 统一组件 API：启停 ADMIN，读取登录即可（GET 落到 anyRequest().authenticated()）
+                .requestMatchers(org.springframework.http.HttpMethod.POST, "/api/system/components/**").hasRole("ADMIN")
                 .requestMatchers("/api/system/napcat/auto-configure").hasRole("ADMIN")
                 // TTS 等资源消耗接口:登录即可用(积分在服务内扣减)
                 .requestMatchers("/api/system/tts", "/api/system/tts/**", "/api/system/convert-voice").authenticated()

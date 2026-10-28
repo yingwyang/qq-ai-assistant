@@ -328,68 +328,19 @@ public class NapCatService {
         }
     }
 
-    private Process napcatProcess;
+    @Autowired
+    private com.qqai.component.ComponentOrchestrator componentOrchestrator;
 
+    /** @deprecated 统一走 ComponentOrchestrator；保留仅为兼容旧调用方。 */
+    @Deprecated
     public void startNapCat() throws Exception {
-        // 幂等性检查 1：进程引用仍存活
-        if (napcatProcess != null && napcatProcess.isAlive()) {
-            log.info("NapCat 进程已存在（PID={}），跳过启动", napcatProcess.pid());
-            return;
-        }
-        // 幂等性检查 2：后端重启后进程引用丢失，但插件可能仍在运行（端口检测）
-        if (processManager.isPortOpen("localhost", 6099)) {
-            log.info("NapCat 端口 6099 已监听，跳过启动（后端重启场景）");
-            return;
-        }
-
-        try {
-            String projectRoot = System.getProperty("user.dir");
-            String napcatPath = projectRoot + File.separator + ".." + File.separator + ".." + File.separator + "napcat" + File.separator + "NapCat.Shell";
-            File napcatDir = new File(napcatPath).getCanonicalFile();
-            String launcherPath = napcatDir.getAbsolutePath() + File.separator + "launcher.bat";
-            
-            File launcherFile = new File(launcherPath);
-            if (!launcherFile.exists()) {
-                throw new IOException("NapCat launcher.bat not found at: " + launcherPath);
-            }
-            
-            ProcessBuilder processBuilder = new ProcessBuilder("cmd.exe", "/c", "start", "/b", launcherPath);
-            processBuilder.directory(napcatDir);
-            
-            napcatProcess = processBuilder.start();
-            
-            Thread.sleep(5000);
-            
-            log.info("NapCat started successfully from: {}", napcatDir.getAbsolutePath());
-        } catch (Exception e) {
-            log.error("Failed to start NapCat: {}", e.getMessage());
-            throw e;
-        }
+        componentOrchestrator.start("napcat", false);
     }
 
+    /** @deprecated 统一走 ComponentOrchestrator；保留仅为兼容旧调用方。 */
+    @Deprecated
     public void stopNapCat() throws Exception {
-        try {
-            // 方式 1：杀存储的进程引用
-            if (napcatProcess != null && napcatProcess.isAlive()) {
-                processManager.destroyProcess(napcatProcess);
-                napcatProcess = null;
-                log.info("NapCat 进程引用已销毁");
-            }
-            // 方式 2：用 PowerShell Stop-Process 杀进程（比 taskkill 权限兼容性更好）
-            // 必须先杀守护进程 NapCatWinBootMain，否则它会自动重启 QQ
-            processManager.killProcessByName("NapCatWinBootMain");
-            Thread.sleep(500);
-            processManager.killProcessByName("QQ");
-            // 方式 3：兜底——taskkill 再试一次
-            processManager.executeCmd("taskkill /F /T /IM NapCatWinBootMain.exe", 5000);
-            processManager.executeCmd("taskkill /F /IM QQ.exe", 5000);
-            // 方式 4：通过端口 6099 定位残留 PID（最终兜底，确保端口释放）
-            processManager.killProcessByPort(6099, "NapCat");
-            log.info("NapCat stopped");
-        } catch (Exception e) {
-            log.error("Failed to stop NapCat: {}", e.getMessage());
-            throw e;
-        }
+        componentOrchestrator.stop("napcat", true);
     }
 
     public void subscribeToMessages() throws Exception {

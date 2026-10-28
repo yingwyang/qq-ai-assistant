@@ -284,18 +284,16 @@ public class AstrBotPersonaService {
         return restarted;
     }
 
+    @Autowired
+    private com.qqai.component.ComponentOrchestrator componentOrchestrator;
+
     /** 重启 AstrBot 并等到接口可用（最多 ~90s） */
     public void restartAstrBotAndWait() {
         log.info("人格变更：重启 AstrBot 以加载新的人格副本");
         try {
-            astrBotService.stopAstrBot();
+            componentOrchestrator.restart("astrbot");
         } catch (Exception e) {
-            log.warn("停止 AstrBot 失败（继续尝试启动）: {}", e.getMessage());
-        }
-        try {
-            astrBotService.startAstrBot();
-        } catch (Exception e) {
-            throw new BizException(503, "AstrBot 启动失败：" + e.getMessage());
+            throw new BizException(503, "AstrBot 重启失败：" + e.getMessage());
         }
         for (int i = 0; i < 30; i++) {
             try {

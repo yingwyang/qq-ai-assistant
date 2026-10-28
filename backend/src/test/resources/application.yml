@@ -81,6 +81,11 @@ management:
     health:
       show-details: always
 
+component:
+  # 测试环境不启动真实组件，状态文件隔离到 target，避免污染 backend/data
+  state-file: ./target/test-components-state.json
+  components: []
+
 logging:
   file:
     name: ./target/test-logs/application.log

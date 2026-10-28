@@ -565,69 +565,19 @@ public class GptSovitsService {
         return sb.toString();
     }
 
-    private Process gptSovitsProcess;
+    @Autowired
+    private com.qqai.component.ComponentOrchestrator componentOrchestrator;
 
+    /** @deprecated 统一走 ComponentOrchestrator；保留仅为兼容旧调用方。 */
+    @Deprecated
     public void startGptSovits() throws Exception {
-        // 幂等性检查 1：进程引用仍存活
-        if (gptSovitsProcess != null && gptSovitsProcess.isAlive()) {
-            log.info("GPT-SoVITS 进程已存在（PID={}），跳过启动", gptSovitsProcess.pid());
-            return;
-        }
-        // 幂等性检查 2：后端重启后进程引用丢失，但插件可能仍在运行（端口检测）
-        if (processManager.isPortOpen("localhost", 8000)) {
-            log.info("GPT-SoVITS 端口 8000 已监听，跳过启动（后端重启场景）");
-            return;
-        }
-
-        try {
-            String projectRoot = System.getProperty("user.dir");
-            // 安装目录走配置（instances: v2Pro / v5），未配置时回退到旧硬编码路径
-            String gptSovitsPath = (installDir == null || installDir.isBlank())
-                    ? projectRoot + File.separator + ".." + File.separator + ".." + File.separator + "GPT-SoVITS-v5"
-                    : installDir;
-            File gptSovitsDir = new File(gptSovitsPath).getCanonicalFile();
-            String pythonPath = gptSovitsDir.getAbsolutePath() + File.separator + "runtime" + File.separator + "python.exe";
-            String apiScriptPath = gptSovitsDir.getAbsolutePath() + File.separator + "api_v2.py";
-
-            File pythonFile = new File(pythonPath);
-            if (!pythonFile.exists()) {
-                throw new IOException("GPT-SoVITS python.exe not found at: " + pythonPath);
-            }
-
-            // 注意：不能用 python -I。v5 的 api_v2 依赖脚本目录下的 tools 包，
-            // 隔离模式不会把脚本目录加入 sys.path，会直接 ModuleNotFoundError。
-            java.util.List<String> cmd = new java.util.ArrayList<>();
-            cmd.add("cmd.exe"); cmd.add("/c"); cmd.add("start"); cmd.add("cmd.exe"); cmd.add("/k");
-            cmd.add(pythonPath);
-            cmd.add(apiScriptPath);
-            if (inferConfig != null && !inferConfig.isBlank()) {
-                cmd.add("-c");
-                cmd.add(inferConfig);
-            }
-            cmd.add("-a"); cmd.add("127.0.0.1"); cmd.add("-p"); cmd.add("8000");
-            ProcessBuilder processBuilder = new ProcessBuilder(cmd);
-            processBuilder.directory(gptSovitsDir);
-            processBuilder.inheritIO();
-
-            gptSovitsProcess = processBuilder.start();
-
-            Thread.sleep(5000);
-            log.info("GPT-SoVITS started successfully from: {}", gptSovitsDir.getAbsolutePath());
-        } catch (Exception e) {
-            log.error("Failed to start GPT-SoVITS: {}", e.getMessage());
-            throw e;
-        }
+        componentOrchestrator.start("gpt-sovits", false);
     }
 
+    /** @deprecated 统一走 ComponentOrchestrator；保留仅为兼容旧调用方。 */
+    @Deprecated
     public void stopGptSovits() throws Exception {
-        // 方式 1：杀存储的进程引用
-        if (gptSovitsProcess != null && gptSovitsProcess.isAlive()) {
-            processManager.destroyProcess(gptSovitsProcess);
-            gptSovitsProcess = null;
-            log.info("GPT-SoVITS 进程引用已销毁");
-        }
-        // 方式 2：通过端口 8000 精确定位并杀掉（避免误杀其他 python 进程）
-        processManager.killProcessByPort(8000, "GPT-SoVITS");
-        log.info("GPT-SoVITS stopped");
+        componentOrchestrator.stop("gpt-sovits", true);
     }
+
 }

@@ -134,6 +134,9 @@ public class SystemController {
     private AstrBotService astrBotService;
 
     @Autowired
+    private com.qqai.component.ComponentOrchestrator componentOrchestrator;
+
+    @Autowired
     private NapCatService napCatService;
 
     @Autowired
@@ -251,7 +254,7 @@ public class SystemController {
         Map<String, String> result = new HashMap<>();
         String operator = currentUsername();
         try {
-            astrBotService.startAstrBot();
+            componentOrchestrator.start("astrbot", false);
             result.put("astrbot", "started");
             auditLogService.log(operator, "COMPONENT_START", "astrbot", "SUCCESS", "一键启动全部组件");
         } catch (Exception e) {
@@ -260,7 +263,7 @@ public class SystemController {
         }
 
         try {
-            napCatService.startNapCat();
+            componentOrchestrator.start("napcat", false);
             result.put("napcat", "started");
             auditLogService.log(operator, "COMPONENT_START", "napcat", "SUCCESS", "一键启动全部组件");
         } catch (Exception e) {
@@ -269,7 +272,7 @@ public class SystemController {
         }
 
         try {
-            gptSovitsService.startGptSovits();
+            componentOrchestrator.start("gpt-sovits", false);
             result.put("gpt-sovits", "started");
             auditLogService.log(operator, "COMPONENT_START", "gpt-sovits", "SUCCESS", "一键启动全部组件");
         } catch (Exception e) {
@@ -285,7 +288,7 @@ public class SystemController {
         Map<String, String> result = new HashMap<>();
         String operator = currentUsername();
         try {
-            astrBotService.stopAstrBot();
+            componentOrchestrator.stop("astrbot", true);
             result.put("astrbot", "stopped");
             auditLogService.log(operator, "COMPONENT_STOP", "astrbot", "SUCCESS", "一键停止全部组件");
         } catch (Exception e) {
@@ -294,7 +297,7 @@ public class SystemController {
         }
 
         try {
-            napCatService.stopNapCat();
+            componentOrchestrator.stop("napcat", true);
             result.put("napcat", "stopped");
             auditLogService.log(operator, "COMPONENT_STOP", "napcat", "SUCCESS", "一键停止全部组件");
         } catch (Exception e) {
@@ -303,7 +306,7 @@ public class SystemController {
         }
 
         try {
-            gptSovitsService.stopGptSovits();
+            componentOrchestrator.stop("gpt-sovits", true);
             result.put("gpt-sovits", "stopped");
             auditLogService.log(operator, "COMPONENT_STOP", "gpt-sovits", "SUCCESS", "一键停止全部组件");
         } catch (Exception e) {
@@ -394,7 +397,7 @@ public class SystemController {
         Map<String, String> result = new HashMap<>();
         String operator = currentUsername();
         try {
-            astrBotService.startAstrBot();
+            componentOrchestrator.start("astrbot", false);
             result.put("status", "started");
             result.put("message", "AstrBot 启动成功");
             auditLogService.log(operator, "COMPONENT_START", "astrbot", "SUCCESS", null);
@@ -410,7 +413,7 @@ public class SystemController {
         Map<String, String> result = new HashMap<>();
         String operator = currentUsername();
         try {
-            astrBotService.stopAstrBot();
+            componentOrchestrator.stop("astrbot", true);
             result.put("status", "stopped");
             result.put("message", "AstrBot 停止成功");
             auditLogService.log(operator, "COMPONENT_STOP", "astrbot", "SUCCESS", null);
@@ -426,7 +429,7 @@ public class SystemController {
         Map<String, String> result = new HashMap<>();
         String operator = currentUsername();
         try {
-            napCatService.startNapCat();
+            componentOrchestrator.start("napcat", false);
             result.put("status", "started");
             result.put("message", "NapCat 启动成功");
             auditLogService.log(operator, "COMPONENT_START", "napcat", "SUCCESS", null);
@@ -458,7 +461,7 @@ public class SystemController {
         Map<String, String> result = new HashMap<>();
         String operator = currentUsername();
         try {
-            napCatService.stopNapCat();
+            componentOrchestrator.stop("napcat", true);
             result.put("status", "stopped");
             result.put("message", "NapCat 停止成功");
             auditLogService.log(operator, "COMPONENT_STOP", "napcat", "SUCCESS", null);
@@ -474,7 +477,7 @@ public class SystemController {
         Map<String, String> result = new HashMap<>();
         String operator = currentUsername();
         try {
-            gptSovitsService.startGptSovits();
+            componentOrchestrator.start("gpt-sovits", false);
             result.put("status", "started");
             result.put("message", "GPT-SoVITS 启动成功");
             auditLogService.log(operator, "COMPONENT_START", "gpt-sovits", "SUCCESS", null);
@@ -490,7 +493,7 @@ public class SystemController {
         Map<String, String> result = new HashMap<>();
         String operator = currentUsername();
         try {
-            gptSovitsService.stopGptSovits();
+            componentOrchestrator.stop("gpt-sovits", true);
             result.put("status", "stopped");
             result.put("message", "GPT-SoVITS 停止成功");
             auditLogService.log(operator, "COMPONENT_STOP", "gpt-sovits", "SUCCESS", null);
@@ -504,19 +507,13 @@ public class SystemController {
     @GetMapping("/component-status")
     public ResponseEntity<ApiResponse<Map<String, Object>>> getComponentStatus() {
         Map<String, Object> result = new HashMap<>();
-
-        // AstrBot 监听 6185 端口
-        boolean astrbotRunning = isPortOpen("localhost", 6185);
-        result.put("astrbot", Map.of("running", astrbotRunning, "status", astrbotRunning ? "running" : "stopped"));
-
-        // NapCat 监听 6099 端口
-        boolean napcatRunning = isPortOpen("localhost", 6099);
-        result.put("napcat", Map.of("running", napcatRunning, "status", napcatRunning ? "running" : "stopped"));
-
-        // GPT-SoVITS 监听 8000 端口
-        boolean gptsovitsRunning = isPortOpen("localhost", 8000);
-        result.put("gptsovits", Map.of("running", gptsovitsRunning, "status", gptsovitsRunning ? "running" : "stopped"));
-
+        for (com.qqai.component.ComponentModel.ComponentView view : componentOrchestrator.list()) {
+            String key = view.legacyKey == null || view.legacyKey.isBlank() ? view.id : view.legacyKey;
+            Map<String, Object> item = new HashMap<>();
+            item.put("running", view.running);
+            item.put("status", view.state == null ? "stopped" : view.state.toLowerCase(java.util.Locale.ROOT));
+            result.put(key, item);
+        }
         return ResponseEntity.ok(ApiResponse.success(result));
     }
 

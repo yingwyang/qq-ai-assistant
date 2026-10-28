@@ -20,9 +20,9 @@
     <div class="component-grid">
       <div v-for="item in components" :key="item.key" class="component-card">
         <div class="component-header">
-          <div class="component-status-dot" :class="{ active: item.running }"></div>
+          <div class="component-status-dot" :class="{ active: item.running, degraded: item.state === 'DEGRADED', failed: item.state === 'FAILED' }"></div>
           <span class="component-title">{{ item.title }}</span>
-          <span class="component-status-text">{{ item.running ? '运行中' : '已停止' }}</span>
+          <span class="component-status-text">{{ item.statusText }}</span>
         </div>
         <div class="component-actions">
           <button class="btn-start" :disabled="item.starting || item.running" @click="item.start()">
@@ -116,40 +116,28 @@ export default {
     const setActiveTab = inject('adminSetActiveTab', null);
     const showSystemMsg = inject('adminShowMsg', null);
 
-    const components = computed(() => [
-      {
-        key: 'astrbot',
-        title: 'AstrBot',
-        running: !!ctrl.componentStatus.value.astrbot?.running,
-        starting: ctrl.isStartingAstrBot.value,
-        stopping: ctrl.isStoppingAstrBot.value,
-        start: ctrl.startAstrBot,
-        stop: ctrl.stopAstrBot,
-        webui: 'http://localhost:6185',
-      },
-      {
-        key: 'napcat',
-        title: 'NapCat',
-        running: !!ctrl.componentStatus.value.napcat?.running,
-        starting: ctrl.isStartingNapCat.value,
-        stopping: ctrl.isStoppingNapCat.value,
-        start: ctrl.startNapCat,
-        stop: ctrl.stopNapCat,
-        webui: ctrl.napCatWebUiUrl.value || 'http://127.0.0.1:6099/webui',
-        onOpen: ctrl.openNapCatWebUI,
-      },
-      {
-        key: 'gptsovits',
-        title: 'GPT-SoVITS',
-        running: !!ctrl.componentStatus.value.gptsovits?.running,
-        starting: ctrl.isStartingGptSovits.value,
-        stopping: ctrl.isStoppingGptSovits.value,
-        start: ctrl.startGptSovits,
-        stop: ctrl.stopGptSovits,
-        webui: 'http://localhost:9874',
-      },
-    ]);
+    const statusText = (c) => {
+      if (c.state === 'DEGRADED') return '降级（探测失败）';
+      if (c.state === 'FAILED') return '失败';
+      if (c.state === 'STARTING') return '启动中';
+      if (c.state === 'STOPPING') return '停止中';
+      return c.running ? '运行中' : '已停止';
+    };
 
+    const components = computed(() => (ctrl.components.value || []).map((c) => ({
+      key: c.id,
+      id: c.id,
+      title: c.displayName || c.id,
+      running: !!c.running,
+      state: c.state,
+      statusText: statusText(c),
+      starting: ctrl.pending.value[c.id] === 'starting',
+      stopping: ctrl.pending.value[c.id] === 'stopping',
+      start: () => ctrl.startComponent(c.id),
+      stop: () => ctrl.stopComponent(c.id),
+      webui: c.webUi || '#',
+      onOpen: c.legacyKey === 'napcat' ? ctrl.openNapCatWebUI : null,
+    })));
     // AI 摘要当前配置（只读概览，设置页可改）
     const summaryConfig = ref({});
     const summaryLoading = ref(true);
@@ -231,6 +219,8 @@ export default {
 .component-header { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; }
 .component-status-dot { width: 10px; height: 10px; border-radius: 50%; background: #e74c3c; transition: background 0.3s; }
 .component-status-dot.active { background: #27ae60; }
+.component-status-dot.degraded { background: #f39c12; }
+.component-status-dot.failed { background: #e74c3c; }
 .component-title { flex: 1; font-weight: 600; font-size: 14px; color: var(--text-primary, #333); }
 .component-status-text { font-size: 12px; color: var(--text-muted, #888); }
 .component-actions { display: flex; gap: 8px; margin-bottom: 12px; }

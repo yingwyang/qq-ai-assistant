@@ -1,5 +1,6 @@
 package com.qqai;
 
+import com.qqai.component.ComponentProperties;
 import com.qqai.config.AppCookieProperties;
 import com.qqai.config.AppRegistrationProperties;
 import org.springframework.boot.SpringApplication;
@@ -7,7 +8,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 
 @SpringBootApplication
-@EnableConfigurationProperties({AppRegistrationProperties.class, AppCookieProperties.class})
+@EnableConfigurationProperties({AppRegistrationProperties.class, AppCookieProperties.class, ComponentProperties.class})
 public class Application {
     public static void main(String[] args) {
         SpringApplication.run(Application.class, args);

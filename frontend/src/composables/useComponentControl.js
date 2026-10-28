@@ -1,54 +1,132 @@
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import { systemApi } from '../services/api';
 import logger from '../utils/logger';
 
 const POLL_INTERVAL_MS = 5000;
 
+/**
+ * 组件控制（数据驱动）：组件列表来自 /api/system/components，
+ * 启停走统一接口；NapCat 的二维码/登录态/WebUI 仍保留专属逻辑。
+ */
 export function useComponentControl({ showSystemMsg } = {}) {
-  const componentStatus = ref({
-    astrbot: { running: false },
-    napcat: { running: false },
-    gptsovits: { running: false },
-  });
+  const components = ref([]);
+  /** { [id]: 'starting' | 'stopping' } */
+  const pending = ref({});
+  const componentErrors = ref({});
+  const lastStatusAt = ref('');
+  const isRefreshing = ref(false);
+  const isStartingAll = ref(false);
+  const isStoppingAll = ref(false);
+
   const qrCode = ref('');
   const napCatWebUiUrl = ref('');
   const autoLogin = ref(localStorage.getItem('napcat_auto_login') === 'true');
   const isCheckingLogin = ref(false);
-  const isStartingAstrBot = ref(false);
-  const isStoppingAstrBot = ref(false);
-  const isStartingNapCat = ref(false);
-  const isStoppingNapCat = ref(false);
-  const isStartingGptSovits = ref(false);
-  const isStoppingGptSovits = ref(false);
 
   let statusInterval = null;
 
-  /** 各组件最近一次启停失败原因（接口只返回运行状态，失败原因只能在调用侧记录） */
-  const componentErrors = ref({ astrbot: '', napcat: '', gptsovits: '' });
-  const lastStatusAt = ref('');
-  const isStartingAll = ref(false);
-  const isStoppingAll = ref(false);
-  const isRefreshing = ref(false);
+  /** 兼容旧调用方：astrbot / napcat / gptsovits 三键视角 */
+  const componentStatus = computed(() => {
+    const map = {
+      astrbot: { running: false, state: 'STOPPED' },
+      napcat: { running: false, state: 'STOPPED' },
+      gptsovits: { running: false, state: 'STOPPED' },
+    };
+    for (const c of components.value) {
+      map[c.legacyKey || c.id] = { running: !!c.running, state: c.state };
+    }
+    return map;
+  });
+
+  const isStartingAstrBot = computed(() => pending.value.astrbot === 'starting');
+  const isStoppingAstrBot = computed(() => pending.value.astrbot === 'stopping');
+  const isStartingNapCat = computed(() => pending.value.napcat === 'starting');
+  const isStoppingNapCat = computed(() => pending.value.napcat === 'stopping');
+  const isStartingGptSovits = computed(() => pending.value['gpt-sovits'] === 'starting');
+  const isStoppingGptSovits = computed(() => pending.value['gpt-sovits'] === 'stopping');
+
+  const setPending = (id, value) => {
+    pending.value = { ...pending.value, [id]: value };
+  };
 
   const getComponentStatus = async () => {
     isRefreshing.value = true;
     try {
-      componentStatus.value = await systemApi.getComponentStatus();
-      lastStatusAt.value = new Date().toLocaleTimeString('zh-CN');
+      const res = await systemApi.getComponents();
+      components.value = (res && res.components) || [];
+      lastStatusAt.value = new Date().toLocaleTimeString();
     } catch (error) {
-      logger.error('获取组件状态失败:', error);
+      logger.error('读取组件状态失败:', error);
+      if (showSystemMsg) showSystemMsg('读取组件状态失败: ' + error.message, 'error');
     } finally {
       isRefreshing.value = false;
     }
   };
 
-  const setComponentError = (key, message) => {
-    componentErrors.value = { ...componentErrors.value, [key]: message || '' };
+  const startComponent = async (id) => {
+    setPending(id, 'starting');
+    componentErrors.value = { ...componentErrors.value, [id]: '' };
+    try {
+      await systemApi.startComponent(id);
+      if (showSystemMsg) showSystemMsg('组件启动成功: ' + id);
+    } catch (error) {
+      componentErrors.value = { ...componentErrors.value, [id]: error.message };
+      if (showSystemMsg) showSystemMsg('组件启动失败 ' + id + ': ' + error.message, 'error');
+    } finally {
+      setPending(id, null);
+      await getComponentStatus();
+    }
   };
 
+  const stopComponent = async (id) => {
+    setPending(id, 'stopping');
+    componentErrors.value = { ...componentErrors.value, [id]: '' };
+    try {
+      await systemApi.stopComponent(id, { force: true });
+      if (showSystemMsg) showSystemMsg('组件已停止: ' + id);
+    } catch (error) {
+      componentErrors.value = { ...componentErrors.value, [id]: error.message };
+      if (showSystemMsg) showSystemMsg('组件停止失败 ' + id + ': ' + error.message, 'error');
+    } finally {
+      setPending(id, null);
+      await getComponentStatus();
+    }
+  };
+
+  const startAllComponents = async () => {
+    isStartingAll.value = true;
+    try {
+      for (const c of components.value) {
+        if (c.running) continue;
+        await startComponent(c.id);
+      }
+    } finally {
+      isStartingAll.value = false;
+    }
+  };
+
+  const stopAllComponents = async () => {
+    isStoppingAll.value = true;
+    try {
+      for (const c of components.value) {
+        if (!c.running) continue;
+        await stopComponent(c.id);
+      }
+    } finally {
+      isStoppingAll.value = false;
+    }
+  };
+
+  // 兼容旧调用方
+  const startAstrBot = () => startComponent('astrbot');
+  const stopAstrBot = () => stopComponent('astrbot');
+  const startNapCat = () => startComponent('napcat');
+  const stopNapCat = () => stopComponent('napcat');
+  const startGptSovits = () => startComponent('gpt-sovits');
+  const stopGptSovits = () => stopComponent('gpt-sovits');
+
   const refreshQrCode = () => {
-    const timestamp = Date.now();
-    qrCode.value = `/api/system/napcat/qrcode-image?timestamp=${timestamp}`;
+    qrCode.value = '/api/system/napcat/qrcode-image?timestamp=' + Date.now();
   };
 
   const onAutoLoginChange = () => {
@@ -60,8 +138,8 @@ export function useComponentControl({ showSystemMsg } = {}) {
     isCheckingLogin.value = true;
     try {
       const res = await systemApi.checkNapCatLoginStatus();
-      if (res.loggedIn && showSystemMsg) {
-        showSystemMsg(`NapCat 已自动登录: ${res.qq || ''}`, 'success');
+      if (res && res.loggedIn && showSystemMsg) {
+        showSystemMsg('NapCat 已自动登录: ' + (res.qq || ''), 'success');
       }
     } catch (error) {
       logger.error('检查 NapCat 登录状态失败:', error);
@@ -73,146 +151,20 @@ export function useComponentControl({ showSystemMsg } = {}) {
   const loadNapCatWebUiUrl = async () => {
     try {
       const res = await systemApi.getNapCatWebUiUrl();
-      if (res.url) {
-        napCatWebUiUrl.value = res.url;
-      }
+      if (res && res.url) napCatWebUiUrl.value = res.url;
     } catch (error) {
       logger.error('获取 NapCat WebUI 地址失败:', error);
     }
   };
 
   const openNapCatWebUI = () => {
-    const url = napCatWebUiUrl.value || 'http://127.0.0.1:6099/webui';
-    window.open(url, '_blank');
-  };
-
-  const openGptSovitsWebUI = () => {
-    const url = 'http://localhost:9874';
-    window.open(url, '_blank');
-  };
-
-  const startAstrBot = async () => {
-    isStartingAstrBot.value = true;
-    setComponentError('astrbot', '');
-    try {
-      const res = await systemApi.startAstrBot();
-      if (showSystemMsg) showSystemMsg(res.message || 'AstrBot 启动成功');
-      await getComponentStatus();
-    } catch (error) {
-      setComponentError('astrbot', error.message);
-      if (showSystemMsg) showSystemMsg('AstrBot 启动失败: ' + error.message, 'error');
-    } finally {
-      isStartingAstrBot.value = false;
-    }
-  };
-
-  const stopAstrBot = async () => {
-    isStoppingAstrBot.value = true;
-    setComponentError('astrbot', '');
-    try {
-      const res = await systemApi.stopAstrBot();
-      if (showSystemMsg) showSystemMsg(res.message || 'AstrBot 停止成功');
-      await getComponentStatus();
-    } catch (error) {
-      setComponentError('astrbot', error.message);
-      if (showSystemMsg) showSystemMsg('AstrBot 停止失败: ' + error.message, 'error');
-    } finally {
-      isStoppingAstrBot.value = false;
-    }
-  };
-
-  const startNapCat = async () => {
-    isStartingNapCat.value = true;
-    setComponentError('napcat', '');
-    try {
-      const res = await systemApi.startNapCat(autoLogin.value);
-      if (showSystemMsg) showSystemMsg(res.message || 'NapCat 启动成功');
-      await getComponentStatus();
-      setTimeout(refreshQrCode, 3000);
-    } catch (error) {
-      setComponentError('napcat', error.message);
-      if (showSystemMsg) showSystemMsg('NapCat 启动失败: ' + error.message, 'error');
-    } finally {
-      isStartingNapCat.value = false;
-    }
-  };
-
-  const stopNapCat = async () => {
-    isStoppingNapCat.value = true;
-    setComponentError('napcat', '');
-    try {
-      const res = await systemApi.stopNapCat();
-      if (showSystemMsg) showSystemMsg(res.message || 'NapCat 停止成功');
-      await getComponentStatus();
-    } catch (error) {
-      setComponentError('napcat', error.message);
-      if (showSystemMsg) showSystemMsg('NapCat 停止失败: ' + error.message, 'error');
-    } finally {
-      isStoppingNapCat.value = false;
-    }
-  };
-
-  const startGptSovits = async () => {
-    isStartingGptSovits.value = true;
-    setComponentError('gptsovits', '');
-    try {
-      const res = await systemApi.startGptSovits();
-      if (showSystemMsg) showSystemMsg(res.message || 'GPT-SoVITS 启动成功');
-      await getComponentStatus();
-    } catch (error) {
-      setComponentError('gptsovits', error.message);
-      if (showSystemMsg) showSystemMsg('GPT-SoVITS 启动失败: ' + error.message, 'error');
-    } finally {
-      isStartingGptSovits.value = false;
-    }
-  };
-
-  const stopGptSovits = async () => {
-    isStoppingGptSovits.value = true;
-    setComponentError('gptsovits', '');
-    try {
-      const res = await systemApi.stopGptSovits();
-      if (showSystemMsg) showSystemMsg(res.message || 'GPT-SoVITS 停止成功');
-      await getComponentStatus();
-    } catch (error) {
-      setComponentError('gptsovits', error.message);
-      if (showSystemMsg) showSystemMsg('GPT-SoVITS 停止失败: ' + error.message, 'error');
-    } finally {
-      isStoppingGptSovits.value = false;
-    }
-  };
-
-  /** 一键启动全部组件（后端逐个拉起，失败项在返回值里） */
-  const startAllComponents = async () => {
-    isStartingAll.value = true;
-    componentErrors.value = { astrbot: '', napcat: '', gptsovits: '' };
-    try {
-      const res = await systemApi.startAllComponents();
-      if (showSystemMsg) showSystemMsg(res.message || '已触发全部组件启动');
-      await getComponentStatus();
-    } catch (error) {
-      if (showSystemMsg) showSystemMsg('批量启动失败: ' + error.message, 'error');
-    } finally {
-      isStartingAll.value = false;
-    }
-  };
-
-  const stopAllComponents = async () => {
-    isStoppingAll.value = true;
-    try {
-      const res = await systemApi.stopAllComponents();
-      if (showSystemMsg) showSystemMsg(res.message || '已触发全部组件停止');
-      await getComponentStatus();
-    } catch (error) {
-      if (showSystemMsg) showSystemMsg('批量停止失败: ' + error.message, 'error');
-    } finally {
-      isStoppingAll.value = false;
-    }
+    window.open(napCatWebUiUrl.value || 'http://127.0.0.1:6099/webui', '_blank');
   };
 
   const startPolling = () => {
     stopPolling();
-    statusInterval = setInterval(getComponentStatus, POLL_INTERVAL_MS);
+    getComponentStatus();
+    statusInterval = setInterval(() => getComponentStatus(), POLL_INTERVAL_MS);
   };
 
   const stopPolling = () => {
@@ -223,15 +175,41 @@ export function useComponentControl({ showSystemMsg } = {}) {
   };
 
   return {
-    componentStatus, qrCode, napCatWebUiUrl, autoLogin, isCheckingLogin,
-    isStartingAstrBot, isStoppingAstrBot,
-    isStartingNapCat, isStoppingNapCat,
-    isStartingGptSovits, isStoppingGptSovits,
-    getComponentStatus, refreshQrCode, onAutoLoginChange, checkNapCatLogin,
-    loadNapCatWebUiUrl, openNapCatWebUI, openGptSovitsWebUI,
-    startAstrBot, stopAstrBot, startNapCat, stopNapCat, startGptSovits, stopGptSovits,
-    startAllComponents, stopAllComponents,
-    componentErrors, lastStatusAt, isStartingAll, isStoppingAll, isRefreshing,
-    startPolling, stopPolling,
+    components,
+    pending,
+    componentStatus,
+    componentErrors,
+    lastStatusAt,
+    isRefreshing,
+    isStartingAll,
+    isStoppingAll,
+    qrCode,
+    napCatWebUiUrl,
+    autoLogin,
+    isCheckingLogin,
+    isStartingAstrBot,
+    isStoppingAstrBot,
+    isStartingNapCat,
+    isStoppingNapCat,
+    isStartingGptSovits,
+    isStoppingGptSovits,
+    getComponentStatus,
+    startComponent,
+    stopComponent,
+    startAllComponents,
+    stopAllComponents,
+    startAstrBot,
+    stopAstrBot,
+    startNapCat,
+    stopNapCat,
+    startGptSovits,
+    stopGptSovits,
+    refreshQrCode,
+    onAutoLoginChange,
+    checkNapCatLogin,
+    loadNapCatWebUiUrl,
+    openNapCatWebUI,
+    startPolling,
+    stopPolling,
   };
 }
