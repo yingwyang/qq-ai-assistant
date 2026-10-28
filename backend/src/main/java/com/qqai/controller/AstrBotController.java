@@ -18,6 +18,8 @@ import com.qqai.exception.CreditErrorCode;
 import com.qqai.plugin.PluginManager;
 import com.qqai.repository.FileRecordRepository;
 import com.qqai.service.AstrBotConversationService;
+import com.qqai.service.AstrBotModelSelector;
+import com.qqai.service.AstrBotSessionMemoryService;
 import com.qqai.service.CreditRuleService;
 import com.qqai.service.CreditService;
 import com.qqai.service.MessageService;
@@ -84,6 +86,14 @@ public class AstrBotController {
 
     @Autowired
     private com.qqai.repository.GroupRepository groupRepository;
+
+    /** 模型 id → AstrBot 4.28 的 selected_provider / selected_model（见类注释） */
+    @Autowired
+    private com.qqai.service.AstrBotModelSelector astrBotModelSelector;
+
+    /** 会话记忆键（session_id）与删对话时的级联清理 */
+    @Autowired
+    private AstrBotSessionMemoryService astrBotSessionMemoryService;
 
     @Autowired
     private FileRecordRepository fileRecordRepository;
@@ -316,10 +326,12 @@ public class AstrBotController {
             cfg = (visionTaskConfigName != null && !visionTaskConfigName.isBlank())
                     ? visionTaskConfigName.trim() : visionConfigName;
         }
+        // 分析永远是一次性会话：即使没有配置档案也要显式给 session_id，
+        // 否则 AstrBot 会自造随机会话，调用方无法清理（AstrBot 对话列表会越积越多）。
+        body.put("session_id", "qqai-" + java.util.UUID.randomUUID());
         if (cfg != null && !cfg.isBlank()) {
             body.put("config_name", cfg);
             // 新会话 → 不会沿用旧会话记住的人格（挂着全部工具的人格会让模型跑去调工具）
-            body.put("session_id", "qqai-" + java.util.UUID.randomUUID());
         }
         if (hasImage && chatFlags != null) {
             chatFlags.put("enable_default_system_prompt", false);
@@ -602,16 +614,16 @@ public class AstrBotController {
             body.put("flags", chatFlags);
             // 人层：用户人格档案（带图则视觉版），没选人格时回退内置视觉档案
             applyPersonaLayer(body, chatFlags, rendered.getAllImageUrls());
+            // 分析用的是一次性会话（qqai-<uuid>）：用完即删，避免 AstrBot 对话列表膨胀
+            String oneShotSession = (String) body.get("session_id");
 
-            // 模型选择：优先用户默认模型，允许请求体 model 字段覆盖
-            String defaultModel = getCurrentUserLlmModel();
-            if (defaultModel != null) {
-                body.put("model", defaultModel);
+            // 模型选择：请求体 model 覆盖 > 用户默认模型。
+            // 4.28 只认 selected_provider/selected_model，只写 model 会被静默忽略（随后回落到档案主模型）。
+            String requestModel = (String) request.get("model");
+            if (requestModel == null || requestModel.isBlank() || "default".equalsIgnoreCase(requestModel)) {
+                requestModel = getCurrentUserLlmModel();
             }
-            String overrideModel = (String) request.get("model");
-            if (overrideModel != null && !overrideModel.isBlank() && !"default".equalsIgnoreCase(overrideModel)) {
-                body.put("model", overrideModel);
-            }
+            applySelectedModelForAnalysis(body, requestModel, !rendered.getAllImageUrls().isEmpty());
 
             // 判断是否为视觉模型（从模型ID推断，为 Task 6 预留；如果 body.get("model") 含 vision key 可升级）
             // （当前仅方案 B 注入图片 URL 文本，不强制依赖视觉能力，留一个日志即可）
@@ -638,6 +650,12 @@ public class AstrBotController {
             
             ResponseEntity<String> response = restTemplateWithTimeout.postForEntity(url, entity, String.class);
             
+            // 分析对话对用户可见：**保留**，并异步补标题（AstrBot 回复后才异步落库，所以带重试）
+            if (oneShotSession != null) {
+                astrBotSessionMemoryService.setTitleForSessionAsync(oneShotSession,
+                        analysisConversationTitle(analysisType, resolvedGroupId));
+            }
+
             // 解析响应
             String responseBody = response.getBody();
             StringBuilder replyText = new StringBuilder();
@@ -881,16 +899,15 @@ public class AstrBotController {
             body.put("flags", chatFlags);
             // 人层：用户人格档案（同 /analyze 链路）
             applyPersonaLayer(body, chatFlags, rendered.getAllImageUrls());
+            // 分析用的是一次性会话（qqai-<uuid>）：用完即删
+            String oneShotSession = (String) body.get("session_id");
 
-            String selectedModel = getCurrentUserLlmModel();
-            if (selectedModel != null) {
-                body.put("model", selectedModel);
+            // 模型选择：请求体 model 覆盖 > 用户默认模型（4.28 只认 selected_provider/selected_model）。
+            String requestModel = (String) request.get("model");
+            if (requestModel == null || requestModel.isBlank() || "default".equalsIgnoreCase(requestModel)) {
+                requestModel = getCurrentUserLlmModel();
             }
-            // 前端可通过请求体 model 覆盖本次分析所用模型
-            String overrideModel = (String) request.get("model");
-            if (overrideModel != null && !overrideModel.isBlank() && !"default".equalsIgnoreCase(overrideModel)) {
-                body.put("model", overrideModel);
-            }
+            applySelectedModelForAnalysis(body, requestModel, !rendered.getAllImageUrls().isEmpty());
 
             // 判断是否为视觉模型（从模型ID推断，为 Task 6 预留；如果 body.get("model") 含 vision key 可升级）
             // （当前仅方案 B 注入图片 URL 文本，不强制依赖视觉能力，留一个日志即可）
@@ -915,6 +932,12 @@ public class AstrBotController {
             restTemplateWithTimeout.setMessageConverters(converters);
 
             ResponseEntity<String> response = restTemplateWithTimeout.postForEntity(url, entity, String.class);
+
+            // 分析对话对用户可见：保留，并异步补标题
+            if (oneShotSession != null) {
+                astrBotSessionMemoryService.setTitleForSessionAsync(oneShotSession,
+                        analysisConversationTitle(analysisType, groupId));
+            }
 
             // 6. 解析 SSE 响应（与 sendMessage 保持一致的解析逻辑）
             String responseBody = response.getBody();
@@ -1342,10 +1365,10 @@ public class AstrBotController {
                     conversationId, userId, groupId, userQq, userNickname, model);
             currentConversationId = conversation.getConversationId();
 
-            // 2. 先构建对话上下文（最近10条历史消息，不包含当前这条）
-            // 避免当前消息在 body.message 和 context 中重复出现，导致模型混乱
+            // 2. 读最近 10 条历史消息：只用于「上下文条数」计费与日志。
+            // AstrBot 不消费请求体里的 context，模型实际看到的是它自己的会话历史（由 session_id 决定）。
             List<Map<String, String>> context = conversationService.buildConversationContext(currentConversationId, 10);
-            log.debug("sendMessage 上下文构建完成 context size={}（未来扩展可在此注入 RichMessageRenderer）", context.size());
+            log.debug("sendMessage 上下文条数={}（仅计费用）", context.size());
 
             // 3. 保存用户消息到数据库
             conversationService.addUserMessage(currentConversationId, message, null);
@@ -1409,54 +1432,41 @@ public class AstrBotController {
                 log.info("AI 对话带图: imageUrls={}, 模型={}", requestImageUrls.size(), model);
             }
             // 优先级：前端本次请求显式传入 model > 用户默认模型
-            String activeModel = (model != null && !model.isBlank() && !"default".equalsIgnoreCase(model))
-                    ? model
-                    : getCurrentUserLlmModel();
-            boolean profileApplied = false;
+            String explicitModel = (model != null && !model.isBlank() && !"default".equalsIgnoreCase(model))
+                    ? model : null;
+            String activeModel = explicitModel != null ? explicitModel : getCurrentUserLlmModel();
             // 是否已经用「配置档案（profile）」决定了模型：带图走视觉档案、选了人格走人格档案。
-            // 这种情况下模型的来源是档案本身，不能再叠加下方的一次性模型选择。
-            profileApplied = (personaCfg != null && !personaCfg.isBlank()) || (cfgName != null && !cfgName.isBlank());
+            boolean profileApplied = (personaCfg != null && !personaCfg.isBlank())
+                    || (cfgName != null && !cfgName.isBlank());
             if (activeModel != null && !activeModel.isBlank()) {
                 body.put("model", activeModel);   // 4.26 及以前版本读这个字段
-                // AstrBot 4.28 的 /api/v1/chat 改为读 selected_provider / selected_model：
-                // 只传 model 会被静默忽略（模型选择器点了没反应）。这里两个字段名都带上，
-                // 并且只有在没有档案覆盖时才传，避免把「带图必走视觉档案」的既定行为顶掉。
-                if (!profileApplied) {
-                    fillSelectedModel(body, activeModel);
+                // AstrBot 4.28 的 /api/v1/chat 只认 selected_provider / selected_model，只传 model 会被
+                // 静默忽略，随后回落到配置档案的主模型（本项目档案的主模型都是 SiliconFlow，于是
+                // 「选了 DeepSeek、账单记在 SiliconFlow」）。所以只要模型能在配置里找到就必须下发；
+                // 唯一例外是「带图 + 所选模型看不了图」——那种情况必须让视觉档案的模型兜底。
+                ModelDispatch dispatch = applySelectedModelForChat(body, activeModel, hasImage, profileApplied);
+                boolean providerApplied = dispatch == ModelDispatch.APPLIED;
+                if (dispatch == ModelDispatch.UNKNOWN && explicitModel != null
+                        && astrBotModelSelector.providers() != null) {
+                    // 显式选了模型却在 AstrBot 配置里找不到：宁可报错，也不静默回退到别的厂商（会记错账）。
+                    log.warn("所选模型 {} 不在 AstrBot 配置中，拒绝静默回退", activeModel);
+                    return ResponseEntity.badRequest().body(Map.of(
+                            "status", "error",
+                            "message", "所选模型「" + activeModel + "」已不在 AstrBot 配置中，请刷新模型列表后重新选择"));
                 }
-                log.info("使用模型: {} (fromRequest={}, profileApplied={})",
-                        activeModel,
-                        (model != null && !model.isBlank() && !"default".equalsIgnoreCase(model)),
-                        profileApplied);
+                log.info("使用模型: {} (fromRequest={}, profileApplied={}, providerApplied={})",
+                        activeModel, explicitModel != null, profileApplied, providerApplied);
             }
-            if (groupId != null) {
-                // 会话 id 带上人格标识：AstrBot 的会话记录里存了 persona 且优先级高于档案，
-                // 换人格后沿用旧 session 会让新人格不生效。上下文由我们自己的 context 字段提供，
-                // 不依赖 AstrBot 侧记忆，所以换 id 不会丢上下文。
-                String personaId = astrBotPersonaService.currentPersonaId(userId);
-                body.put("session_id", personaId == null
-                        ? groupId
-                        : groupId + "@" + com.qqai.service.AstrBotPersonaService.slug(personaId));
-            }
-            // 在上下文最前面追加系统提示（从 prompts.yml 渲染，按群类型定制）
-            String groupType = resolveGroupType(groupId);
-            Map<String, Object> systemVars = new HashMap<>();
-            if (groupId != null) systemVars.put("groupId", groupId);
-            Map<String, Object> groupInfo = resolveGroupInfo(groupId);
-            if (groupInfo.get("groupName") != null) systemVars.put("groupName", groupInfo.get("groupName"));
-            if (groupType != null) systemVars.put("groupTypeLabel", groupInfo.get("groupTypeLabel"));
-            String systemContent = promptTemplateService.render("chat.system", groupType, systemVars);
+            // AstrBot 的记忆来自「会话历史」，session_id 才是开关（我们发的 context 它不消费）：
+            // 用本项目 conversationId 做键 → 新对话=新 session（旧记忆不再注入）、未选群也有记忆、
+            // 同一对话多轮连续记得。人格仍拼进键：AstrBot 会话记录里存了 persona 且优先于档案，
+            // 换人格必须换 session 才会生效（旧人格的记忆不跨人格共享，符合预期）。
+            String personaId = astrBotPersonaService.currentPersonaId(userId);
+            body.put("session_id", AstrBotSessionMemoryService.buildSessionId(
+                    currentConversationId, AstrBotSessionMemoryService.personaKey(personaId)));
 
-            Map<String, String> systemMessage = new HashMap<>();
-            systemMessage.put("role", "system");
-            systemMessage.put("content", systemContent);
-            List<Map<String, String>> finalContext = new ArrayList<>();
-            finalContext.add(systemMessage);
-            finalContext.addAll(context);
-            // 如果有上下文，传递给 AstrBot
-            if (!finalContext.isEmpty()) {
-                body.put("context", finalContext);
-            }
+            // 不再向 AstrBot 传 context：实测它不消费未知字段（新 session 只带 context 仍不知道历史）。
+            // 本地 context 列表只用于估算/结算「上下文条数」。
             
             HttpEntity<Map<String, Object>> entity = new HttpEntity<>(body, headers);
             
@@ -1868,8 +1878,11 @@ public class AstrBotController {
             }
 
             conversationService.deleteConversation(conversationId);
+            // 连带删掉 AstrBot 侧该会话的记忆（best-effort：失败只记日志，不影响本地删除）
+            Map<String, Object> memoryCleanup = astrBotSessionMemoryService.purgeConversation(conversationId);
             Map<String, Object> okResult = new HashMap<>();
             okResult.put("status", "ok");
+            okResult.put("memoryCleanup", memoryCleanup);
             return ResponseEntity.ok(okResult);
         } catch (Exception e) {
             ObjectNode error = objectMapper.createObjectNode();
@@ -2080,39 +2093,57 @@ public class AstrBotController {
     }
 
     /**
-     * 把「模型 id」翻译成 AstrBot 4.28 的 {@code selected_provider} + {@code selected_model}。
+     * 聊天链路（{@code /send}）的模型下发：写入 AstrBot 4.28 认的 {@code selected_provider} + {@code selected_model}。
      *
-     * <p>4.28 的对话接口先按 {@code selected_provider} 从 provider 实例表里取提供商
-     * （取不到会直接报「未找到指定的提供商」），再用 {@code selected_model} 覆盖请求里的模型名。
-     * 我们模型列表里的 id 就是 provider 实例 id（形如 {@code siliconflow/Pro/deepseek-ai/DeepSeek-V3.2}），
-     * model 名则是去掉 provider 前缀剩下的部分。</p>
+     * <p>唯一不下发的情况是「带图 + 档案已生效 + 所选模型看不了图」：这时必须让视觉档案的模型兜底，
+     * 否则图片会被降级成文本路径（模型回答"看不到图"）。文本对话一律按用户所选模型走，
+     * 不能因为挂了人格档案就把模型选择丢掉——那正是「选了 DeepSeek、账单记在 SiliconFlow」的成因。</p>
      *
-     * <p>只在该 id 确实存在于 AstrBot 配置里时才写这两个字段：模型被删掉/改名后，
-     * 传一个不存在的 provider 会让 AstrBot 直接失败，不如退回它自己的默认模型。</p>
-     *
-     * @param body      待发送的请求体
-     * @param activeModel 前端选择的模型（provider 前缀 + 模型名）
+     * @return {@link ModelDispatch#APPLIED} 表示本次确实会用所选模型；{@code UNKNOWN} 表示配置里没有；
+     *         {@link ModelDispatch#VISION_PROFILE_WINS} 表示带图时让位视觉档案
      */
-    void fillSelectedModel(Map<String, Object> body, String activeModel) {
-        if (activeModel == null || activeModel.isBlank()) return;
-        if (astrBotDataPath == null || astrBotDataPath.isBlank()) return;
-        try {
-            java.io.File configFile = new java.io.File(astrBotDataPath, "cmd_config.json");
-            if (!configFile.exists() || !configFile.canRead()) return;
-            ArrayNode models = collectModelsFromConfig(objectMapper.readTree(configFile));
-            for (JsonNode m : models) {
-                if (m.has("id") && activeModel.equals(m.get("id").asText())) {
-                    body.put("selected_provider", activeModel);
-                    if (m.has("fullName") && !m.get("fullName").asText().isBlank()) {
-                        body.put("selected_model", m.get("fullName").asText());
-                    }
-                    return;
-                }
-            }
-            log.info("模型 {} 不在 AstrBot 配置里，跳过 selected_provider（交给 AstrBot 默认模型）", activeModel);
-        } catch (Exception e) {
-            log.warn("解析 selected_provider 失败，回退到 AstrBot 默认模型: {}", e.getMessage());
+    private ModelDispatch applySelectedModelForChat(Map<String, Object> body, String modelId,
+                                                   boolean hasImage, boolean profileApplied) {
+        if (modelId == null || modelId.isBlank()) return ModelDispatch.UNKNOWN;
+        // 先按 provider 实例 id 精确匹配；再按上游模型名反查（自定义模型面板允许手输短名）
+        JsonNode selected = astrBotModelSelector.resolve(modelId);
+        if (selected == null) return ModelDispatch.UNKNOWN;
+        if (hasImage && profileApplied && !AstrBotModelSelector.supportsImage(selected)) {
+            log.info("带图请求保留档案模型：所选 {} 不支持图片（profileApplied=true）", modelId);
+            return ModelDispatch.VISION_PROFILE_WINS;
         }
+        return astrBotModelSelector.apply(body, modelId) ? ModelDispatch.APPLIED : ModelDispatch.UNKNOWN;
+    }
+
+    /** 模型下发结果：{@code /send} 需要区分「配置里没有」与「带图让位视觉档案」两种未下发情况 */
+    private enum ModelDispatch {
+        /** 已写入 selected_provider/selected_model，本次确实用所选模型 */
+        APPLIED,
+        /** 模型不在 AstrBot 配置里（配置读不到时也是这个） */
+        UNKNOWN,
+        /** 带图 + 所选模型不支持图片：保留视觉档案的模型 */
+        VISION_PROFILE_WINS
+    }
+
+    /**
+     * 分析链路（{@code /analyze}、{@code /analyze-selected}）的模型下发。
+     *
+     * <p>分析请求总会挂人格/视觉档案，所以带图时能不能顶掉档案模型取决于所选模型是否支持图片；
+     * 找不到模型时只记警告（分析链路不该因为一个过期的模型名整条失败）。</p>
+     */
+    private void applySelectedModelForAnalysis(Map<String, Object> body, String modelId, boolean hasImage) {
+        if (modelId == null || modelId.isBlank() || "default".equalsIgnoreCase(modelId)) return;
+        body.put("model", modelId);   // 兼容 4.26 及以前版本
+        JsonNode selected = astrBotModelSelector.resolve(modelId);
+        if (selected == null) {
+            log.warn("分析链路所选模型 {} 不在 AstrBot 配置中，本次交给档案默认模型", modelId);
+            return;
+        }
+        if (hasImage && !AstrBotModelSelector.supportsImage(selected)) {
+            log.info("分析链路带图但所选 {} 不支持图片，保留视觉档案模型", modelId);
+            return;
+        }
+        astrBotModelSelector.apply(body, modelId);
     }
 
     /**
@@ -2144,6 +2175,29 @@ public class AstrBotController {
     /**
      * 分析类型标签映射
      */
+    /**
+     * 分析对话在 AstrBot 里的标题：{@code 群分析 · 群聊速览 · 群名 · MM-dd HH:mm}。
+     *
+     * <p>用户要求保留分析对话并补标题（2026-10-28）：AstrBot 走开放 API 不会自动起标题，
+     * 不补的话它在「数据与日志 → 对话」里就是「无标题对话」。</p>
+     */
+    private String analysisConversationTitle(String analysisType, String groupId) {
+        String label = analysisTypeLabel(
+                analysisType == null || analysisType.isBlank() ? "summary" : analysisType);
+        String groupName = null;
+        try {
+            Map<String, Object> info = resolveGroupInfo(groupId);
+            if (info != null && info.get("groupName") != null) groupName = String.valueOf(info.get("groupName"));
+        } catch (Exception ignored) {
+            // 群信息读不到就用群号兜底
+        }
+        if (groupName == null || groupName.isBlank()) {
+            groupName = (groupId != null && !groupId.isBlank()) ? "群 " + groupId : "群聊";
+        }
+        return "群分析 · " + label + " · " + groupName + " · "
+                + java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("MM-dd HH:mm"));
+    }
+
     private String analysisTypeLabel(String analysisType) {
         return switch (analysisType) {
             case "summary" -> "群聊速览";

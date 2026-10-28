@@ -708,6 +708,56 @@ export const adminApi = {
   updateConfig: (data) => request('/admin/config', {
     method: 'PUT',
     body: JSON.stringify(data),  }),
+  // ===== AstrBot 配置（provider_sources / providers / config-profiles）=====
+  // 直连 AstrBot 4.28 的全局配置；写成功时 data 带 { ok, message } 或更新后的对象，
+  // 失败为 400/403 + { code, message }（request() 已统一解出 data 并 toast 错误）。
+  getAstrBotConfig: () => request('/admin/astrbot/config'),
+  /** 保存摘要模型：model 传空字符串 = 清除（回落到 AstrBot 默认），返回更新后的 summary */
+  updateAstrBotSummary: (model) => request('/admin/astrbot/config/summary', {
+    method: 'PUT',
+    body: JSON.stringify({ model: model == null ? '' : String(model) }),
+  }),
+  /** 新增提供商来源：{ id, type?, apiBase, apiKey?, enable?, timeout? } */
+  createAstrBotSource: (payload) => request('/admin/astrbot/config/sources', {
+    method: 'POST',
+    body: JSON.stringify(payload || {}),
+  }),
+  /** 更新提供商来源：{ id, apiBase?, apiKey?, enable?, timeout? }（apiKey 留空/不传 = 不修改） */
+  updateAstrBotSource: (payload) => request('/admin/astrbot/config/sources', {
+    method: 'PUT',
+    body: JSON.stringify(payload || {}),
+  }),
+  deleteAstrBotSource: (id) => request(
+    '/admin/astrbot/config/sources?id=' + encodeURIComponent(id),
+    { method: 'DELETE' }
+  ),
+  /** 新增模型：{ sourceId, model, modalities?: [], enable? } */
+  createAstrBotProvider: (payload) => request('/admin/astrbot/config/providers', {
+    method: 'POST',
+    body: JSON.stringify(payload || {}),
+  }),
+  /** 启用/停用模型：PATCH { id, enable } */
+  patchAstrBotProvider: (id, enable) => request('/admin/astrbot/config/providers', {
+    method: 'PATCH',
+    body: JSON.stringify({ id, enable: !!enable }),
+  }),
+  deleteAstrBotProvider: (id) => request(
+    '/admin/astrbot/config/providers?id=' + encodeURIComponent(id),
+    { method: 'DELETE' }
+  ),
+  /**
+   * 把全局提供商同步进配置档案。
+   * apply=false 只预检（不写入）；apply=true 真正写入。
+   * @returns {Promise<{applied:boolean, items:Array<{name,mainModelBefore,mainModelAfter,providerCountBefore,providerCountAfter}>}>}
+   */
+  syncAstrBotProfiles: (payload) => request('/admin/astrbot/config/profiles/sync', {
+    method: 'POST',
+    body: JSON.stringify(payload || { apply: false }),
+  }),
+  deleteAstrBotProfile: (id) => request(
+    '/admin/astrbot/config/profiles?id=' + encodeURIComponent(id),
+    { method: 'DELETE' }
+  ),
   triggerBackup: () => request('/admin/backup', { method: 'POST' }),
   getBackupList: () => request('/admin/backup/list'),
   downloadBackupUrl: (fileName) => {

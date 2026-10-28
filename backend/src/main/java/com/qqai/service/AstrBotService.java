@@ -53,11 +53,23 @@ public class AstrBotService {
     private String serverAddress;
 
     /**
-     * 摘要使用的模型名。留空表示不指定,交给 AstrBot 使用其默认模型
-     * (此前硬编码 "gpt-3.5-turbo",在只挂了 Kimi/DeepSeek 等模型的实例上会被拒或返回空)。
+     * 摘要模型：每次调用都从 Environment 读，后台「配置管理 → AstrBot → 摘要模型」改完立即生效。
      */
-    @Value("${astrbot.summary-model:}")
-    private String summaryModel;
+    private String resolvedSummaryModel() {
+        return configService.getEffectiveValue("astrbot.summary-model").trim();
+    }
+
+    /** 运行时配置（摘要模型每次调用时读，后台改完立即生效，且重启后不丢） */
+    @Autowired
+    private ConfigService configService;
+
+    /** 模型 id → AstrBot 4.28 的 selected_provider/selected_model（只写 model 会被静默忽略） */
+    @Autowired
+    private AstrBotModelSelector modelSelector;
+
+    /** 一次性 session 的收尾清理（摘要/分析每次新建会话） */
+    @Autowired
+    private AstrBotSessionMemoryService sessionMemoryService;
 
     /**
      * 带图调用时使用的 AstrBot 配置文件（config profile）名。
@@ -386,8 +398,20 @@ public class AstrBotService {
         flags.put("enable_streaming", false);
         flags.put("enable_reasoning", false);
         requestBody.put("temperature", 0.7);
-        if (summaryModel != null && !summaryModel.isBlank()) {
-            requestBody.put("model", summaryModel.trim());
+        String summaryModel = resolvedSummaryModel();
+        if (!summaryModel.isBlank()) {
+            String summaryModelId = summaryModel;
+            requestBody.put("model", summaryModelId);   // 兼容 4.26 及以前版本
+            // AstrBot 4.28 只认 selected_provider/selected_model：只写 model 会被静默忽略，
+            // 于是「配了 astrbot.summary-model 却仍在用档案主模型」（实测会记到别的厂商账上）。
+            com.fasterxml.jackson.databind.JsonNode provider = modelSelector.find(summaryModelId);
+            if (provider == null) {
+                log.warn("摘要模型 {} 不在 AstrBot 配置中，本次交给档案默认模型", summaryModelId);
+            } else if (withVision && !AstrBotModelSelector.supportsImage(provider)) {
+                log.info("摘要任务带图但所选 {} 不支持图片，保留视觉档案模型", summaryModelId);
+            } else {
+                modelSelector.apply(requestBody, summaryModelId);
+            }
         }
         // 「人层」档案优先级：调用方按用户所选人格给的档案 > 带图时内置的 vision-task。
         // 人格在 AstrBot 里是绑在配置档案上的（/api/v1/chat 没有 persona 字段），
@@ -402,12 +426,15 @@ public class AstrBotService {
                     ? visionTaskConfigName.trim()
                     : visionConfigName;
         }
+        // 摘要/分析永远是一次性会话：即使没有配置档案也要显式给 session_id，
+        // 否则 AstrBot 会自造一个随机会话，我们事后无法清理（对话列表每调一次就多一条）。
+        String oneShotSession = "qqai-" + java.util.UUID.randomUUID();
+        requestBody.put("session_id", oneShotSession);
         if (cfg != null && !cfg.isBlank()) {
             requestBody.put("config_name", cfg);
-            // 每次请求用一个全新会话：AstrBot 的会话记录里带 persona_id 且优先级高于档案，
+            // 顺便：AstrBot 的会话记录里带 persona_id 且优先级高于档案，
             // 复用旧会话会沿用旧人格（tools=null 的人格会挂上全部工具），
             // 模型于是去调 send_message_to_user/future_task，而不是输出摘要。
-            requestBody.put("session_id", "qqai-" + java.util.UUID.randomUUID());
         }
         if (withVision) {
             // 带图时不注入默认人格：人格提示词会诱导模型描述"我看到了什么"的元话术，
@@ -437,6 +464,11 @@ public class AstrBotService {
                 return null;
             }
             return sanitizeReply(reply);
+        } finally {
+            // 一次性会话用完即删（否则每调一次摘要/分析都会在 AstrBot 的对话列表里留一条）
+            if (oneShotSession != null) {
+                sessionMemoryService.purgeSession(oneShotSession);
+            }
         }
     }
 

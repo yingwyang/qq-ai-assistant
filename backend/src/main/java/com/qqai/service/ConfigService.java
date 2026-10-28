@@ -32,7 +32,9 @@ public class ConfigService {
                     new ConfigItemDef("astrbot.api-url", "API 地址", false, false,
                             "AstrBot 的 HTTP 接口地址，形如 http://127.0.0.1:6185"),
                     new ConfigItemDef("astrbot.token", "Token", true, true,
-                            "AstrBot 控制台 → 配置 → API Key")
+                            "AstrBot 控制台 → 配置 → API Key"),
+                    new ConfigItemDef("astrbot.summary-model", "摘要模型", false, false,
+                            "后台摘要/群分析使用的主模型 id（如 deepseek/deepseek-flash），可留空=交给配置档案默认模型；保存后立即生效")
             )),
             new ConfigGroupDef("NapCat", List.of(
                     new ConfigItemDef("napcat.api-url", "API 地址", false, false,
@@ -139,6 +141,20 @@ public class ConfigService {
      */
     public Map<String, String> getPersistedOverrides() {
         return readOverrides(Path.of(OVERRIDE_DIR).resolve(OVERRIDE_FILE));
+    }
+
+    /**
+     * 取运行时配置的有效值：环境变量/系统属性优先，其次读后台保存的覆盖文件。
+     *
+     * <p>为什么不直接用 {@code @Value}：后台改的值只写进 {@code data/application-override.properties}
+     * 和 System 属性，JVM 重启后 System 属性没了，而覆盖文件还在 —— 只读 {@code env} 会在重启后
+     * 把用户改过的值"忘掉"（实测摘要模型就这么丢过一次）。</p>
+     */
+    public String getEffectiveValue(String key) {
+        String value = env.getProperty(key, "");
+        if (value != null && !value.isBlank()) return value;
+        String persisted = getPersistedOverrides().get(key);
+        return persisted == null ? "" : persisted;
     }
 
     /** 解析 override 文件为 key=value（忽略空行与 # 注释行） */

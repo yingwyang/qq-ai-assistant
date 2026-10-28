@@ -72,6 +72,15 @@ export const ADMIN_TABS = [
     loader: () => import('../views/admin/AdminConfig.vue'),
   },
   {
+    key: 'astrbot-config',
+    label: 'AstrBot 配置',
+    icon: 'robot',
+    group: 'system',
+    title: 'AstrBot 配置',
+    subtitle: '提供商、模型、配置档案与摘要模型（写操作实时生效）',
+    loader: () => import('../views/admin/AdminAstrBotConfig.vue'),
+  },
+  {
     key: 'log',
     label: '系统日志',
     icon: 'file',

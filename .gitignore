@@ -34,6 +34,7 @@ desktop.ini
 # ==================== 环境变量与密钥 ====================
 .env
 .env.local
+backend/.env.bak.*
 backend/src/main/resources/application-dev.yml
 backend/_admin_token.txt
 
