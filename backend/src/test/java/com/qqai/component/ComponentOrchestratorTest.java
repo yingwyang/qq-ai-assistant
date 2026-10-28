@@ -132,6 +132,23 @@ class ComponentOrchestratorTest {
     }
 
     @Test
+    @DisplayName("DEGRADED（探测不可达）时允许从界面重启")
+    void degradedAllowsStartAction() {
+        ComponentModel.ComponentRecord rec = store.get("astrbot");
+        rec.state = "DEGRADED";
+        rec.pid = 42L;
+        store.put("astrbot", rec);
+        runtime.reachable = false;
+
+        ComponentModel.ComponentView view = orchestrator.list().get(0);
+
+        assertEquals("DEGRADED", view.state);
+        assertFalse(view.running);
+        assertTrue(view.actions.get("start"));
+        assertTrue(view.actions.get("stop"));
+    }
+
+    @Test
     @DisplayName("restart = stop + start")
     void restart() {
         runtime.reachable = true;

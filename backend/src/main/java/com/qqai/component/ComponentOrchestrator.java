@@ -99,6 +99,17 @@ public class ComponentOrchestrator {
                 store.put(id, rec);
                 return view(d, rec, before);
             }
+            // 僵死实例：进程还活着但探测失败（如假死），先清掉再启动，避免双开
+            if (rec.pid != null) {
+                ProcessHandle stale = ProcessHandle.of(rec.pid).orElse(null);
+                if (stale != null && stale.isAlive()) {
+                    try {
+                        runtime(d).stop(d, rec, true);
+                    } catch (Exception e) {
+                        log.warn("清理僵死进程 {} 失败: {}", rec.pid, e.getMessage());
+                    }
+                }
+            }
             validate(d);
             rec.state = ComponentModel.ComponentState.STARTING.name();
             rec.startedAt = now();
@@ -263,14 +274,9 @@ public class ComponentOrchestrator {
         v.capability = d.getCapability();
         boolean reachable = probe != null && probe.reachable();
         v.healthy = reachable;
-        v.running = reachable
-                || ComponentModel.ComponentState.RUNNING.name().equals(rec.state)
-                || ComponentModel.ComponentState.DEGRADED.name().equals(rec.state);
-        v.state = reachable
-                ? (ComponentModel.ComponentState.DEGRADED.name().equals(rec.state)
-                    ? ComponentModel.ComponentState.DEGRADED.name()
-                    : ComponentModel.ComponentState.RUNNING.name())
-                : rec.state;
+        // running 以“当前可达”为准：DEGRADED 表示进程可能已死，UI 必须允许重启
+        v.running = reachable;
+        v.state = reachable ? ComponentModel.ComponentState.RUNNING.name() : rec.state;
         v.owned = rec.owned;
         v.pid = rec.pid;
         v.ports = d.getPorts();
@@ -278,8 +284,11 @@ public class ComponentOrchestrator {
         v.lastError = rec.lastError;
         v.startedAt = rec.startedAt;
         boolean starting = ComponentModel.ComponentState.STARTING.name().equals(rec.state);
-        v.actions.put("start", !v.running && !starting);
-        v.actions.put("stop", v.running || starting);
+        boolean stopping = ComponentModel.ComponentState.STOPPING.name().equals(rec.state);
+        v.actions.put("start", !reachable && !starting && !stopping);
+        v.actions.put("stop", reachable || starting
+                || ComponentModel.ComponentState.RUNNING.name().equals(rec.state)
+                || ComponentModel.ComponentState.DEGRADED.name().equals(rec.state));
         return v;
     }
 
