@@ -60,13 +60,14 @@ public class SupervisedRuntime implements ComponentRuntime {
                 exec("taskkill", "/T", "/F", "/PID", String.valueOf(record.pid));
             }
         }
-        if (!killed && allowPortFallback) {
+        // 即使进程树 kill 成功，也可能残留“脱离进程树”的监听进程（实测 AstrBot 的 python 孙进程），
+        // 因此只要允许端口兜底，就必须在 kill 后复查端口并清掉实际监听者。
+        if (allowPortFallback) {
             for (Integer port : d.getPorts()) {
                 Long pid = findPidByPort(port);
                 if (pid != null) {
                     exec("taskkill", "/T", "/F", "/PID", String.valueOf(pid));
-                    log.warn("组件 {} 未持有进程，按端口 {} 结束 PID={}", d.getId(), port, pid);
-                    killed = true;
+                    log.warn("组件 {} 端口 {} 仍有监听，已结束残留 PID={}", d.getId(), port, pid);
                     try {
                         TimeUnit.MILLISECONDS.sleep(500);
                     } catch (InterruptedException ie) {

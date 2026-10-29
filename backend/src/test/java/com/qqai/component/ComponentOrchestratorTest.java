@@ -60,11 +60,29 @@ class ComponentOrchestratorTest {
     @DisplayName("已运行再启动：幂等返回，不重复拉起")
     void startIsIdempotent() {
         runtime.reachable = true;
+        ComponentModel.ComponentRecord rec = store.get("astrbot");
+        rec.state = "RUNNING";
+        rec.owned = true;
+        rec.pid = 42L;
+        store.put("astrbot", rec);
 
         ComponentModel.ComponentView view = orchestrator.start("astrbot", false);
 
         assertEquals("RUNNING", view.state);
         assertEquals(0, runtime.starts.get());
+    }
+
+    @Test
+    @DisplayName("端口被陌生进程占用且组件未跟踪：409，不误认领、不拉起")
+    void portOccupiedByForeignProcessRejected() {
+        runtime.reachable = true;
+
+        BizException ex = assertThrows(BizException.class, () -> orchestrator.start("astrbot", false));
+
+        assertEquals(409, ex.getCode());
+        assertTrue(ex.getMessage().contains("端口"), ex.getMessage());
+        assertEquals(0, runtime.starts.get());
+        assertEquals("STOPPED", store.get("astrbot").state);
     }
 
     @Test
@@ -116,7 +134,6 @@ class ComponentOrchestratorTest {
     @Test
     @DisplayName("连续 3 次探测失败进入 DEGRADED，恢复 1 次回到 RUNNING")
     void healthDegradesAndRecovers() {
-        runtime.reachable = true;
         orchestrator.start("astrbot", false);
 
         runtime.reachable = false;

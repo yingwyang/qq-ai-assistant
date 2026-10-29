@@ -40,9 +40,12 @@ application.yml 的 component.components 描述 id、legacy-key、启动命令�
 2. 命令路径写错 → FAILED + 原因
 3. 就绪超时 → FAILED，不出现 RUNNING
 4. 运行中 kill → 3 次探测后 DEGRADED；可再启动恢复
-5. 端口被其他程序占用 → start 409，不误杀
-6. 停止 → 只结束自己拉起的进程树
+5. 端口被其他程序占用 → start 409，不误杀（2026-10-29 已实测：占位 6185 启动返回 409，占位进程存活，组件保持 STOPPED、不显示停止按钮）
+6. 停止 → 只结束自己拉起的进程树（2026-10-29 已实测：停止 AstrBot 后 cmd/astrbot.exe/python/监听 PID 全部消失、端口释放；对「脱离进程树」的监听进程会按端口兜底清理）
 7. 外部启动（owned=false）→ stop 需 force
+8. 健康巡检不把 STOPPED 自动认领为 RUNNING；start 只在已跟踪 RUNNING/DEGRADED 时幂等返回
+
+> 已知边界：后端启动时的组件对账仍会“探测可达即认领”（沿用改造前的 adopt 语义）。若启动瞬间端口被无关程序占用，会显示 RUNNING；此时请勿点停止，先手动确认占用进程。显式 start 已改为 409，不会误认领。
 
 ## 回滚
 

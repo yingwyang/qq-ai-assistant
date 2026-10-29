@@ -59,6 +59,7 @@ public class ComponentOrchestrator {
                     rec.state = ComponentModel.ComponentState.STOPPED.name();
                     rec.pid = null;
                     rec.pidStartInstant = null;
+                    rec.lastError = null;
                 }
                 if (!before.equals(rec.state) || p.reachable()) {
                     store.put(d.getId(), rec);
@@ -91,6 +92,14 @@ public class ComponentOrchestrator {
             }
             ComponentModel.ProbeResult before = runtime(d).probe(d);
             if (before.reachable()) {
+                // 只有我们自己已跟踪为 RUNNING/DEGRADED 时才幂等返回；
+                // 否则端口被别的进程占着 → 409，不能把它误认成组件已启动（更不能后续被 stop 杀掉）。
+                boolean tracked = ComponentModel.ComponentState.RUNNING.name().equals(rec.state)
+                        || ComponentModel.ComponentState.DEGRADED.name().equals(rec.state);
+                if (!tracked) {
+                    throw new BizException(409,
+                            "端口已被其他进程占用，无法启动 " + id + "（" + before.detail() + "）");
+                }
                 rec.state = ComponentModel.ComponentState.RUNNING.name();
                 rec.lastHealthAt = now();
                 if (force) {
@@ -169,11 +178,13 @@ public class ComponentOrchestrator {
                 throw new BizException(409, "组件正在停止: " + id);
             }
             ComponentModel.ProbeResult probe = runtime(d).probe(d);
-            boolean running = probe.reachable()
-                    || ComponentModel.ComponentState.RUNNING.name().equals(rec.state)
+            // 只处理“我们跟踪中的组件”。端口可达不等于它是我们的进程：
+            // 停止一个 STOPPED 组件时若端口被别的程序占着，绝不能把对方杀掉。
+            boolean tracked = ComponentModel.ComponentState.RUNNING.name().equals(rec.state)
                     || ComponentModel.ComponentState.DEGRADED.name().equals(rec.state)
-                    || ComponentModel.ComponentState.STARTING.name().equals(rec.state);
-            if (!running) {
+                    || ComponentModel.ComponentState.STARTING.name().equals(rec.state)
+                    || ComponentModel.ComponentState.STOPPING.name().equals(rec.state);
+            if (!tracked) {
                 rec.state = ComponentModel.ComponentState.STOPPED.name();
                 rec.pid = null;
                 rec.pidStartInstant = null;
@@ -249,13 +260,10 @@ public class ComponentOrchestrator {
                 if (p.reachable()) {
                     healthFailures.remove(d.getId());
                     rec.lastHealthAt = now();
-                    if (ComponentModel.ComponentState.DEGRADED.name().equals(rec.state)
-                            || (ComponentModel.ComponentState.RUNNING.name().equals(rec.state))) {
+                    // 只做 DEGRADED -> RUNNING 的恢复；STOPPED 时端口可达不等于组件被我们启动，
+                    // 不自动认领（否则会把占用端口的其他程序当成组件，后续 stop 可能误杀）。
+                    if (ComponentModel.ComponentState.DEGRADED.name().equals(rec.state)) {
                         rec.state = ComponentModel.ComponentState.RUNNING.name();
-                    } else if (ComponentModel.ComponentState.STOPPED.name().equals(rec.state)
-                            || ComponentModel.ComponentState.FAILED.name().equals(rec.state)) {
-                        rec.state = ComponentModel.ComponentState.RUNNING.name();
-                        rec.owned = false;
                     }
                 } else {
                     int failures = healthFailures.merge(d.getId(), 1, Integer::sum);
@@ -283,10 +291,15 @@ public class ComponentOrchestrator {
         v.displayName = d.getDisplayName();
         v.capability = d.getCapability();
         boolean reachable = probe != null && probe.reachable();
-        v.healthy = reachable;
-        // running 以“当前可达”为准：DEGRADED 表示进程可能已死，UI 必须允许重启
-        v.running = reachable;
-        v.state = reachable ? ComponentModel.ComponentState.RUNNING.name() : rec.state;
+        boolean tracked = ComponentModel.ComponentState.RUNNING.name().equals(rec.state)
+                || ComponentModel.ComponentState.DEGRADED.name().equals(rec.state)
+                || ComponentModel.ComponentState.STARTING.name().equals(rec.state)
+                || ComponentModel.ComponentState.STOPPING.name().equals(rec.state);
+        v.healthy = reachable && tracked;
+        // 只有“我们跟踪中的组件”端口可达才算 running；STOPPED 时端口被别的程序占用不能被认领
+        v.running = reachable && tracked;
+        v.state = v.running ? ComponentModel.ComponentState.RUNNING.name()
+                : (reachable ? ComponentModel.ComponentState.STOPPED.name() : rec.state);
         v.owned = rec.owned;
         v.pid = rec.pid;
         v.ports = d.getPorts();
@@ -295,9 +308,9 @@ public class ComponentOrchestrator {
         v.startedAt = rec.startedAt;
         boolean starting = ComponentModel.ComponentState.STARTING.name().equals(rec.state);
         boolean stopping = ComponentModel.ComponentState.STOPPING.name().equals(rec.state);
-        v.actions.put("start", !reachable && !starting && !stopping);
-        v.actions.put("stop", reachable || starting
-                || ComponentModel.ComponentState.RUNNING.name().equals(rec.state)
+        v.actions.put("start", !v.running && !starting && !stopping);
+        // DEGRADED 也允许“停止”来清理僵死进程；但 STOPPED 且端口被陌生程序占用时不允许停止
+        v.actions.put("stop", v.running || starting
                 || ComponentModel.ComponentState.DEGRADED.name().equals(rec.state));
         return v;
     }
