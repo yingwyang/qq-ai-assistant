@@ -3,6 +3,7 @@ package com.qqai.service;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import com.qqai.capability.im.ImGateway;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.regex.Matcher;
@@ -26,15 +27,15 @@ class QqVerificationServiceTest {
     private static final Pattern CODE_PATTERN = Pattern.compile("(\\d{6})");
 
     private QqVerificationService service;
-    private NapCatService napCat;
+    private ImGateway napCat;
 
     @BeforeEach
     void setUp() {
-        napCat = mock(NapCatService.class);
+        napCat = mock(ImGateway.class);
         willReturn(true).given(napCat).sendPrivateMessage(anyString(), anyString());
 
         service = new QqVerificationService();
-        ReflectionTestUtils.setField(service, "napCatService", napCat);
+        ReflectionTestUtils.setField(service, "imGateway", napCat);
     }
 
     @Test
@@ -48,9 +49,9 @@ class QqVerificationServiceTest {
     @Test
     @DisplayName("NapCat 发送失败 → SEND_FAILED，且不留下有效验证码")
     void reportsSendFailure() {
-        NapCatService failing = mock(NapCatService.class);
+        ImGateway failing = mock(ImGateway.class);
         willReturn(false).given(failing).sendPrivateMessage(anyString(), anyString());
-        ReflectionTestUtils.setField(service, "napCatService", failing);
+        ReflectionTestUtils.setField(service, "imGateway", failing);
 
         assertEquals(QqVerificationService.SendResult.SEND_FAILED,
                 service.sendVerificationCode("100002", 2L));

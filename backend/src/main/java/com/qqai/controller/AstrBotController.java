@@ -185,74 +185,10 @@ public class AstrBotController {
         return RichMessageRenderer.renderBatch(msgs, cache, buildImageBaseUrl(), 36000);
     }
 
-    /**
-     * 将图片 URL（如 http://localhost:8081/images/images/xxx.jpg）映射为本地文件。
-     * 规则参考 WebMvcConfig：/images/** → uploads/images/，/uploads/** → uploads/
-     */
-    private File resolveImageFileFromUrl(String imageUrl) {
-        return mediaSupport.resolveImageFileFromUrl(imageUrl);
-    }
 
-    /**
-     * 上传图片到 AstrBot /api/v1/file 获取 attachment_id（多模态视觉识别所需）。
-     * 限制最多 5 张，单张超过 10MB 跳过。
-     * @return attachment_id 列表；全部失败返回空列表
-     */
-    private List<String> uploadImagesToAstrBot(List<String> imageUrls, String token) {
-        return mediaSupport.uploadImagesToAstrBot(imageUrls, token);
-    }
 
-    /**
-     * 构造多模态 message：如果图片上传成功则用列表格式（plain + image），
-     * 否则回退为纯文本 prompt（方案B 文本注入URL已在调用方完成）。
-     */
-    private Object buildMultimodalMessage(String prompt, List<String> imageUrls, String token) {
-        return mediaSupport.buildMultimodalMessage(prompt, imageUrls, token);
-    }
 
-    /**
-     * 带图时补充提示词：分析模板里的「富媒体识别规则」要求模型描述图片时保守
-     * （"不编造具体图片内容即可"）。当图片真的作为多模态消息段随附时，这条规则会
-     * 让模型继续输出"内容未知"，把视觉能力浪费掉。这里明确告知可以看图。
-     */
-    private String augmentPromptForImages(String prompt, List<String> imageUrls) {
-        return mediaSupport.augmentPromptForImages(prompt, imageUrls);
-    }
 
-    /**
-     * 双层提示词的「人层」落地：按当前用户选定的人格挑配置档案。
-     *
-     * <p>规则（优先级从上到下）：</p>
-     * <ol>
-     *   <li>用户选了人格 → 用该人格的档案（带图用 {@code -image} 视觉版，否则 {@code -text}）；</li>
-     *   <li>没选人格但带图 → 用内置 {@code vision-task}（视觉模型 + 无工具人格）；</li>
-     *   <li>都没有 → 不改档案，走 AstrBot 默认。</li>
-     * </ol>
-     *
-     * <p>只要指定了档案就带一个全新 {@code session_id}：AstrBot 会话记录里的 persona
-     * 优先级高于档案，复用旧会话会让新人格不生效。</p>
-     */
-    private void applyPersonaLayer(Map<String, Object> body, Map<String, Object> chatFlags,
-                                   List<String> imageUrls) {
-        boolean hasImage = imageUrls != null && !imageUrls.isEmpty();
-        String personaCfg = astrBotPersonaService.resolveConfigName(securityHelper.getCurrentUserId(), hasImage);
-        String cfg = personaCfg;
-        if (cfg == null && hasImage) {
-            cfg = (visionTaskConfigName != null && !visionTaskConfigName.isBlank())
-                    ? visionTaskConfigName.trim() : visionConfigName;
-        }
-        // 分析永远是一次性会话：即使没有配置档案也要显式给 session_id，
-        // 否则 AstrBot 会自造随机会话，调用方无法清理（AstrBot 对话列表会越积越多）。
-        body.put("session_id", "qqai-" + java.util.UUID.randomUUID());
-        if (cfg != null && !cfg.isBlank()) {
-            body.put("config_name", cfg);
-            // 新会话 → 不会沿用旧会话记住的人格（挂着全部工具的人格会让模型跑去调工具）
-        }
-        if (hasImage && chatFlags != null) {
-            chatFlags.put("enable_default_system_prompt", false);
-        }
-        log.info("本次请求：带图 {} 张，人层档案={}（用户选择={}）", imageUrls == null ? 0 : imageUrls.size(), cfg, personaCfg);
-    }
 
     private String getCurrentUserAstrbotApiKey() {
         UserSettings settings = getCurrentUserSettings();
@@ -504,7 +440,7 @@ public class AstrBotController {
             // 旧模板 analysis.group 可能没有 {messageContents} 变量，手动追加到 prompt 末尾
             prompt = prompt + "\n\n以下是最近群聊消息：\n" + messageContents;
             // 有图时补充「可以直接看图」的说明（否则模板里的保守规则会让模型答"内容未知"）
-            prompt = augmentPromptForImages(prompt, rendered.getAllImageUrls());
+            prompt = mediaSupport.augmentPromptForImages(prompt, rendered.getAllImageUrls());
 
             // 4. 直接调用 AstrBot API 获取分析结果
             String url = astrBotApiUrl + "/api/v1/chat";
@@ -714,7 +650,7 @@ public class AstrBotController {
 
             String prompt = promptTemplateService.render("analysis.selected", groupType, templateVars);
             // 有图时补充「可以直接看图」的说明（同 /analyze）
-            prompt = augmentPromptForImages(prompt, rendered.getAllImageUrls());
+            prompt = mediaSupport.augmentPromptForImages(prompt, rendered.getAllImageUrls());
 
             // 5. 调 AstrBot LLM（与 analyzeGroupMessages 相同的 RestTemplate 配置）
             String url = astrBotApiUrl + "/api/v1/chat";
@@ -1728,26 +1664,6 @@ public class AstrBotController {
         VISION_PROFILE_WINS
     }
 
-    /**
-     * 分析链路（{@code /analyze}、{@code /analyze-selected}）的模型下发。
-     *
-     * <p>分析请求总会挂人格/视觉档案，所以带图时能不能顶掉档案模型取决于所选模型是否支持图片；
-     * 找不到模型时只记警告（分析链路不该因为一个过期的模型名整条失败）。</p>
-     */
-    private void applySelectedModelForAnalysis(Map<String, Object> body, String modelId, boolean hasImage) {
-        if (modelId == null || modelId.isBlank() || "default".equalsIgnoreCase(modelId)) return;
-        body.put("model", modelId);   // 兼容 4.26 及以前版本
-        JsonNode selected = astrBotModelSelector.resolve(modelId);
-        if (selected == null) {
-            log.warn("分析链路所选模型 {} 不在 AstrBot 配置中，本次交给档案默认模型", modelId);
-            return;
-        }
-        if (hasImage && !AstrBotModelSelector.supportsImage(selected)) {
-            log.info("分析链路带图但所选 {} 不支持图片，保留视觉档案模型", modelId);
-            return;
-        }
-        astrBotModelSelector.apply(body, modelId);
-    }
 
     /**
      * 设置当前用户的默认模型

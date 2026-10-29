@@ -44,7 +44,7 @@ public class QqVerificationService {
     private static final Duration CODE_TTL = Duration.ofMinutes(CODE_EXPIRE_MINUTES);
 
     @Autowired
-    private NapCatService napCatService;
+    private com.qqai.capability.im.ImGateway imGateway;
 
     private final SecureRandom random = new SecureRandom();
 
@@ -104,7 +104,7 @@ public class QqVerificationService {
             code, CODE_EXPIRE_MINUTES
         );
 
-        boolean sent = napCatService.sendPrivateMessage(qqNumber, message);
+        boolean sent = imGateway.sendPrivateMessage(qqNumber, message);
         if (!sent) {
             log.error("发送验证码到QQ {} 失败", qqNumber);
             return SendResult.SEND_FAILED;

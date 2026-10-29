@@ -64,7 +64,7 @@ public class MessageService {
     private MessageBroadcastService messageBroadcastService;
 
     @Autowired
-    private NapCatService napCatService;
+    private com.qqai.capability.im.ImGateway imGateway;
 
     @Autowired
     private MessageQueueService messageQueueService;
@@ -259,7 +259,7 @@ public class MessageService {
 
         // 3. 优先从 NapCat 拉取完整群成员列表
         try {
-            ArrayNode members = napCatService.getGroupMemberList(groupId, true);
+            ArrayNode members = imGateway.getGroupMemberList(groupId, true);
             if (members != null) {
                 for (int i = 0; i < members.size(); i++) {
                     ObjectNode member = (ObjectNode) members.get(i);

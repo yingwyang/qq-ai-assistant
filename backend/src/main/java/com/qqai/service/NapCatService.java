@@ -331,17 +331,7 @@ public class NapCatService {
     @Autowired
     private com.qqai.component.ComponentOrchestrator componentOrchestrator;
 
-    /** @deprecated 统一走 ComponentOrchestrator；保留仅为兼容旧调用方。 */
-    @Deprecated
-    public void startNapCat() throws Exception {
-        componentOrchestrator.start("napcat", false);
-    }
 
-    /** @deprecated 统一走 ComponentOrchestrator；保留仅为兼容旧调用方。 */
-    @Deprecated
-    public void stopNapCat() throws Exception {
-        componentOrchestrator.stop("napcat", true);
-    }
 
     public void subscribeToMessages() throws Exception {
         // 实现订阅消息的逻辑

@@ -40,7 +40,7 @@ public class UserProfileController {
     private UserQqBindingRepository userQqBindingRepository;
 
     @Autowired
-    private NapCatService napCatService;
+    private com.qqai.capability.im.ImGateway imGateway;
 
     /**
      * 获取当前登录用户信息
@@ -248,7 +248,7 @@ public class UserProfileController {
                 // 昵称为空时，通过 NapCat OneBot11 API 自动获取QQ昵称
                 if (nickname == null || nickname.isBlank()) {
                     try {
-                        String fetched = napCatService.getStrangerNickname(qqNumber);
+                        String fetched = imGateway.getStrangerNickname(qqNumber);
                         if (fetched != null && !fetched.isBlank()) {
                             nickname = fetched;
                             log.info("通过NapCat获取QQ{}昵称: {}", qqNumber, nickname);

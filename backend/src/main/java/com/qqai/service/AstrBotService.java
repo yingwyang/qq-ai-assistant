@@ -611,15 +611,5 @@ public class AstrBotService {
     @Autowired
     private com.qqai.component.ComponentOrchestrator componentOrchestrator;
 
-    /** @deprecated 统一走 ComponentOrchestrator；保留仅为兼容旧调用方。 */
-    @Deprecated
-    public void startAstrBot() throws Exception {
-        componentOrchestrator.start("astrbot", false);
-    }
 
-    /** @deprecated 统一走 ComponentOrchestrator；保留仅为兼容旧调用方。 */
-    @Deprecated
-    public void stopAstrBot() throws Exception {
-        componentOrchestrator.stop("astrbot", true);
-    }
 }

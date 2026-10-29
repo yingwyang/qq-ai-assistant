@@ -62,7 +62,7 @@ public class SystemController {
 
         String audioUrl;
         try {
-            audioUrl = gptSovitsService.generateVoice(text, userId, character);
+            audioUrl = ttsProvider.synthesize(text, userId, character);
         } catch (RuntimeException e) {
             // 合成失败必须把刚扣的积分退回去（按 requestKey 精确匹配、幂等），否则用户为没拿到的语音付费
             if (userId != null && ttsResult != null && ttsResult.getCost() > 0) {
@@ -76,7 +76,7 @@ public class SystemController {
         }
         Map<String, Object> data = new HashMap<>();
         data.put("audioUrl", audioUrl);
-        data.put("character", gptSovitsService.getUserCharacter(userId));
+        data.put("character", ttsProvider.currentCharacter(userId));
         data.put("cost", ttsResult.getCost());
         data.put("balance", ttsResult.getBalanceAfter());
         return ResponseEntity.ok(ApiResponse.success(data));
@@ -87,7 +87,7 @@ public class SystemController {
      */
     @GetMapping("/tts/characters")
     public ResponseEntity<ApiResponse<Map<String, Object>>> listTtsCharacters() {
-        List<Map<String, String>> characters = gptSovitsService.listCharacters();
+        List<Map<String, String>> characters = ttsProvider.listCharacters();
         Long userId = null;
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         if (auth != null && auth.getPrincipal() instanceof AuthPrincipal) {
@@ -95,7 +95,7 @@ public class SystemController {
         }
         Map<String, Object> data = new HashMap<>();
         data.put("characters", characters);
-        data.put("current", gptSovitsService.getUserCharacter(userId));
+        data.put("current", ttsProvider.currentCharacter(userId));
         return ResponseEntity.ok(ApiResponse.success(data));
     }
 
@@ -118,7 +118,7 @@ public class SystemController {
         }
 
         try {
-            gptSovitsService.setCharacterForUser(userId, character);
+            ttsProvider.switchCharacter(userId, character);
             Map<String, Object> data = new HashMap<>();
             data.put("character", character);
             return ResponseEntity.ok(ApiResponse.success(data));
@@ -137,10 +137,10 @@ public class SystemController {
     private com.qqai.component.ComponentOrchestrator componentOrchestrator;
 
     @Autowired
-    private NapCatService napCatService;
+    private com.qqai.capability.im.ImGateway imGateway;
 
     @Autowired
-    private GptSovitsService gptSovitsService;
+    private com.qqai.capability.tts.TtsProvider ttsProvider;
 
     @Autowired
     private MediaDownloadService mediaDownloadService;
@@ -210,7 +210,7 @@ public class SystemController {
      */
     private boolean isNapCatLoggedIn() {
         try {
-            return napCatService.checkLoginStatus();
+            return imGateway.checkLoginStatus();
         } catch (Exception e) {
             log.warn("查询 NapCat 登录状态失败，按已登录从严处理: {}", e.getMessage());
             return true;
@@ -249,6 +249,7 @@ public class SystemController {
         }
     }
 
+    @Deprecated
     @PostMapping("/start-all")
     public ResponseEntity<ApiResponse<Map<String, String>>> startAllComponents() {
         Map<String, String> result = new HashMap<>();
@@ -283,6 +284,7 @@ public class SystemController {
         return ResponseEntity.ok(ApiResponse.success(result));
     }
 
+    @Deprecated
     @PostMapping("/stop-all")
     public ResponseEntity<ApiResponse<Map<String, String>>> stopAllComponents() {
         Map<String, String> result = new HashMap<>();
@@ -325,7 +327,7 @@ public class SystemController {
             return denied;
         }
         Map<String, String> result = new HashMap<>();
-        String qrCode = napCatService.getLoginQrCode();
+        String qrCode = imGateway.getLoginQrCode();
         result.put("qrcode", qrCode);
         return ResponseEntity.ok(ApiResponse.success(result));
     }
@@ -334,7 +336,7 @@ public class SystemController {
     public ResponseEntity<ApiResponse<Map<String, Boolean>>> checkNapCatLoginStatus() {
         Map<String, Boolean> result = new HashMap<>();
         try {
-            boolean loggedIn = napCatService.checkLoginStatus();
+            boolean loggedIn = imGateway.checkLoginStatus();
             result.put("loggedIn", loggedIn);
         } catch (Exception e) {
             result.put("loggedIn", false);
@@ -349,7 +351,7 @@ public class SystemController {
             return denied;
         }
         Map<String, String> result = new HashMap<>();
-        String qrCodePath = napCatService.getQrCodePath();
+        String qrCodePath = imGateway.getQrCodePath();
         result.put("qrcodePath", qrCodePath);
         return ResponseEntity.ok(ApiResponse.success(result));
     }
@@ -360,7 +362,7 @@ public class SystemController {
         if (denied != null) {
             return denied;
         }
-        String qrCodePath = napCatService.getQrCodePath();
+        String qrCodePath = imGateway.getQrCodePath();
         File file = new File(qrCodePath);
         if (!file.exists()) {
             return ResponseEntity.notFound().build();
@@ -380,7 +382,7 @@ public class SystemController {
         
         // 检查 NapCat 服务是否可访问
         try {
-            napCatService.checkLoginStatus();
+            imGateway.checkLoginStatus();
             result.put("napcat", "available");
         } catch (Exception e) {
             result.put("napcat", "unavailable");
@@ -392,6 +394,7 @@ public class SystemController {
 
     // ========== 分别启动/停止各个组件 ==========
 
+    @Deprecated
     @PostMapping("/start-astrbot")
     public ResponseEntity<ApiResponse<Map<String, String>>> startAstrBot() throws Exception {
         Map<String, String> result = new HashMap<>();
@@ -408,6 +411,7 @@ public class SystemController {
         return ResponseEntity.ok(ApiResponse.success(result));
     }
 
+    @Deprecated
     @PostMapping("/stop-astrbot")
     public ResponseEntity<ApiResponse<Map<String, String>>> stopAstrBot() throws Exception {
         Map<String, String> result = new HashMap<>();
@@ -424,6 +428,7 @@ public class SystemController {
         return ResponseEntity.ok(ApiResponse.success(result));
     }
 
+    @Deprecated
     @PostMapping("/start-napcat")
     public ResponseEntity<ApiResponse<Map<String, String>>> startNapCat() throws Exception {
         Map<String, String> result = new HashMap<>();
@@ -445,7 +450,7 @@ public class SystemController {
         Map<String, Object> result = new HashMap<>();
         String operator = currentUsername();
         try {
-            napCatService.checkAndAutoConfigureNewQq();
+            imGateway.checkAndAutoConfigureNewQq();
             result.put("configured", true);
             result.put("message", "NapCat 自动配置完成");
             auditLogService.log(operator, "NAPCAT_AUTO_CONFIG", "napcat", "SUCCESS", null);
@@ -456,6 +461,7 @@ public class SystemController {
         return ResponseEntity.ok(ApiResponse.success(result));
     }
 
+    @Deprecated
     @PostMapping("/stop-napcat")
     public ResponseEntity<ApiResponse<Map<String, String>>> stopNapCat() throws Exception {
         Map<String, String> result = new HashMap<>();
@@ -472,6 +478,7 @@ public class SystemController {
         return ResponseEntity.ok(ApiResponse.success(result));
     }
 
+    @Deprecated
     @PostMapping("/start-gptsovits")
     public ResponseEntity<ApiResponse<Map<String, String>>> startGptSovits() throws Exception {
         Map<String, String> result = new HashMap<>();
@@ -488,6 +495,7 @@ public class SystemController {
         return ResponseEntity.ok(ApiResponse.success(result));
     }
 
+    @Deprecated
     @PostMapping("/stop-gptsovits")
     public ResponseEntity<ApiResponse<Map<String, String>>> stopGptSovits() throws Exception {
         Map<String, String> result = new HashMap<>();
@@ -504,6 +512,7 @@ public class SystemController {
         return ResponseEntity.ok(ApiResponse.success(result));
     }
 
+    @Deprecated
     @GetMapping("/component-status")
     public ResponseEntity<ApiResponse<Map<String, Object>>> getComponentStatus() {
         Map<String, Object> result = new HashMap<>();
@@ -520,7 +529,7 @@ public class SystemController {
     @GetMapping("/napcat/webui-url")
     public ResponseEntity<ApiResponse<Map<String, String>>> getNapCatWebUiUrl() {
         Map<String, String> result = new HashMap<>();
-        result.put("url", napCatService.getWebUiUrl());
+        result.put("url", imGateway.getWebUiUrl());
         return ResponseEntity.ok(ApiResponse.success(result));
     }
 

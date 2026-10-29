@@ -69,7 +69,7 @@ public class GroupController {
 
     /** 手动推送日报到 QQ 群（仅管理员）用的 NapCat 发送能力 */
     @Autowired
-    private NapCatService napCatService;
+    private com.qqai.capability.im.ImGateway imGateway;
 
     /** 手动推送日报的审计日志 */
     @Autowired
@@ -373,9 +373,9 @@ public class GroupController {
         String text = groupDigestService.buildPushText(digest);
         String digestDate = digest.getDigestDate() == null ? targetDate.toString() : digest.getDigestDate().toString();
 
-        NapCatService.SendGroupMessageResult sendResult = napCatService.sendGroupMessage(groupId, text);
-        if (sendResult == null || !sendResult.isSuccess()) {
-            String detail = (sendResult == null || sendResult.getErrorMessage() == null) ? "未知原因" : sendResult.getErrorMessage();
+        com.qqai.capability.im.ImSendResult sendResult = imGateway.sendGroupMessage(groupId, text);
+        if (sendResult == null || !sendResult.success()) {
+            String detail = (sendResult == null || sendResult.errorMessage() == null) ? "未知原因" : sendResult.errorMessage();
             log.warn("推送群日报失败 groupId={}, date={}: {}", groupId, digestDate, detail);
             auditLogService.log(username, "AI_SUMMARY_DIGEST_PUSH", "group:" + groupId, "FAIL",
                     "推送 " + digestDate + " 速览到群 " + groupId + " 失败：" + detail);
@@ -389,10 +389,10 @@ public class GroupController {
         data.put("groupId", groupId);
         data.put("digestDate", digestDate);
         data.put("text", text);
-        data.put("napcatMessageId", sendResult.getMessageId());
+        data.put("napcatMessageId", sendResult.messageId());
 
         auditLogService.log(username, "AI_SUMMARY_DIGEST_PUSH", "group:" + groupId, "SUCCESS",
-                "推送 " + digestDate + " 速览到群 " + groupId + " 成功, napcatMessageId=" + sendResult.getMessageId());
+                "推送 " + digestDate + " 速览到群 " + groupId + " 成功, napcatMessageId=" + sendResult.messageId());
         return ResponseEntity.ok(ApiResponse.success(data));
     }
 
@@ -466,9 +466,9 @@ public class GroupController {
                     .body(ApiResponse.error(429, "发送过于频繁，请稍后再试（每分钟最多 10 条）"));
         }
 
-        NapCatService.SendGroupMessageResult sendResult = napCatService.sendGroupSegments(groupId, segments);
-        if (sendResult == null || !sendResult.isSuccess()) {
-            String detail = (sendResult == null || sendResult.getErrorMessage() == null) ? "未知原因" : sendResult.getErrorMessage();
+        com.qqai.capability.im.ImSendResult sendResult = imGateway.sendGroupSegments(groupId, segments);
+        if (sendResult == null || !sendResult.success()) {
+            String detail = (sendResult == null || sendResult.errorMessage() == null) ? "未知原因" : sendResult.errorMessage();
             log.warn("网页发送群消息失败 groupId={}: {}", groupId, detail);
             auditLogService.log(username, "GROUP_SEND", "group:" + groupId, "FAIL",
                     "发送失败：" + detail + buildSegmentDetail(segmentTypes, atQqs.size()));
@@ -479,7 +479,7 @@ public class GroupController {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("sent", true);
         data.put("groupId", groupId);
-        data.put("napcatMessageId", sendResult.getMessageId());
+        data.put("napcatMessageId", sendResult.messageId());
         data.put("length", text.length());
         // 新增字段：本次实际发出的段类型，如 ["reply","at","text"]
         data.put("segmentTypes", segmentTypes);
@@ -488,7 +488,7 @@ public class GroupController {
         String preview = text.length() > 30 ? text.substring(0, 30) + "…" : text;
         auditLogService.log(username, "GROUP_SEND", "group:" + groupId, "SUCCESS",
                 "发送 " + text.length() + " 字：[" + preview + "]" + buildSegmentDetail(segmentTypes, atQqs.size())
-                        + ", napcatMessageId=" + sendResult.getMessageId());
+                        + ", napcatMessageId=" + sendResult.messageId());
         return ResponseEntity.ok(ApiResponse.success(data));
     }
 

@@ -78,7 +78,7 @@ public class OutboundMediaService {
     private String uploadBaseDir;
 
     @Autowired
-    private NapCatService napCatService;
+    private com.qqai.capability.im.ImGateway imGateway;
 
     @Autowired
     private MessageService messageService;
@@ -300,8 +300,8 @@ public class OutboundMediaService {
         log.info("发送图片到群{}: name={}, size={}B, 图片段方式={}", groupId, fileName, size,
                 useBase64 ? "base64" : "本地路径");
 
-        NapCatService.SendGroupMessageResult result = napCatService.sendGroupSegments(groupId, segments);
-        if (result == null || !result.isSuccess()) {
+        com.qqai.capability.im.ImSendResult result = imGateway.sendGroupSegments(groupId, segments);
+        if (result == null || !result.success()) {
             throw new BizException(503, "NapCat 未登录或不可用，发送失败");
         }
 
@@ -311,7 +311,7 @@ public class OutboundMediaService {
         data.put("kind", "image");
         data.put("fileName", fileName);
         data.put("size", size);
-        data.put("napcatMessageId", result.getMessageId());
+        data.put("napcatMessageId", result.messageId());
         data.put("segmentTypes", segmentTypes(segments));
         return data;
     }
@@ -329,18 +329,18 @@ public class OutboundMediaService {
 
         if ((text != null && !text.isEmpty()) || !mentionIds.isEmpty()) {
             ArrayNode textSegments = buildTextSegments(replyMessageId, mentionIds, text);
-            NapCatService.SendGroupMessageResult textResult = napCatService.sendGroupSegments(groupId, textSegments);
-            if (textResult == null || !textResult.isSuccess()) {
+            com.qqai.capability.im.ImSendResult textResult = imGateway.sendGroupSegments(groupId, textSegments);
+            if (textResult == null || !textResult.success()) {
                 // 文字都没发出去，再传文件也没意义，且失败语义与图片分支保持一致 → 503
                 throw new BizException(503, "NapCat 未登录或不可用，发送失败");
             }
-            textMessageId = textResult.getMessageId();
+            textMessageId = textResult.messageId();
             types.addAll(segmentTypes(textSegments));
         }
 
-        NapCatService.UploadGroupFileResult upload =
-                napCatService.uploadGroupFile(groupId, file.getAbsolutePath(), fileName);
-        if (upload == null || !upload.isSuccess()) {
+        com.qqai.capability.im.ImUploadResult upload =
+                imGateway.uploadGroupFile(groupId, file.getAbsolutePath(), fileName);
+        if (upload == null || !upload.success()) {
             throw new BizException(503, "NapCat 未登录或不可用，发送失败");
         }
         types.add("file");
@@ -351,7 +351,7 @@ public class OutboundMediaService {
         data.put("kind", "file");
         data.put("fileName", fileName);
         data.put("size", file.length());
-        data.put("napcatMessageId", upload.getMessageId());
+        data.put("napcatMessageId", upload.messageId());
         // 附带文字时它是独立的一条消息，其 message_id 单独给出（契约只要求 napcatMessageId，这里是新增字段）
         if (textMessageId != null) {
             data.put("textMessageId", textMessageId);

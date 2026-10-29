@@ -568,16 +568,6 @@ public class GptSovitsService {
     @Autowired
     private com.qqai.component.ComponentOrchestrator componentOrchestrator;
 
-    /** @deprecated 统一走 ComponentOrchestrator；保留仅为兼容旧调用方。 */
-    @Deprecated
-    public void startGptSovits() throws Exception {
-        componentOrchestrator.start("gpt-sovits", false);
-    }
 
-    /** @deprecated 统一走 ComponentOrchestrator；保留仅为兼容旧调用方。 */
-    @Deprecated
-    public void stopGptSovits() throws Exception {
-        componentOrchestrator.stop("gpt-sovits", true);
-    }
 
 }
