@@ -21,6 +21,13 @@ public interface MessageRepository extends JpaRepository<Message, Long>, JpaSpec
      */
     @Query("SELECT m FROM Message m WHERE m.groupId = :groupId ORDER BY m.serverRecvMs DESC, m.id DESC")
     List<Message> findByGroupIdOrderBySendTimeDesc(@Param("groupId") String groupId);
+
+    /** 多机器人：按 bot 隔离的最近消息。 */
+    @Query("SELECT m FROM Message m WHERE m.botId = :botId AND m.groupId = :groupId "
+            + "ORDER BY m.serverRecvMs DESC, m.id DESC")
+    List<Message> findRecentByBotIdAndGroupId(@Param("botId") Long botId,
+                                              @Param("groupId") String groupId,
+                                              org.springframework.data.domain.Pageable pageable);
     
     /**
      * 根据群聊ID查询未归档&未被用户删除的消息（按服务端接收时间倒序）

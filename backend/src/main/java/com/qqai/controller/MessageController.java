@@ -57,6 +57,9 @@ public class MessageController {
     private SecurityHelper securityHelper;
 
     @Autowired
+    private com.qqai.repository.BotRepository botRepository;
+
+    @Autowired
     private AuditLogService auditLogService;
 
     @Autowired
@@ -225,11 +228,26 @@ public class MessageController {
     public ResponseEntity<ApiResponse<List<Message>>> getMessagesByGroupId(
             @PathVariable String groupId,
             @RequestParam(required = false) String selfQq,
-            @RequestParam(required = false) Integer limit) {
+            @RequestParam(required = false) Integer limit,
+            @RequestParam(required = false, defaultValue = "1") Long botId) {
         Long userId = securityHelper.getCurrentUserId();
         if (userId == null) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(ApiResponse.error(401, "未登录"));
+        }
+
+        // 非默认 bot：按 bot 归属授权（owner/admin），数据按 botId 过滤
+        if (botId != null && botId != 1L) {
+            com.qqai.entity.Bot bot = botRepository.findById(botId)
+                    .orElseThrow(() -> new com.qqai.exception.BizException(404, "机器人不存在: " + botId));
+            if (!securityHelper.isAdmin() && !bot.getOwnerUserId().equals(userId)) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                        .body(ApiResponse.error(403, "无权访问该机器人的数据"));
+            }
+            int fetchByBot = limit != null ? limit
+                    : com.qqai.service.MessageService.DEFAULT_GROUP_MESSAGE_FETCH;
+            return ResponseEntity.ok(ApiResponse.success(
+                    messageService.getRecentMessagesByBot(botId, groupId, fetchByBot)));
         }
 
         // 获取用户绑定的所有QQ账号

@@ -39,6 +39,8 @@ public interface GroupRepository extends JpaRepository<Group, Long> {
      */
     List<Group> findByOwnerQqAndActiveTrue(String ownerQq);
 
+    java.util.Optional<Group> findByBotIdAndGroupIdAndOwnerQq(Long botId, String groupId, String ownerQq);
+
     /**
      * 批量按绑定 QQ 取活跃群聊，替代「逐个 QQ 调用 findByOwnerQqAndActiveTrue」的 N+1。
      */

@@ -13,7 +13,8 @@ import java.time.LocalDateTime;
     @Index(name = "idx_file_id", columnList = "fileId"),
     @Index(name = "idx_send_time", columnList = "sendTime"),
     @Index(name = "idx_group_server_time", columnList = "groupId, serverRecvMs"),
-    @Index(name = "idx_user_id", columnList = "userId")
+    @Index(name = "idx_user_id", columnList = "userId"),
+    @Index(name = "idx_bot_group_time", columnList = "botId, groupId, sendTime")
 })
 public class Message {
     
@@ -21,6 +22,10 @@ public class Message {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
     
+    /** 所属机器人（P3 数据隔离；老数据默认 1）。 */
+    @Column(name = "bot_id", nullable = false)
+    private Long botId = 1L;
+
     @Column(length = 100, unique = true)
     private String messageId;  // QQ消息唯一ID
     
@@ -136,6 +141,8 @@ public class Message {
     
     // Getters and Setters
     public Long getId() { return id; }
+    public Long getBotId() { return botId; }
+    public void setBotId(Long botId) { this.botId = botId; }
     public void setId(Long id) { this.id = id; }
     
     public String getMessageId() { return messageId; }

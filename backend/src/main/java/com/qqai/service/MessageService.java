@@ -149,6 +149,11 @@ public class MessageService {
     public static final int DEFAULT_GROUP_MESSAGE_FETCH = 200;
     public static final int MAX_GROUP_MESSAGE_FETCH = 500;
 
+    /** 多机器人：按 botId 取最近消息（调用方负责 bot 归属校验）。 */
+    public List<Message> getRecentMessagesByBot(Long botId, String groupId, int limit) {
+        return messageRepository.findRecentByBotIdAndGroupId(botId, groupId, pageOf(limit));
+    }
+
     /** 只取最近 limit 条（不排除已归档/已删除，口径与 getMessagesByGroupIdAndUser 一致） */
     public List<Message> getRecentMessages(String groupId, String selfQq, int limit) {
         return messageRepository.findRecentByGroupIdAndSelfQq(groupId, selfQq, pageOf(limit));

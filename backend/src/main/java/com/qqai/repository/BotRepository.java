@@ -10,4 +10,5 @@ public interface BotRepository extends JpaRepository<Bot, Long> {
     List<Bot> findByOwnerUserIdOrderByIdAsc(Long ownerUserId);
     long countByOwnerUserId(Long ownerUserId);
     Optional<Bot> findByQqNumber(String qqNumber);
+    Optional<Bot> findByAgentToken(String agentToken);
 }

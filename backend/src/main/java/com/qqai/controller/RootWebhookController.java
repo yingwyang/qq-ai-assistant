@@ -5,8 +5,10 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.qqai.dto.common.ApiResponse;
 import com.qqai.dto.webhook.MediaTaskPayload;
 import com.qqai.dto.webhook.MessageParseResult;
+import com.qqai.entity.Bot;
 import com.qqai.entity.Message;
 import com.qqai.entity.UserQqBinding;
+import com.qqai.repository.BotRepository;
 import com.qqai.repository.UserQqBindingRepository;
 import com.qqai.service.GroupService;
 import com.qqai.service.MessageParserService;
@@ -41,6 +43,9 @@ public class RootWebhookController {
 
     @Autowired
     private GroupService groupService;
+
+    @Autowired
+    private BotRepository botRepository;
 
     @Autowired
     private MessageParserService messageParserService;
@@ -95,24 +100,28 @@ public class RootWebhookController {
             return ResponseEntity.status(503)
                     .body(Map.of("error", "ServiceUnavailable", "message", "Webhook token not configured"));
         }
-        boolean valid = false;
+        String candidate = null;
         if (authHeader != null) {
-            valid = authHeader.equals("Bearer " + webhookToken) || authHeader.equals(webhookToken);
+            candidate = authHeader.startsWith("Bearer ") ? authHeader.substring(7) : authHeader;
         }
-        if (!valid && xToken != null) {
-            valid = xToken.equals(webhookToken);
+        if (candidate == null) candidate = xToken;
+        if (candidate == null) candidate = xOneBotToken;
+        if (candidate == null) candidate = accessToken;
+
+        Bot resolvedBot = null;
+        if (candidate != null && candidate.equals(webhookToken)) {
+            // 兼容现有单 bot：全局 webhook token 归默认机器人（id=1）
+            resolvedBot = botRepository.findById(1L).orElse(null);
+        } else if (candidate != null) {
+            // 每 bot 的 agent token 也用作 OneBot 回调 token，便于按 bot 路由
+            resolvedBot = botRepository.findByAgentToken(candidate).orElse(null);
         }
-        if (!valid && xOneBotToken != null) {
-            valid = xOneBotToken.equals(webhookToken);
-        }
-        if (!valid && accessToken != null) {
-            valid = accessToken.equals(webhookToken);
-        }
-        if (!valid) {
+        if (resolvedBot == null && (candidate == null || !candidate.equals(webhookToken))) {
             log.error("【安全】Webhook Token 验证失败，拒绝接收消息。");
             return ResponseEntity.status(401)
                     .body(Map.of("error", "Unauthorized", "message", "Webhook token validation failed"));
         }
+        long resolvedBotId = resolvedBot != null ? resolvedBot.getId() : 1L;
 
         try {
             ObjectNode json = (ObjectNode) objectMapper.readTree(payload);
@@ -165,7 +174,10 @@ public class RootWebhookController {
                     ? parsed.getGroupName() : String.valueOf(parsed.getGroupId());
 
             // 判断是否是登录账号发送的消息
-            String currentSelfQq = resolveSelfQq(selfIdLong, selfId);
+            String currentSelfQq = (resolvedBot != null && resolvedBot.getQqNumber() != null
+                    && !resolvedBot.getQqNumber().isBlank())
+                    ? resolvedBot.getQqNumber()
+                    : resolveSelfQq(selfIdLong, selfId);
             boolean isSelfMessage = currentSelfQq != null && currentSelfQq.equals(String.valueOf(parsed.getUserId()));
 
             if (isSelfMessage) {
@@ -178,6 +190,7 @@ public class RootWebhookController {
 
             // 创建消息实体
             Message message = buildMessage(parsed, finalMessageId, nickname, groupName, isSelfMessage, currentSelfQq);
+            message.setBotId(resolvedBotId);
 
             // 若含媒体任务，标记 mediaPending=true（前端显示占位符，消费者完成后回填并推送 message_update）
             boolean hasMediaTasks = parsed.getMediaTasks() != null && !parsed.getMediaTasks().isEmpty();
@@ -211,7 +224,7 @@ public class RootWebhookController {
             // 保存群聊信息
             String ownerQq = isSelfMessage ? String.valueOf(parsed.getUserId())
                     : (currentSelfQq != null ? currentSelfQq : String.valueOf(parsed.getUserId()));
-            groupService.saveGroupInfo(ownerQq, String.valueOf(parsed.getGroupId()), groupName);
+            groupService.saveGroupInfo(ownerQq, String.valueOf(parsed.getGroupId()), groupName, resolvedBotId);
 
             log.info("Webhook 处理完成, 耗时: {}ms", System.currentTimeMillis() - webhookStartMs);
             Map<String, Object> okResult = new HashMap<>();
