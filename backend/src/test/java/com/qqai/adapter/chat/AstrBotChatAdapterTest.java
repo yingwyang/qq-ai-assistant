@@ -37,6 +37,7 @@ class AstrBotChatAdapterTest {
     private AstrBotModelSelector modelSelector;
     private AstrBotMediaSupport mediaSupport;
     private UserSettingsService userSettingsService;
+    private AstrBotSessionMemoryService sessionMemoryService;
     private AstrBotChatAdapter adapter;
     private ObjectMapper mapper;
 
@@ -46,14 +47,19 @@ class AstrBotChatAdapterTest {
         modelSelector = mock(AstrBotModelSelector.class);
         mediaSupport = mock(AstrBotMediaSupport.class);
         userSettingsService = mock(UserSettingsService.class);
+        sessionMemoryService = mock(AstrBotSessionMemoryService.class);
         mapper = new ObjectMapper();
-        adapter = new AstrBotChatAdapter(personaService, modelSelector, mediaSupport, userSettingsService, mapper);
+        adapter = new AstrBotChatAdapter(personaService, modelSelector, mediaSupport, userSettingsService, sessionMemoryService, mapper);
         adapter.initHttpClient();
         given(userSettingsService.findByUserId(anyString())).willReturn(Optional.empty());
     }
 
     private ChatRequest request(List<String> images, String model, String cfgName, ChatPurpose purpose) {
-        return new ChatRequest(1L, "conv_abc", "hi", images, model, cfgName, null, "10001", purpose);
+        return new ChatRequest(1L, "conv_abc", "hi", images, model, cfgName, null, "10001", null, purpose);
+    }
+
+    private ChatRequest analysisRequest(List<String> images, String model, String title) {
+        return new ChatRequest(1L, null, "prompt", images, model, null, null, "analyzer", title, ChatPurpose.ANALYSIS);
     }
 
     @Test
@@ -126,5 +132,33 @@ class AstrBotChatAdapterTest {
         String session = String.valueOf(body.get("session_id"));
         assertTrue(session.startsWith("qqai-"));
         assertFalse(session.contains("conv_abc"));
+        assertEquals("analyzer", body.get("username"));
+    }
+
+    @Test
+    @DisplayName("分析带图且无人格：回退视觉档案 vision-task；模型不存在只告警不失败")
+    void analysisFallsBackToVisionTaskAndLenientModel() {
+        given(personaService.resolveConfigName(1L, true)).willReturn(null);
+        org.springframework.test.util.ReflectionTestUtils.setField(adapter, "visionTaskConfigName", "vision-task");
+        given(modelSelector.resolve("old-model")).willReturn(null);
+
+        Map<String, Object> body = adapter.buildRequestBody(
+                analysisRequest(List.of("/uploads/a.png"), "old-model", "群分析 · 群聊速览 · 群 · 10-29"));
+
+        assertEquals("vision-task", body.get("config_name"));
+        assertEquals("old-model", body.get("model"));
+        assertEquals(false, ((Map<?, ?>) body.get("flags")).get("enable_default_system_prompt"));
+    }
+
+    @Test
+    @DisplayName("分析标题：仅 ANALYSIS 且有标题时写入（异步补标题）")
+    void writesAnalysisTitle() {
+        String session = "qqai-test-session";
+        adapter.maybeSetAnalysisTitle(analysisRequest(List.of(), null, "群分析 · 群聊速览 · 群 · 10-29"), session);
+        verify(sessionMemoryService).setTitleForSessionAsync(session, "群分析 · 群聊速览 · 群 · 10-29");
+
+        adapter.maybeSetAnalysisTitle(analysisRequest(List.of(), null, null), session);
+        verify(sessionMemoryService, org.mockito.Mockito.times(1))
+                .setTitleForSessionAsync(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString());
     }
 }

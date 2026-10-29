@@ -14,6 +14,7 @@ public record ChatRequest(
         String configName,
         String configId,
         String userQq,
+        String title,
         ChatPurpose purpose) {
 
     public boolean hasImage() {

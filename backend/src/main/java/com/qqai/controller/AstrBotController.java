@@ -517,91 +517,15 @@ public class AstrBotController {
             headers.setContentType(MediaType.APPLICATION_JSON);
             headers.set("Accept", "application/json");
 
-            Map<String, Object> body = new HashMap<>();
-            // 多模态：如果有图片，上传到AstrBot获取attachment_id，构造列表格式message
-            body.put("message", buildMultimodalMessage(prompt, rendered.getAllImageUrls(), token));
-            body.put("username", "analyzer");
-            body.put("enable_streaming", false);
-            // 4.28.x：显式关闭推理过程（默认开启会把「🤔 思考:…」混进回复正文）
-            java.util.Map<String, Object> chatFlags = new HashMap<>();
-            chatFlags.put("enable_streaming", false);
-            chatFlags.put("enable_reasoning", false);
-            body.put("flags", chatFlags);
-            // 人层：用户人格档案（带图则视觉版），没选人格时回退内置视觉档案
-            applyPersonaLayer(body, chatFlags, rendered.getAllImageUrls());
-            // 分析用的是一次性会话（qqai-<uuid>）：用完即删，避免 AstrBot 对话列表膨胀
-            String oneShotSession = (String) body.get("session_id");
+            // 模型/人格/会话/SSE 统一走 ChatProvider；分析会话标题由适配器写入 AstrBot
+            String analysis = chatProvider.chat(
+                    new com.qqai.capability.chat.ChatRequest(
+                            securityHelper.getCurrentUserId(), null, prompt,
+                            rendered.getAllImageUrls(), (String) request.get("model"),
+                            null, null, "analyzer",
+                            analysisConversationTitle(analysisType, resolvedGroupId),
+                            com.qqai.capability.chat.ChatPurpose.ANALYSIS)).text();
 
-            // 模型选择：请求体 model 覆盖 > 用户默认模型。
-            // 4.28 只认 selected_provider/selected_model，只写 model 会被静默忽略（随后回落到档案主模型）。
-            String requestModel = (String) request.get("model");
-            if (requestModel == null || requestModel.isBlank() || "default".equalsIgnoreCase(requestModel)) {
-                requestModel = getCurrentUserLlmModel();
-            }
-            applySelectedModelForAnalysis(body, requestModel, !rendered.getAllImageUrls().isEmpty());
-
-            // 判断是否为视觉模型（从模型ID推断，为 Task 6 预留；如果 body.get("model") 含 vision key 可升级）
-            // （当前仅方案 B 注入图片 URL 文本，不强制依赖视觉能力，留一个日志即可）
-            log.debug("本次分析最终模型={}, imageUrls count={}", body.get("model"), rendered != null ? rendered.getAllImageUrls().size() : 0);
-
-            HttpEntity<Map<String, Object>> entity = new HttpEntity<>(body, headers);
-            
-            // 配置消息转换器，使用 UTF-8 编码
-            org.springframework.http.client.SimpleClientHttpRequestFactory factory = 
-                new org.springframework.http.client.SimpleClientHttpRequestFactory();
-            factory.setConnectTimeout(60000);
-            factory.setReadTimeout(120000);
-            
-            java.util.List<org.springframework.http.converter.HttpMessageConverter<?>> converters = 
-                new java.util.ArrayList<>();
-            org.springframework.http.converter.StringHttpMessageConverter stringConverter = 
-                new org.springframework.http.converter.StringHttpMessageConverter(java.nio.charset.StandardCharsets.UTF_8);
-            stringConverter.setWriteAcceptCharset(false);
-            converters.add(stringConverter);
-            converters.add(new org.springframework.http.converter.json.MappingJackson2HttpMessageConverter());
-            
-            RestTemplate restTemplateWithTimeout = new RestTemplate(factory);
-            restTemplateWithTimeout.setMessageConverters(converters);
-            
-            ResponseEntity<String> response = restTemplateWithTimeout.postForEntity(url, entity, String.class);
-            
-            // 分析对话对用户可见：**保留**，并异步补标题（AstrBot 回复后才异步落库，所以带重试）
-            if (oneShotSession != null) {
-                astrBotSessionMemoryService.setTitleForSessionAsync(oneShotSession,
-                        analysisConversationTitle(analysisType, resolvedGroupId));
-            }
-
-            // 解析响应
-            String responseBody = response.getBody();
-            StringBuilder replyText = new StringBuilder();
-
-            if (responseBody != null) {
-                String[] lines = responseBody.split("\n");
-                for (String line : lines) {
-                    line = line.trim();
-                    if (line.startsWith("data: ")) {
-                        String jsonData = line.substring(6);
-                        try {
-                            JsonNode json = objectMapper.readTree(jsonData);
-                            String type = json.has("type") ? json.get("type").asText() : null;
-                            if ("plain".equals(type)) {
-                                String data = json.has("data") ? json.get("data").asText() : null;
-                                if (data != null) {
-                                    replyText.append(data);
-                                }
-                            }
-                        } catch (Exception e) {
-                            // 忽略解析错误
-                        }
-                    }
-                }
-            }
-            
-            String analysis = com.qqai.service.AstrBotService.sanitizeReply(replyText.toString().trim());
-            if (analysis.isEmpty()) {
-                analysis = "抱歉，无法分析群聊消息。";
-            }
-            
             // 过滤掉工具调用的 JSON 内容
             // 使用递归正则移除嵌套的 JSON 对象（包含 id 和 name 字段的）
             String jsonPattern = "\\s*\\{[^{}]*(?:\"id\"\\s*:\\s*\"[^\"]+\"|\"name\"\\s*:\\s*\"[^\"]+\")[^{}]*(?:\\{[^{}]*\\}[^{}]*)*\\}\\s*";
@@ -797,98 +721,14 @@ public class AstrBotController {
             String userApiKey = getCurrentUserAstrbotApiKey();
             String token = (userApiKey != null && !userApiKey.isEmpty()) ? userApiKey : astrBotToken;
 
-            HttpHeaders headers = new HttpHeaders();
-            headers.set("X-API-Key", token);
-            headers.setContentType(MediaType.APPLICATION_JSON);
-            headers.set("Accept", "application/json");
-
-            Map<String, Object> body = new HashMap<>();
-            // 多模态：如果有图片，上传到AstrBot获取attachment_id，构造列表格式message
-            body.put("message", buildMultimodalMessage(prompt, rendered.getAllImageUrls(), token));
-            body.put("username", "analyzer");
-            body.put("enable_streaming", false);
-            // 4.28.x：显式关闭推理过程（默认开启会把「🤔 思考:…」混进回复正文）
-            java.util.Map<String, Object> chatFlags = new HashMap<>();
-            chatFlags.put("enable_streaming", false);
-            chatFlags.put("enable_reasoning", false);
-            body.put("flags", chatFlags);
-            // 人层：用户人格档案（同 /analyze 链路）
-            applyPersonaLayer(body, chatFlags, rendered.getAllImageUrls());
-            // 分析用的是一次性会话（qqai-<uuid>）：用完即删
-            String oneShotSession = (String) body.get("session_id");
-
-            // 模型选择：请求体 model 覆盖 > 用户默认模型（4.28 只认 selected_provider/selected_model）。
-            String requestModel = (String) request.get("model");
-            if (requestModel == null || requestModel.isBlank() || "default".equalsIgnoreCase(requestModel)) {
-                requestModel = getCurrentUserLlmModel();
-            }
-            applySelectedModelForAnalysis(body, requestModel, !rendered.getAllImageUrls().isEmpty());
-
-            // 判断是否为视觉模型（从模型ID推断，为 Task 6 预留；如果 body.get("model") 含 vision key 可升级）
-            // （当前仅方案 B 注入图片 URL 文本，不强制依赖视觉能力，留一个日志即可）
-            log.debug("本次分析最终模型={}, imageUrls count={}", body.get("model"), rendered != null ? rendered.getAllImageUrls().size() : 0);
-
-            HttpEntity<Map<String, Object>> entity = new HttpEntity<>(body, headers);
-
-            org.springframework.http.client.SimpleClientHttpRequestFactory factory =
-                    new org.springframework.http.client.SimpleClientHttpRequestFactory();
-            factory.setConnectTimeout(60000);
-            factory.setReadTimeout(120000);
-
-            java.util.List<org.springframework.http.converter.HttpMessageConverter<?>> converters =
-                    new java.util.ArrayList<>();
-            org.springframework.http.converter.StringHttpMessageConverter stringConverter =
-                    new org.springframework.http.converter.StringHttpMessageConverter(java.nio.charset.StandardCharsets.UTF_8);
-            stringConverter.setWriteAcceptCharset(false);
-            converters.add(stringConverter);
-            converters.add(new org.springframework.http.converter.json.MappingJackson2HttpMessageConverter());
-
-            RestTemplate restTemplateWithTimeout = new RestTemplate(factory);
-            restTemplateWithTimeout.setMessageConverters(converters);
-
-            ResponseEntity<String> response = restTemplateWithTimeout.postForEntity(url, entity, String.class);
-
-            // 分析对话对用户可见：保留，并异步补标题
-            if (oneShotSession != null) {
-                astrBotSessionMemoryService.setTitleForSessionAsync(oneShotSession,
-                        analysisConversationTitle(analysisType, groupId));
-            }
-
-            // 6. 解析 SSE 响应（与 sendMessage 保持一致的解析逻辑）
-            String responseBody = response.getBody();
-            StringBuilder replyText = new StringBuilder();
-            if (responseBody != null) {
-                log.debug("analyze-selected AstrBot 原始响应: {}", responseBody.substring(0, Math.min(500, responseBody.length())));
-                String[] lines = responseBody.split("\n");
-                for (String line : lines) {
-                    line = line.trim();
-                    if (line.startsWith("data: ")) {
-                        String jsonData = line.substring(6);
-                        try {
-                            JsonNode json = objectMapper.readTree(jsonData);
-                            String type = json.has("type") ? json.get("type").asText() : null;
-                            if ("plain".equals(type)) {
-                                String data = json.has("data") ? json.get("data").asText() : null;
-                                if (data != null) {
-                                    // 过滤工具调用 JSON（与 sendMessage 保持一致）
-                                    boolean isToolResult = (data.contains("\"id\"") && data.contains("\"ts\"") && data.contains("\"result\""))
-                                        || (data.contains("\"id\"") && data.contains("\"name\"") && data.contains("\"parameters\""))
-                                        || (data.startsWith("{") && data.contains("\"static\"") && data.contains("\"content\""));
-                                    if (!isToolResult) {
-                                        replyText.append(data);
-                                    }
-                                }
-                            }
-                        } catch (Exception e) {
-                            // 单行 SSE 数据解析失败不影响其余分片，跳过该行但要留调试线索
-                            log.debug("SSE 数据行解析失败，已跳过: {}", e.toString());
-                        }
-                    }
-                }
-            }
-
-            String analysis = com.qqai.service.AstrBotService.sanitizeReply(replyText.toString().trim());
-            if (analysis.isEmpty()) analysis = "抱歉，无法分析所选消息。";
+            // 模型/人格/一次性会话/SSE 统一走 ChatProvider
+            String analysis = chatProvider.chat(
+                    new com.qqai.capability.chat.ChatRequest(
+                            securityHelper.getCurrentUserId(), null, prompt,
+                            rendered.getAllImageUrls(), (String) request.get("model"),
+                            null, null, "analyzer",
+                            analysisConversationTitle(analysisType, groupId),
+                            com.qqai.capability.chat.ChatPurpose.ANALYSIS)).text();
 
             // 额外过滤工具调用 JSON
             String jsonPattern = "\\s*\\{[^{}]*(?:\"id\"\\s*:\\s*\"[^\"]+\"|\"name\"\\s*:\\s*\"[^\"]+\")[^{}]*(?:\\{[^{}]*\\}[^{}]*)*\\}\\s*";
@@ -1304,7 +1144,7 @@ public class AstrBotController {
             com.qqai.capability.chat.ChatReply chatReply = chatProvider.chat(
                     new com.qqai.capability.chat.ChatRequest(
                             userId, currentConversationId, message, requestImageUrls,
-                            model, cfgName, cfgId, userQq,
+                            model, cfgName, cfgId, userQq, null,
                             com.qqai.capability.chat.ChatPurpose.CHAT));
             String finalReply = chatReply.text();
             Integer promptTokens = chatReply.promptTokens();

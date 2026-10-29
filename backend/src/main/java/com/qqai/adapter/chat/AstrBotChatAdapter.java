@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.qqai.capability.HealthStatus;
 import com.qqai.capability.chat.ChatProvider;
+import com.qqai.capability.chat.ChatPurpose;
 import com.qqai.capability.chat.ChatReply;
 import com.qqai.capability.chat.ChatRequest;
 import com.qqai.exception.BizException;
@@ -50,6 +51,7 @@ public class AstrBotChatAdapter implements ChatProvider {
     private final AstrBotModelSelector modelSelector;
     private final AstrBotMediaSupport mediaSupport;
     private final UserSettingsService userSettingsService;
+    private final AstrBotSessionMemoryService sessionMemoryService;
     private final ObjectMapper objectMapper;
 
     @Value("${astrbot.api-url:http://localhost:6185}")
@@ -58,24 +60,32 @@ public class AstrBotChatAdapter implements ChatProvider {
     @Value("${astrbot.token:}")
     private String astrBotToken;
 
+    @Value("${astrbot.vision-config-name:vision}")
+    private String visionConfigName;
+
+    @Value("${astrbot.vision-task-config-name:vision-task}")
+    private String visionTaskConfigName;
+
     private RestTemplate restTemplate;
 
     public AstrBotChatAdapter(AstrBotPersonaService personaService,
                               AstrBotModelSelector modelSelector,
                               AstrBotMediaSupport mediaSupport,
                               UserSettingsService userSettingsService,
+                              AstrBotSessionMemoryService sessionMemoryService,
                               ObjectMapper objectMapper) {
         this.personaService = personaService;
         this.modelSelector = modelSelector;
         this.mediaSupport = mediaSupport;
         this.userSettingsService = userSettingsService;
+        this.sessionMemoryService = sessionMemoryService;
         this.objectMapper = objectMapper;
     }
 
     @PostConstruct
     void initHttpClient() {
         SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
-        factory.setConnectTimeout(30000);
+        factory.setConnectTimeout(60000);
         factory.setReadTimeout(180000);
         List<HttpMessageConverter<?>> converters = new ArrayList<>();
         StringHttpMessageConverter stringConverter = new StringHttpMessageConverter(StandardCharsets.UTF_8);
@@ -89,6 +99,7 @@ public class AstrBotChatAdapter implements ChatProvider {
     @Override
     public ChatReply chat(ChatRequest request) {
         Map<String, Object> body = buildRequestBody(request);
+        String sessionId = body.get("session_id") == null ? null : String.valueOf(body.get("session_id"));
         String token = resolveToken(request.userId());
         HttpHeaders headers = new HttpHeaders();
         headers.set("X-API-Key", token);
@@ -98,6 +109,8 @@ public class AstrBotChatAdapter implements ChatProvider {
 
         ResponseEntity<String> response = restTemplate.postForEntity(
                 astrBotApiUrl + "/api/v1/chat", entity, String.class);
+
+        maybeSetAnalysisTitle(request, sessionId);
 
         StringBuilder replyText = new StringBuilder();
         Integer promptTokens = null;
@@ -132,7 +145,9 @@ public class AstrBotChatAdapter implements ChatProvider {
 
         String finalReply = AstrBotService.sanitizeReply(replyText.toString().trim());
         if (finalReply.isEmpty()) {
-            finalReply = "抱歉，我没有理解您的问题。";
+            finalReply = request.purpose() == ChatPurpose.ANALYSIS
+                    ? "抱歉，无法分析消息。"
+                    : "抱歉，我没有理解您的问题。";
         }
         return new ChatReply(finalReply, promptTokens, completionTokens, totalTokens);
     }
@@ -154,26 +169,36 @@ public class AstrBotChatAdapter implements ChatProvider {
     /** 供单测：组装 AstrBot 请求体（不发 HTTP）。 */
     Map<String, Object> buildRequestBody(ChatRequest request) {
         boolean hasImage = request.hasImage();
+        boolean analysis = request.purpose() == ChatPurpose.ANALYSIS;
         String token = resolveToken(request.userId());
 
         Map<String, Object> body = new HashMap<>();
         body.put("message", hasImage
                 ? mediaSupport.buildMultimodalMessage(request.text(), request.imageUrls(), token)
                 : request.text());
-        body.put("username", request.userQq() != null ? request.userQq() : "web_user");
+        body.put("username", analysis ? "analyzer" : (request.userQq() != null ? request.userQq() : "web_user"));
         body.put("enable_streaming", false);
         Map<String, Object> flags = new HashMap<>();
         flags.put("enable_streaming", false);
         flags.put("enable_reasoning", false);
+        body.put("flags", flags);
+
+        if (analysis) {
+            buildAnalysisRequest(body, flags, request, hasImage);
+        } else {
+            buildChatRequest(body, flags, request, hasImage);
+        }
+        return body;
+    }
+
+    private void buildChatRequest(Map<String, Object> body, Map<String, Object> flags,
+                                  ChatRequest request, boolean hasImage) {
         if (hasImage) {
             flags.put("enable_default_system_prompt", false);
         }
-        body.put("flags", flags);
-
         String personaCfg = personaService.resolveConfigName(request.userId(), hasImage);
         if (personaCfg != null && !personaCfg.isBlank()) {
             body.put("config_name", personaCfg);
-            log.info("AI 对话使用人格档案: {}", personaCfg);
         } else if (request.configName() != null && !request.configName().isBlank()) {
             body.put("config_name", request.configName());
         }
@@ -181,8 +206,7 @@ public class AstrBotChatAdapter implements ChatProvider {
             body.put("config_id", request.configId());
         }
 
-        String explicitModel = request.model() != null && !request.model().isBlank()
-                && !"default".equalsIgnoreCase(request.model()) ? request.model() : null;
+        String explicitModel = explicitModel(request.model());
         String activeModel = explicitModel != null ? explicitModel : defaultModel(request.userId());
         boolean profileApplied = (personaCfg != null && !personaCfg.isBlank())
                 || (request.configName() != null && !request.configName().isBlank());
@@ -200,15 +224,57 @@ public class AstrBotChatAdapter implements ChatProvider {
             }
         }
 
-        if (request.purpose() == com.qqai.capability.chat.ChatPurpose.ANALYSIS) {
-            // 分析链路：一次性会话（标题补写/清理在 Phase 2b 收口，本类暂只服务 CHAT）
-            body.put("session_id", "qqai-" + UUID.randomUUID());
-        } else {
-            String personaId = personaService.currentPersonaId(request.userId());
-            body.put("session_id", AstrBotSessionMemoryService.buildSessionId(
-                    request.conversationId(), AstrBotSessionMemoryService.personaKey(personaId)));
+        String personaId = personaService.currentPersonaId(request.userId());
+        body.put("session_id", AstrBotSessionMemoryService.buildSessionId(
+                request.conversationId(), AstrBotSessionMemoryService.personaKey(personaId)));
+    }
+
+    private void buildAnalysisRequest(Map<String, Object> body, Map<String, Object> flags,
+                                      ChatRequest request, boolean hasImage) {
+        String cfg = personaService.resolveConfigName(request.userId(), hasImage);
+        if (cfg == null && hasImage) {
+            cfg = visionTaskConfigName != null && !visionTaskConfigName.isBlank()
+                    ? visionTaskConfigName.trim() : visionConfigName;
         }
-        return body;
+        if (cfg != null && !cfg.isBlank()) {
+            body.put("config_name", cfg);
+        }
+        if (hasImage) {
+            flags.put("enable_default_system_prompt", false);
+        }
+        // 分析永远是一次性会话（即使没有档案），便于标题/清理精确定位
+        body.put("session_id", "qqai-" + UUID.randomUUID());
+
+        String model = explicitModel(request.model());
+        if (model == null) {
+            model = defaultModel(request.userId());
+        }
+        if (model == null || model.isBlank()) {
+            return;
+        }
+        body.put("model", model);
+        JsonNode selected = modelSelector.resolve(model);
+        if (selected == null) {
+            log.warn("分析链路所选模型 {} 不在 AstrBot 配置中，本次交给档案默认模型", model);
+            return;
+        }
+        if (hasImage && !AstrBotModelSelector.supportsImage(selected)) {
+            log.info("分析链路带图但所选 {} 不支持图片，保留视觉档案模型", model);
+            return;
+        }
+        modelSelector.apply(body, model);
+    }
+
+    /** 分析对话对用户可见：保留并异步补标题（写入带重试，供单测直接验证）。 */
+    void maybeSetAnalysisTitle(ChatRequest request, String sessionId) {
+        if (request.purpose() == ChatPurpose.ANALYSIS
+                && request.title() != null && !request.title().isBlank() && sessionId != null) {
+            sessionMemoryService.setTitleForSessionAsync(sessionId, request.title());
+        }
+    }
+
+    private static String explicitModel(String model) {
+        return model != null && !model.isBlank() && !"default".equalsIgnoreCase(model) ? model : null;
     }
 
     private String resolveToken(Long userId) {
