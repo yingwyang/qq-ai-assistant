@@ -95,6 +95,14 @@ public class AstrBotController {
     @Autowired
     private AstrBotSessionMemoryService astrBotSessionMemoryService;
 
+    /** 对话能力契约：请求组装/模型下发/人格/会话/SSE 解析由适配器负责 */
+    @Autowired
+    private com.qqai.capability.chat.ChatProvider chatProvider;
+
+    /** 多模态图片上传（主聊天与分析链路共用） */
+    @Autowired
+    private com.qqai.adapter.chat.AstrBotMediaSupport mediaSupport;
+
     @Autowired
     private FileRecordRepository fileRecordRepository;
 
@@ -182,25 +190,7 @@ public class AstrBotController {
      * 规则参考 WebMvcConfig：/images/** → uploads/images/，/uploads/** → uploads/
      */
     private File resolveImageFileFromUrl(String imageUrl) {
-        if (imageUrl == null || imageUrl.isBlank()) return null;
-        try {
-            String path;
-            if (imageUrl.startsWith("http://") || imageUrl.startsWith("https://")) {
-                int idx = imageUrl.indexOf("://");
-                int pathStart = imageUrl.indexOf("/", idx + 3);
-                path = pathStart >= 0 ? imageUrl.substring(pathStart) : "";
-            } else {
-                path = imageUrl;
-            }
-            if (path.startsWith("/images/")) {
-                return new File("uploads" + path);
-            } else if (path.startsWith("/uploads/")) {
-                return new File("uploads" + path.substring("/uploads".length()));
-            }
-        } catch (Exception e) {
-            log.debug("解析图片URL失败 {}: {}", imageUrl, e.getMessage());
-        }
-        return null;
+        return mediaSupport.resolveImageFileFromUrl(imageUrl);
     }
 
     /**
@@ -209,51 +199,7 @@ public class AstrBotController {
      * @return attachment_id 列表；全部失败返回空列表
      */
     private List<String> uploadImagesToAstrBot(List<String> imageUrls, String token) {
-        if (imageUrls == null || imageUrls.isEmpty()) return Collections.emptyList();
-        List<String> attachmentIds = new ArrayList<>();
-        int maxImages = 5;
-        long maxSize = 10L * 1024 * 1024; // 10MB
-        int uploaded = 0;
-        for (String imageUrl : imageUrls) {
-            if (uploaded >= maxImages) break;
-            try {
-                File imageFile = resolveImageFileFromUrl(imageUrl);
-                if (imageFile == null || !imageFile.exists() || !imageFile.isFile()) {
-                    log.debug("图片文件不存在，跳过: {}", imageUrl);
-                    continue;
-                }
-                if (imageFile.length() > maxSize) {
-                    log.debug("图片过大({}B)，跳过: {}", imageFile.length(), imageUrl);
-                    continue;
-                }
-                String uploadUrl = astrBotApiUrl + "/api/v1/file";
-                HttpHeaders uploadHeaders = new HttpHeaders();
-                uploadHeaders.set("X-API-Key", token);
-                uploadHeaders.setContentType(MediaType.MULTIPART_FORM_DATA);
-
-                MultiValueMap<String, Object> multipartBody = new LinkedMultiValueMap<>();
-                multipartBody.add("file", new FileSystemResource(imageFile));
-
-                HttpEntity<MultiValueMap<String, Object>> uploadEntity = new HttpEntity<>(multipartBody, uploadHeaders);
-
-                // 复用共享客户端（带超时），不再每次 new 一个无超时实例
-                ResponseEntity<String> uploadResp = restTemplate.postForEntity(uploadUrl, uploadEntity, String.class);
-
-                if (uploadResp.getStatusCode().is2xxSuccessful() && uploadResp.getBody() != null) {
-                    JsonNode respJson = objectMapper.readTree(uploadResp.getBody());
-                    JsonNode dataNode = respJson.path("data");
-                    String attachmentId = dataNode.path("attachment_id").asText(null);
-                    if (attachmentId != null && !attachmentId.isEmpty()) {
-                        attachmentIds.add(attachmentId);
-                        uploaded++;
-                        log.debug("图片上传成功: {} -> attachment_id={}", imageUrl, attachmentId);
-                    }
-                }
-            } catch (Exception e) {
-                log.warn("上传图片到AstrBot失败 {}: {}", imageUrl, e.getMessage());
-            }
-        }
-        return attachmentIds;
+        return mediaSupport.uploadImagesToAstrBot(imageUrls, token);
     }
 
     /**
@@ -261,32 +207,7 @@ public class AstrBotController {
      * 否则回退为纯文本 prompt（方案B 文本注入URL已在调用方完成）。
      */
     private Object buildMultimodalMessage(String prompt, List<String> imageUrls, String token) {
-        if (imageUrls == null || imageUrls.isEmpty()) {
-            return prompt;
-        }
-        try {
-            List<String> attachmentIds = uploadImagesToAstrBot(imageUrls, token);
-            if (attachmentIds.isEmpty()) {
-                log.info("图片全部上传失败，回退到纯文本方案");
-                return prompt;
-            }
-            List<Map<String, Object>> messageParts = new ArrayList<>();
-            Map<String, Object> textPart = new HashMap<>();
-            textPart.put("type", "plain");
-            textPart.put("text", prompt);
-            messageParts.add(textPart);
-            for (String attachmentId : attachmentIds) {
-                Map<String, Object> imagePart = new HashMap<>();
-                imagePart.put("type", "image");
-                imagePart.put("attachment_id", attachmentId);
-                messageParts.add(imagePart);
-            }
-            log.info("构造多模态message: 1段文本 + {}张图片", attachmentIds.size());
-            return messageParts;
-        } catch (Exception e) {
-            log.warn("构造多模态message失败，回退到纯文本: {}", e.getMessage());
-            return prompt;
-        }
+        return mediaSupport.buildMultimodalMessage(prompt, imageUrls, token);
     }
 
     /**
@@ -295,13 +216,7 @@ public class AstrBotController {
      * 让模型继续输出"内容未知"，把视觉能力浪费掉。这里明确告知可以看图。
      */
     private String augmentPromptForImages(String prompt, List<String> imageUrls) {
-        if (imageUrls == null || imageUrls.isEmpty()) return prompt;
-        return prompt + "\n\n【重要】本次请求已随附 " + imageUrls.size() + " 张真实图片"
-                + "（多模态消息段，可以直接看到画面）。凡是占位符 [图片] 对应的消息，"
-                + "请直接描述图片的实际内容（人物/物体/场景/截图文字/表情包含义等），"
-                + "不要再输出「内容未知」「未提供可辨内容」「无法查看图片」这类说法；"
-                + "音视频仍按占位符处理，不要编造。"
-                + "输出格式仍严格遵循上面的要求。";
+        return mediaSupport.augmentPromptForImages(prompt, imageUrls);
     }
 
     /**
@@ -1385,172 +1300,17 @@ public class AstrBotController {
                 balanceBefore = estimated.getBalanceAfter();
             }
 
-            // 4. 调用 AstrBot HTTP API
-            String url = astrBotApiUrl + "/api/v1/chat";
-            
-            String userApiKey = getCurrentUserAstrbotApiKey();
-            String token = (userApiKey != null && !userApiKey.isEmpty()) ? userApiKey : astrBotToken;
-            
-            HttpHeaders headers = new HttpHeaders();
-            headers.set("X-API-Key", token);
-            headers.setContentType(MediaType.APPLICATION_JSON);
-            headers.set("Accept", "application/json");
-            
-            Map<String, Object> body = new HashMap<>();
-            // ---- 富媒体渲染一致性说明 ----
-            // 主聊天/分析链路/异步摘要三条链路的消息文本渲染统一使用 RichMessageRenderer：
-            // - 分析链路：见 analyzeSelected()/analyzeGroupMessages() buildRenderedBatch() 调用
-            // - 异步摘要链路：见 AiAnalysisConsumer + AstrBotService.doSummarize()
-            // - 主聊天：本条消息若带图，走 buildMultimodalMessage()（与两条分析链路同一实现）上传换 attachment_id
-            body.put("message", hasImage ? buildMultimodalMessage(message, requestImageUrls, token) : message);
-            body.put("username", userQq != null ? userQq : "web_user");
-            body.put("enable_streaming", false);
-            // 4.28.x：显式关闭推理过程（默认开启会把「🤔 思考:…」混进回复正文）
-            java.util.Map<String, Object> chatFlags = new HashMap<>();
-            chatFlags.put("enable_streaming", false);
-            chatFlags.put("enable_reasoning", false);
-            // 带图时关闭「默认系统提示」：否则 AstrBot 会套上默认人格（本项目里是"聊天记录分析器"），
-            // 把"这张图里有什么"也按聊天总结格式回答。纯文本对话保持原样（人格仍生效）。
-            if (hasImage) {
-                chatFlags.put("enable_default_system_prompt", false);
-            }
-            body.put("flags", chatFlags);
-            // 人层（双层提示词）：用户选定的人格 → 对应配置档案，带图用视觉版。
-            // 优先级高于 sendMessageWithImage 传入的内置 vision 档案。
-            String personaCfg = astrBotPersonaService.resolveConfigName(userId, hasImage);
-            if (personaCfg != null && !personaCfg.isBlank()) {
-                body.put("config_name", personaCfg);
-                log.info("AI 对话使用人格档案: {}", personaCfg);
-            } else if (cfgName != null && !cfgName.isBlank()) {
-                // 带图时指定「配置文件」：4.28 的 Agent 以 profile 里的主模型为准（body 的 model 不覆盖它），
-                // 主模型若是纯文本模型就会把图片降级成文本路径。指向视觉 profile 后图片才能被识别。
-                body.put("config_name", cfgName);
-                log.info("使用 AstrBot 配置文件: {}", cfgName);
-            }
-            if (cfgId != null && !cfgId.isBlank()) body.put("config_id", cfgId);
-            if (hasImage) {
-                log.info("AI 对话带图: imageUrls={}, 模型={}", requestImageUrls.size(), model);
-            }
-            // 优先级：前端本次请求显式传入 model > 用户默认模型
-            String explicitModel = (model != null && !model.isBlank() && !"default".equalsIgnoreCase(model))
-                    ? model : null;
-            String activeModel = explicitModel != null ? explicitModel : getCurrentUserLlmModel();
-            // 是否已经用「配置档案（profile）」决定了模型：带图走视觉档案、选了人格走人格档案。
-            boolean profileApplied = (personaCfg != null && !personaCfg.isBlank())
-                    || (cfgName != null && !cfgName.isBlank());
-            if (activeModel != null && !activeModel.isBlank()) {
-                body.put("model", activeModel);   // 4.26 及以前版本读这个字段
-                // AstrBot 4.28 的 /api/v1/chat 只认 selected_provider / selected_model，只传 model 会被
-                // 静默忽略，随后回落到配置档案的主模型（本项目档案的主模型都是 SiliconFlow，于是
-                // 「选了 DeepSeek、账单记在 SiliconFlow」）。所以只要模型能在配置里找到就必须下发；
-                // 唯一例外是「带图 + 所选模型看不了图」——那种情况必须让视觉档案的模型兜底。
-                ModelDispatch dispatch = applySelectedModelForChat(body, activeModel, hasImage, profileApplied);
-                boolean providerApplied = dispatch == ModelDispatch.APPLIED;
-                if (dispatch == ModelDispatch.UNKNOWN && explicitModel != null
-                        && astrBotModelSelector.providers() != null) {
-                    // 显式选了模型却在 AstrBot 配置里找不到：宁可报错，也不静默回退到别的厂商（会记错账）。
-                    log.warn("所选模型 {} 不在 AstrBot 配置中，拒绝静默回退", activeModel);
-                    return ResponseEntity.badRequest().body(Map.of(
-                            "status", "error",
-                            "message", "所选模型「" + activeModel + "」已不在 AstrBot 配置中，请刷新模型列表后重新选择"));
-                }
-                log.info("使用模型: {} (fromRequest={}, profileApplied={}, providerApplied={})",
-                        activeModel, explicitModel != null, profileApplied, providerApplied);
-            }
-            // AstrBot 的记忆来自「会话历史」，session_id 才是开关（我们发的 context 它不消费）：
-            // 用本项目 conversationId 做键 → 新对话=新 session（旧记忆不再注入）、未选群也有记忆、
-            // 同一对话多轮连续记得。人格仍拼进键：AstrBot 会话记录里存了 persona 且优先于档案，
-            // 换人格必须换 session 才会生效（旧人格的记忆不跨人格共享，符合预期）。
-            String personaId = astrBotPersonaService.currentPersonaId(userId);
-            body.put("session_id", AstrBotSessionMemoryService.buildSessionId(
-                    currentConversationId, AstrBotSessionMemoryService.personaKey(personaId)));
-
-            // 不再向 AstrBot 传 context：实测它不消费未知字段（新 session 只带 context 仍不知道历史）。
-            // 本地 context 列表只用于估算/结算「上下文条数」。
-            
-            HttpEntity<Map<String, Object>> entity = new HttpEntity<>(body, headers);
-            
-            // 调用大模型前的余额门禁：原实现是"先调用、先落库回复、最后扣费"，
-            // 0 余额用户虽然最后会收到扣费失败，但回复已经生成并入库（刷新就能看到），等于免费刷模型。
-            // 这里只拦截"确定要付费且连最低消费都不够"的请求；精确扣费仍在下方 spendForChat 完成。
-            if (userId != null) {
-                creditService.assertChatAffordable(userId, securityHelper.isAdmin());
-            }
-            
-            // 使用 SimpleClientHttpRequestFactory 设置超时
-            org.springframework.http.client.SimpleClientHttpRequestFactory factory = 
-                new org.springframework.http.client.SimpleClientHttpRequestFactory();
-            factory.setConnectTimeout(30000);
-            // 读超时 180s：带图的视觉调用实测 20~100s，原来 60s 会在 99s 时抛
-            // "Error while extracting response"（实为 SocketTimeout），前端只看到“服务暂时不可用”
-            factory.setReadTimeout(180000);
-            
-            // 配置消息转换器，使用 UTF-8 编码
-            java.util.List<org.springframework.http.converter.HttpMessageConverter<?>> converters = 
-                new java.util.ArrayList<>();
-            org.springframework.http.converter.StringHttpMessageConverter stringConverter = 
-                new org.springframework.http.converter.StringHttpMessageConverter(java.nio.charset.StandardCharsets.UTF_8);
-            stringConverter.setWriteAcceptCharset(false);
-            converters.add(stringConverter);
-            converters.add(new org.springframework.http.converter.json.MappingJackson2HttpMessageConverter());
-            
-            RestTemplate restTemplateWithTimeout = new RestTemplate(factory);
-            restTemplateWithTimeout.setMessageConverters(converters);
-            
-            ResponseEntity<String> response = restTemplateWithTimeout.postForEntity(url, entity, String.class);
-            
-            // 5. 解析响应
-            String responseBody = response.getBody();
-            StringBuilder replyText = new StringBuilder();
-            Integer promptTokens = null;
-            Integer completionTokens = null;
-            Integer totalTokens = null;
-
-            if (responseBody != null) {
-                log.debug("AstrBot 原始响应: {}", responseBody.substring(0, Math.min(500, responseBody.length())));
-
-                // 解析 SSE 格式的数据行
-                String[] lines = responseBody.split("\n");
-                for (String line : lines) {
-                    line = line.trim();
-                    if (line.startsWith("data: ")) {
-                        String jsonData = line.substring(6);
-                        try {
-                            JsonNode json = objectMapper.readTree(jsonData);
-                            String type = json.has("type") ? json.get("type").asText() : null;
-                            if ("plain".equals(type)) {
-                                String data = json.has("data") ? json.get("data").asText() : null;
-                                if (data != null) {
-                                    // 过滤掉工具调用的 JSON 内容
-                                    // 检查是否是工具调用结果（包含 id + ts + result 或 id + name 等特征）
-                                    boolean isToolResult = (data.contains("\"id\"") && data.contains("\"ts\"") && data.contains("\"result\""))
-                                        || (data.contains("\"id\"") && data.contains("\"name\"") && data.contains("\"parameters\""))
-                                        || (data.startsWith("{") && data.contains("\"static\"") && data.contains("\"content\""));
-                                    if (!isToolResult) {
-                                        replyText.append(data);
-                                    }
-                                }
-                            }
-                            // 尝试解析 token 使用量
-                            if (json.has("usage")) {
-                                JsonNode usage = json.get("usage");
-                                if (usage != null) {
-                                    promptTokens = usage.has("prompt_tokens") ? usage.get("prompt_tokens").asInt() : null;
-                                    completionTokens = usage.has("completion_tokens") ? usage.get("completion_tokens").asInt() : null;
-                                    totalTokens = usage.has("total_tokens") ? usage.get("total_tokens").asInt() : null;
-                                }
-                            }
-                        } catch (Exception e) {
-                            // 忽略解析错误
-                        }
-                    }
-                }
-            }
-
-            String finalReply = com.qqai.service.AstrBotService.sanitizeReply(replyText.toString().trim());
-            if (finalReply.isEmpty()) {
-                finalReply = "抱歉，我没有理解您的问题。";
-            }
+            // 4. 调用 AstrBot（传输/模型/人格/会话统一由 ChatProvider 适配器负责）
+            com.qqai.capability.chat.ChatReply chatReply = chatProvider.chat(
+                    new com.qqai.capability.chat.ChatRequest(
+                            userId, currentConversationId, message, requestImageUrls,
+                            model, cfgName, cfgId, userQq,
+                            com.qqai.capability.chat.ChatPurpose.CHAT));
+            String finalReply = chatReply.text();
+            Integer promptTokens = chatReply.promptTokens();
+            Integer completionTokens = chatReply.completionTokens();
+            Integer totalTokens = chatReply.totalTokens();
+            log.debug("AstrBot 最终回复: {}", finalReply);
 
             // 通过插件链格式化 AI 回复
             Map<String, Object> replyContext = new HashMap<>();
@@ -1605,6 +1365,9 @@ public class AstrBotController {
             // 直接返回 ObjectNode，让 Spring 自动转换为 JSON
             return ResponseEntity.ok(result);
 
+        } catch (com.qqai.exception.BizException biz) {
+            return ResponseEntity.status(biz.getCode()).body(Map.of(
+                    "status", "error", "message", biz.getMessage()));
         } catch (Exception e) {
             log.error("发送消息到 AstrBot 失败: {}", e.getMessage(), e);
             
