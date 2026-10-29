@@ -321,6 +321,20 @@ component:
       order: 30
       web-ui: http://localhost:9874
 
+# 多机器人（每个用户自己的 QQ 机器人）
+bot:
+  enabled: ${BOT_ENABLED:true}
+  seed-default: ${BOT_SEED_DEFAULT:true}
+  default-owner: ${BOT_DEFAULT_OWNER:}
+  default-qq: ${BOT_DEFAULT_QQ:2488130337}
+  default-name: ${BOT_DEFAULT_NAME:默认机器人}
+  default-napcat-port: ${BOT_DEFAULT_NAPCAT_PORT:6099}
+  default-onebot-port: ${BOT_DEFAULT_ONEBOT_PORT:6100}
+  default-workdir: ${BOT_DEFAULT_WORKDIR:../../napcat/NapCat.Shell}
+  port-range-start: ${BOT_PORT_RANGE_START:16100}
+  max-per-user: ${BOT_MAX_PER_USER:1}
+  workdir-root: ${BOT_WORKDIR_ROOT:bots}
+
 ---
 # Dev profile: 开发环境覆盖
 # 启用: java -jar app.jar --spring.profiles.active=dev

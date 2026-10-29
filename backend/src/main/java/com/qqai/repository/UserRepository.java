@@ -52,4 +52,7 @@ public interface UserRepository extends JpaRepository<User, Long>, JpaSpecificat
      * 用于保证系统里始终至少有一位能登录后台的管理员。
      */
     long countByRoleIgnoreCaseAndActiveTrue(String role);
+
+    /** 默认机器人归属：取最早创建的可用管理员。 */
+    java.util.Optional<com.qqai.entity.User> findFirstByRoleAndActiveTrueOrderByIdAsc(String role);
 }

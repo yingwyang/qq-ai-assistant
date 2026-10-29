@@ -92,3 +92,7 @@ logging:
   level:
     root: WARN
     com.qqai: INFO
+
+# 测试环境不种子默认机器人（避免每个测试上下文都建 bots 记录）
+bot:
+  seed-default: false
