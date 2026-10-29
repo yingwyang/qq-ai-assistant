@@ -71,6 +71,12 @@ public class GroupController {
     @Autowired
     private com.qqai.capability.im.ImGateway imGateway;
 
+    @Autowired
+    private com.qqai.service.BotImRouter botImRouter;
+
+    @Autowired
+    private com.qqai.repository.BotRepository botRepository;
+
     /** 手动推送日报的审计日志 */
     @Autowired
     private AuditLogService auditLogService;
@@ -346,8 +352,12 @@ public class GroupController {
     @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<ApiResponse<?>> pushGroupDigest(
             @PathVariable String groupId,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date,
+            @RequestParam(required = false, defaultValue = "1") Long botId) {
 
+        if (botId != 1L) {
+            requireBotAccess(botId);
+        }
         LocalDate targetDate = (date == null) ? LocalDate.now() : date;
         String username = securityHelper.getCurrentUsername();
 
@@ -373,7 +383,7 @@ public class GroupController {
         String text = groupDigestService.buildPushText(digest);
         String digestDate = digest.getDigestDate() == null ? targetDate.toString() : digest.getDigestDate().toString();
 
-        com.qqai.capability.im.ImSendResult sendResult = imGateway.sendGroupMessage(groupId, text);
+        com.qqai.capability.im.ImSendResult sendResult = botImRouter.sendGroupMessage(botId, groupId, text);
         if (sendResult == null || !sendResult.success()) {
             String detail = (sendResult == null || sendResult.errorMessage() == null) ? "未知原因" : sendResult.errorMessage();
             log.warn("推送群日报失败 groupId={}, date={}: {}", groupId, digestDate, detail);
@@ -423,11 +433,16 @@ public class GroupController {
     @PostMapping("/{groupId}/send")
     public ResponseEntity<ApiResponse<?>> sendGroupText(
             @PathVariable String groupId,
+            @RequestParam(required = false, defaultValue = "1") Long botId,
             @RequestBody(required = false) Map<String, Object> body) {
 
-        ResponseEntity<ApiResponse<?>> denied = checkGroupAccess(groupId);
-        if (denied != null) {
-            return denied;
+        if (botId == 1L) {
+            ResponseEntity<ApiResponse<?>> denied = checkGroupAccess(groupId);
+            if (denied != null) {
+                return denied;
+            }
+        } else {
+            requireBotAccess(botId);
         }
 
         String username = securityHelper.getCurrentUsername();
@@ -466,7 +481,7 @@ public class GroupController {
                     .body(ApiResponse.error(429, "发送过于频繁，请稍后再试（每分钟最多 10 条）"));
         }
 
-        com.qqai.capability.im.ImSendResult sendResult = imGateway.sendGroupSegments(groupId, segments);
+        com.qqai.capability.im.ImSendResult sendResult = botImRouter.sendGroupSegments(botId, groupId, segments);
         if (sendResult == null || !sendResult.success()) {
             String detail = (sendResult == null || sendResult.errorMessage() == null) ? "未知原因" : sendResult.errorMessage();
             log.warn("网页发送群消息失败 groupId={}: {}", groupId, detail);
@@ -671,6 +686,15 @@ public class GroupController {
      *
      * @return 校验通过返回 null；否则返回可直接回给前端的错误响应
      */
+    /** 非默认 bot：owner 或 ADMIN 才可操作；默认 bot 继续走 QQ 绑定 ACL。 */
+    private void requireBotAccess(Long botId) {
+        com.qqai.entity.Bot bot = botRepository.findById(botId)
+                .orElseThrow(() -> new BizException(404, "机器人不存在: " + botId));
+        if (!securityHelper.isAdmin() && !bot.getOwnerUserId().equals(securityHelper.getCurrentUserId())) {
+            throw new BizException(403, "无权操作该机器人");
+        }
+    }
+
     private ResponseEntity<ApiResponse<?>> checkGroupAccess(String groupId) {
         Long userId = securityHelper.getCurrentUserId();
         if (userId == null) {

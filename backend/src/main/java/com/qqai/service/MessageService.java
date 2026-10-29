@@ -154,6 +154,33 @@ public class MessageService {
         return messageRepository.findRecentByBotIdAndGroupId(botId, groupId, pageOf(limit));
     }
 
+    public List<Message> getMessagesByBotIdPaged(Long botId, String groupId,
+                                                 org.springframework.data.domain.Pageable pageable) {
+        return messageRepository.findActiveByBotIdAndGroupId(botId, groupId, pageable);
+    }
+
+    public long countMessagesByBotId(Long botId, String groupId) {
+        return messageRepository.countActiveByBotIdAndGroupId(botId, groupId);
+    }
+
+    public List<Message> getMessagesSinceIdByBotId(Long botId, String groupId, Long afterId) {
+        return messageRepository.findByBotIdAndGroupIdAndIdGreaterThan(botId, groupId, afterId);
+    }
+
+    /** 非默认 bot 的最近群列表（从消息聚合，未读按 0 处理）。 */
+    public List<java.util.Map<String, Object>> getRecentGroupsByBotId(Long botId, int limit) {
+        List<java.util.Map<String, Object>> result = new java.util.ArrayList<>();
+        for (Object[] row : messageRepository.recentGroupsByBotId(botId, pageOf(limit))) {
+            java.util.Map<String, Object> item = new java.util.LinkedHashMap<>();
+            item.put("groupId", row[0]);
+            item.put("groupName", row[1]);
+            item.put("lastMessageTime", row[2]);
+            item.put("unreadCount", 0);
+            result.add(item);
+        }
+        return result;
+    }
+
     /** 只取最近 limit 条（不排除已归档/已删除，口径与 getMessagesByGroupIdAndUser 一致） */
     public List<Message> getRecentMessages(String groupId, String selfQq, int limit) {
         return messageRepository.findRecentByGroupIdAndSelfQq(groupId, selfQq, pageOf(limit));

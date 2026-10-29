@@ -28,6 +28,27 @@ public interface MessageRepository extends JpaRepository<Message, Long>, JpaSpec
     List<Message> findRecentByBotIdAndGroupId(@Param("botId") Long botId,
                                               @Param("groupId") String groupId,
                                               org.springframework.data.domain.Pageable pageable);
+
+    @Query("SELECT m FROM Message m WHERE m.botId = :botId AND m.groupId = :groupId "
+            + "AND m.archived = false AND m.deleted = false ORDER BY m.serverRecvMs DESC, m.id DESC")
+    List<Message> findActiveByBotIdAndGroupId(@Param("botId") Long botId,
+                                              @Param("groupId") String groupId,
+                                              org.springframework.data.domain.Pageable pageable);
+
+    @Query("SELECT COUNT(m) FROM Message m WHERE m.botId = :botId AND m.groupId = :groupId "
+            + "AND m.archived = false AND m.deleted = false")
+    long countActiveByBotIdAndGroupId(@Param("botId") Long botId, @Param("groupId") String groupId);
+
+    @Query("SELECT m FROM Message m WHERE m.botId = :botId AND m.groupId = :groupId AND m.id > :afterId "
+            + "ORDER BY m.id ASC")
+    List<Message> findByBotIdAndGroupIdAndIdGreaterThan(@Param("botId") Long botId,
+                                                        @Param("groupId") String groupId,
+                                                        @Param("afterId") Long afterId);
+
+    @Query("SELECT m.groupId, MAX(m.groupName), MAX(m.serverRecvMs) FROM Message m WHERE m.botId = :botId "
+            + "GROUP BY m.groupId ORDER BY MAX(m.serverRecvMs) DESC")
+    List<Object[]> recentGroupsByBotId(@Param("botId") Long botId,
+                                       org.springframework.data.domain.Pageable pageable);
     
     /**
      * 根据群聊ID查询未归档&未被用户删除的消息（按服务端接收时间倒序）
