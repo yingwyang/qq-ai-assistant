@@ -435,6 +435,7 @@ export const systemApi = {
   // 统一组件 API（组件中心数据驱动）
   getComponents: () => systemRequest('/system/components'),
   startComponent: (id) => systemRequest('/system/components/' + encodeURIComponent(id) + '/start', { method: 'POST' }),
+  restartComponent: (id) => systemRequest('/system/components/' + encodeURIComponent(id) + '/restart', { method: 'POST' }),
   stopComponent: (id, body = {}) => systemRequest('/system/components/' + encodeURIComponent(id) + '/stop', {
     method: 'POST',
     body: JSON.stringify(body),

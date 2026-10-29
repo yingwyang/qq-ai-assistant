@@ -333,11 +333,15 @@ public class SystemController {
     }
 
     @GetMapping("/napcat/login-status")
-    public ResponseEntity<ApiResponse<Map<String, Boolean>>> checkNapCatLoginStatus() {
-        Map<String, Boolean> result = new HashMap<>();
+    public ResponseEntity<ApiResponse<Map<String, Object>>> checkNapCatLoginStatus() {
+        Map<String, Object> result = new HashMap<>();
         try {
-            boolean loggedIn = imGateway.checkLoginStatus();
-            result.put("loggedIn", loggedIn);
+            com.qqai.capability.im.ImLoginInfo info = imGateway.loginInfo();
+            result.put("loggedIn", info != null);
+            if (info != null) {
+                result.put("qq", String.valueOf(info.qq()));
+                result.put("nickname", info.nickname());
+            }
         } catch (Exception e) {
             result.put("loggedIn", false);
         }

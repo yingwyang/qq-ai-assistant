@@ -19,6 +19,8 @@ export function useComponentControl({ showSystemMsg } = {}) {
   const isStoppingAll = ref(false);
 
   const qrCode = ref('');
+  /** NapCat 登录态（扫码成功后 UI 要切到「已登录」，不能再显示二维码） */
+  const napCatLogin = ref({ checked: false, loggedIn: false, qq: '', nickname: '', error: '' });
   const napCatWebUiUrl = ref('');
   const autoLogin = ref(localStorage.getItem('napcat_auto_login') === 'true');
   const isCheckingLogin = ref(false);
@@ -90,6 +92,45 @@ export function useComponentControl({ showSystemMsg } = {}) {
     } finally {
       setPending(id, null);
       await getComponentStatus();
+    }
+  };
+
+  const refreshNapCatLoginStatus = async () => {
+    const running = componentStatus.value.napcat?.running;
+    if (!running) {
+      napCatLogin.value = { checked: true, loggedIn: false, qq: '', nickname: '', error: '' };
+      return napCatLogin.value;
+    }
+    try {
+      const res = await systemApi.checkNapCatLoginStatus();
+      napCatLogin.value = {
+        checked: true,
+        loggedIn: !!(res && res.loggedIn),
+        qq: (res && res.qq) || '',
+        nickname: (res && res.nickname) || '',
+        error: '',
+      };
+    } catch (error) {
+      logger.error('读取 NapCat 登录状态失败:', error);
+      napCatLogin.value = { checked: true, loggedIn: false, qq: '', nickname: '', error: error.message };
+    }
+    return napCatLogin.value;
+  };
+
+  /** 重启组件（NapCat 重启会断开 QQ 登录，调用方需确认） */
+  const restartComponent = async (id) => {
+    setPending(id, 'restarting');
+    componentErrors.value = { ...componentErrors.value, [id]: '' };
+    try {
+      await systemApi.restartComponent(id);
+      if (showSystemMsg) showSystemMsg('组件已重启: ' + id);
+    } catch (error) {
+      componentErrors.value = { ...componentErrors.value, [id]: error.message };
+      if (showSystemMsg) showSystemMsg('组件重启失败 ' + id + ': ' + error.message, 'error');
+    } finally {
+      setPending(id, null);
+      await getComponentStatus();
+      await refreshNapCatLoginStatus();
     }
   };
 
@@ -184,6 +225,7 @@ export function useComponentControl({ showSystemMsg } = {}) {
     isStartingAll,
     isStoppingAll,
     qrCode,
+    napCatLogin,
     napCatWebUiUrl,
     autoLogin,
     isCheckingLogin,
@@ -194,8 +236,10 @@ export function useComponentControl({ showSystemMsg } = {}) {
     isStartingGptSovits,
     isStoppingGptSovits,
     getComponentStatus,
+    refreshNapCatLoginStatus,
     startComponent,
     stopComponent,
+    restartComponent,
     startAllComponents,
     stopAllComponents,
     startAstrBot,

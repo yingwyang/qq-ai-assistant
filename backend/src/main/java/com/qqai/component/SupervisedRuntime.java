@@ -67,6 +67,17 @@ public class SupervisedRuntime implements ComponentRuntime {
                     exec("taskkill", "/T", "/F", "/PID", String.valueOf(pid));
                     log.warn("组件 {} 未持有进程，按端口 {} 结束 PID={}", d.getId(), port, pid);
                     killed = true;
+                    try {
+                        TimeUnit.MILLISECONDS.sleep(500);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                    }
+                    Long still = findPidByPort(port);
+                    if (still != null) {
+                        exec("powershell", "-NoProfile", "-Command",
+                                "Stop-Process -Id " + still + " -Force -ErrorAction SilentlyContinue");
+                        log.warn("组件 {} 按端口结束仍失败，已用 Stop-Process 重试 PID={}", d.getId(), still);
+                    }
                 }
             }
         }

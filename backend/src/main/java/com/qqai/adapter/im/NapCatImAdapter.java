@@ -2,6 +2,7 @@ package com.qqai.adapter.im;
 
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.qqai.capability.im.ImGateway;
+import com.qqai.capability.im.ImLoginInfo;
 import com.qqai.capability.im.ImSendResult;
 import com.qqai.capability.im.ImUploadResult;
 import com.qqai.service.NapCatService;
@@ -24,6 +25,15 @@ public class NapCatImAdapter implements ImGateway {
     @Override
     public boolean checkLoginStatus() throws Exception {
         return napCatService.checkLoginStatus();
+    }
+
+    @Override
+    public ImLoginInfo loginInfo() throws Exception {
+        com.fasterxml.jackson.databind.JsonNode data = napCatService.getLoginInfo();
+        if (data == null) return null;
+        long qq = data.path("user_id").asLong(0);
+        if (qq <= 0) return null;
+        return new ImLoginInfo(qq, data.path("nickname").asText(""));
     }
 
     @Override

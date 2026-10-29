@@ -57,6 +57,7 @@ class ComponentControllerSecurityTest {
         view.running = true;
         given(orchestrator.list()).willReturn(List.of(view));
         given(orchestrator.start("astrbot", false)).willReturn(view);
+        given(orchestrator.restart("astrbot")).willReturn(view);
     }
 
     @Test
@@ -82,6 +83,15 @@ class ComponentControllerSecurityTest {
         mockMvc.perform(post("/api/system/components/astrbot/stop").cookie(userCookie))
                 .andExpect(status().isForbidden());
         mockMvc.perform(post("/api/system/components/astrbot/stop").cookie(adminCookie))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    @DisplayName("POST restart：USER 403，ADMIN 200")
+    void restartRequiresAdmin() throws Exception {
+        mockMvc.perform(post("/api/system/components/astrbot/restart").cookie(userCookie))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(post("/api/system/components/astrbot/restart").cookie(adminCookie))
                 .andExpect(status().isOk());
     }
 

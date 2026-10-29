@@ -1,5 +1,7 @@
 package com.qqai.adapter.im;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.qqai.capability.im.ImLoginInfo;
 import com.qqai.capability.im.ImSendResult;
 import com.qqai.capability.im.ImUploadResult;
 import com.qqai.service.NapCatService;
@@ -47,6 +49,21 @@ class NapCatImAdapterTest {
 
         assertTrue(result.success());
         assertEquals("u1", result.messageId());
+    }
+
+    @Test
+    @DisplayName("登录信息：user_id/nickname 转成 ImLoginInfo")
+    void loginInfoConverts() throws Exception {
+        var data = new ObjectMapper().createObjectNode();
+        data.put("user_id", 2488130337L);
+        data.put("nickname", "陰陽");
+        given(napCatService.getLoginInfo()).willReturn(data);
+
+        ImLoginInfo info = adapter.loginInfo();
+
+        assertNotNull(info);
+        assertEquals(2488130337L, info.qq());
+        assertEquals("陰陽", info.nickname());
     }
 
     @Test

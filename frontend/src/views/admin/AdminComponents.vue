@@ -31,6 +31,9 @@
           <button class="btn-stop" :disabled="item.stopping || !item.running" @click="item.stop()">
             {{ item.stopping ? '停止中...' : '停止' }}
           </button>
+          <button class="btn-restart" :disabled="item.restarting || item.starting || item.stopping" @click="item.restart()">
+            {{ item.restarting ? '重启中...' : '重启' }}
+          </button>
         </div>
         <p v-if="componentErrors[item.key]" class="component-error">
           最近一次操作失败：{{ componentErrors[item.key] }}
@@ -133,8 +136,10 @@ export default {
       statusText: statusText(c),
       starting: ctrl.pending.value[c.id] === 'starting',
       stopping: ctrl.pending.value[c.id] === 'stopping',
+      restarting: ctrl.pending.value[c.id] === 'restarting',
       start: () => ctrl.startComponent(c.id),
       stop: () => ctrl.stopComponent(c.id),
+      restart: () => ctrl.restartComponent(c.id),
       webui: c.webUi || '#',
       onOpen: c.legacyKey === 'napcat' ? ctrl.openNapCatWebUI : null,
     })));
@@ -229,6 +234,8 @@ export default {
 .btn-start:not(:disabled):hover { background: #2980b9; }
 .btn-stop:not(:disabled) { background: #e74c3c; color: #fff; }
 .btn-stop:not(:disabled):hover { background: #c0392b; }
+.btn-restart:not(:disabled) { background: #e67e22; color: #fff; }
+.btn-restart:not(:disabled):hover { background: #ca6f1e; }
 button:disabled { background: #ddd; color: var(--text-muted, #999); cursor: not-allowed; }
 .theme-dark button:disabled { background: rgba(255, 255, 255, 0.12); color: var(--text-muted, #8c8c8c); }
 .component-error { margin: 0 0 10px 0; font-size: 12px; color: #e74c3c; line-height: 1.5; word-break: break-all; }

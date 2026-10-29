@@ -13,6 +13,9 @@ public interface ImGateway {
 
     boolean checkLoginStatus() throws Exception;
 
+    /** 当前登录 QQ；未登录返回 null。 */
+    ImLoginInfo loginInfo() throws Exception;
+
     String getLoginQrCode() throws Exception;
 
     String getQrCodePath() throws Exception;

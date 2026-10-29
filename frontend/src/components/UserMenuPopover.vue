@@ -68,7 +68,24 @@
           </div>
           <div v-show="activeSubmenu === 'qq-login'" class="submenu qq-login-submenu">
             <div class="qq-login-content">
-              <div v-if="componentStatus.napcat?.running" class="qq-qr-section">
+              <div v-if="!componentStatus.napcat?.running" class="qq-qr-empty">
+                <Icon name="alert-circle" :size="32" />
+                <div>NapCat 未启动</div>
+                <div class="qq-qr-hint">请先启动 NapCat 服务</div>
+                <button class="qq-mini-btn" type="button" :disabled="pending.napcat === 'starting'" @click.stop="startNapCatFromPanel">
+                  {{ pending.napcat === 'starting' ? '启动中...' : '启动 NapCat' }}
+                </button>
+              </div>
+              <div v-else-if="napCatLogin.loggedIn" class="qq-login-ok">
+                <div class="qq-login-ok-icon"><Icon name="check-circle" :size="34" /></div>
+                <div class="qq-login-ok-title">已登录 {{ napCatLogin.nickname || 'QQ' }}</div>
+                <div v-if="napCatLogin.qq" class="qq-login-ok-qq">QQ {{ napCatLogin.qq }}</div>
+                <div class="qq-login-ok-hint">当前 QQ 已在线。需要换号或登录异常时，重启 NapCat 后重新扫码。</div>
+                <button class="qq-mini-btn warn" type="button" :disabled="pending.napcat === 'restarting'" @click.stop="restartNapCat">
+                  {{ pending.napcat === 'restarting' ? '重启中...' : '重启 NapCat' }}
+                </button>
+              </div>
+              <div v-else class="qq-qr-section">
                 <div class="qq-qr-header">
                   <span class="qq-qr-title">NapCat 扫码登录</span>
                   <span class="qq-qr-refresh" @click.stop="refreshQrCode" title="刷新二维码">
@@ -82,13 +99,12 @@
                     <span>加载中...</span>
                   </div>
                 </div>
-                <div class="qq-qr-tip">请使用手机 QQ 扫描二维码登录</div>
+                <div class="qq-qr-tip">{{ napCatLogin.checked ? '等待手机 QQ 扫码确认…' : '正在检查登录状态…' }}</div>
+                <div class="qq-qr-secondary">
+                  <span class="qq-mini-link" @click.stop="restartNapCat">登录一直不成功？重启 NapCat</span>
+                </div>
               </div>
-              <div v-else class="qq-qr-empty">
-                <Icon name="alert-circle" :size="32" />
-                <div>NapCat 未启动</div>
-                <div class="qq-qr-hint">请先启动 NapCat 服务</div>
-              </div>
+              <p v-if="componentErrors.napcat" class="qq-login-error">{{ componentErrors.napcat }}</p>
             </div>
           </div>
 
@@ -122,6 +138,7 @@ import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useRouter } from 'vue-router';
 import Icon from './Icon.vue';
 import { useComponentControl } from '../composables/useComponentControl';
+import { showConfirm } from './ConfirmDialog.vue';
 import { useUserCreditsStore } from '../composables/useUserCreditsStore';
 import { useTheme } from '../composables/useTheme';
 
@@ -184,11 +201,57 @@ export default {
     const {
       componentStatus,
       qrCode,
+      napCatLogin,
+      componentErrors,
+      pending,
       refreshQrCode,
+      refreshNapCatLoginStatus,
+      restartComponent,
+      startNapCat,
       getComponentStatus,
       startPolling,
       stopPolling,
     } = useComponentControl();
+
+    let napCatPollTimer = null;
+    const stopNapCatStatusPolling = () => {
+      if (napCatPollTimer) {
+        clearInterval(napCatPollTimer);
+        napCatPollTimer = null;
+      }
+    };
+    const startNapCatStatusPolling = () => {
+      stopNapCatStatusPolling();
+      napCatPollTimer = setInterval(async () => {
+        const state = await refreshNapCatLoginStatus();
+        if (state.loggedIn) stopNapCatStatusPolling();
+      }, 5000);
+    };
+
+    const restartNapCat = async () => {
+      const confirmed = await showConfirm({
+        title: '重启 NapCat',
+        message: '重启会结束当前 QQ 进程并断开登录，需要重新扫码。确定继续吗？',
+        type: 'warning',
+        confirmText: '重启',
+      });
+      if (!confirmed) return;
+      await restartComponent('napcat');
+      await refreshNapCatLoginStatus();
+      if (!napCatLogin.value.loggedIn) {
+        refreshQrCode();
+        startNapCatStatusPolling();
+      }
+    };
+
+    const startNapCatFromPanel = async () => {
+      await startNapCat();
+      await refreshNapCatLoginStatus();
+      if (!napCatLogin.value.loggedIn) {
+        refreshQrCode();
+        startNapCatStatusPolling();
+      }
+    };
 
     const positionPopover = () => {
       const trigger = document.querySelector('.footer-user-info');
@@ -219,8 +282,16 @@ export default {
       if (name === 'qq-login' && activeSubmenu.value !== 'qq-login') {
         await getComponentStatus();
         if (componentStatus.value.napcat?.running) {
-          refreshQrCode();
+          const state = await refreshNapCatLoginStatus();
+          if (!state.loggedIn) {
+            refreshQrCode();
+            startNapCatStatusPolling();
+          }
+        } else {
+          stopNapCatStatusPolling();
         }
+      } else if (name === 'qq-login') {
+        stopNapCatStatusPolling();
       }
       activeSubmenu.value = activeSubmenu.value === name ? '' : name;
       // 展开/收起后重新定位
@@ -249,6 +320,7 @@ export default {
 
     onBeforeUnmount(() => {
       document.removeEventListener('keydown', handleKeydown);
+      stopNapCatStatusPolling();
       stopPolling();
     });
 
@@ -259,6 +331,7 @@ export default {
         getComponentStatus();
       } else {
         activeSubmenu.value = '';
+        stopNapCatStatusPolling();
       }
     });
 
@@ -267,7 +340,12 @@ export default {
       popoverEl,
       componentStatus,
       qrCode,
+      napCatLogin,
+      componentErrors,
+      pending,
       toggleSubmenu,
+      restartNapCat,
+      startNapCatFromPanel,
       handleOverlayClick,
       handleAvatarError,
       refreshQrCode,
@@ -573,6 +651,44 @@ export default {
   color: var(--text-muted, #888);
   margin-top: 8px;
 }
+.qq-qr-secondary {
+  text-align: center;
+  margin-top: 8px;
+}
+.qq-mini-link {
+  font-size: 11px;
+  color: var(--accent-color, #3498db);
+  cursor: pointer;
+}
+.qq-mini-link:hover { text-decoration: underline; }
+.qq-mini-btn {
+  margin-top: 10px;
+  padding: 6px 14px;
+  border: 1px solid var(--accent-color, #3498db);
+  background: transparent;
+  color: var(--accent-color, #3498db);
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.qq-mini-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+.qq-mini-btn.warn { border-color: #e67e22; color: #e67e22; }
+.qq-login-ok {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 8px;
+  padding: 18px 14px;
+  background: var(--card-bg, #fff);
+  border: 1px solid var(--border-color, #e0e0e0);
+  border-radius: 8px;
+}
+.qq-login-ok-icon { color: #27ae60; }
+.qq-login-ok-title { font-size: 14px; font-weight: 600; color: var(--text-primary, #333); }
+.qq-login-ok-qq { font-size: 12px; color: var(--accent-color, #3498db); font-family: ui-monospace, monospace; }
+.qq-login-ok-hint { font-size: 11px; line-height: 1.6; color: var(--text-muted, #888); }
+.qq-login-error { margin: 6px 2px 0; font-size: 11px; color: #e74c3c; word-break: break-all; }
 .qq-qr-empty {
   display: flex;
   flex-direction: column;

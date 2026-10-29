@@ -53,6 +53,20 @@ public class ComponentController {
         }
     }
 
+    @PostMapping("/{id}/restart")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> restart(@PathVariable String id) {
+        String operator = currentUsername();
+        try {
+            ComponentModel.ComponentView view = orchestrator.restart(id);
+            auditLogService.log(operator, "COMPONENT_RESTART", id, "SUCCESS",
+                    "state=" + view.state + ", pid=" + view.pid);
+            return ResponseEntity.ok(ApiResponse.success(single(view)));
+        } catch (BizException e) {
+            auditLogService.log(operator, "COMPONENT_RESTART", id, "FAILURE", e.getMessage());
+            throw e;
+        }
+    }
+
     @PostMapping("/{id}/stop")
     public ResponseEntity<ApiResponse<Map<String, Object>>> stop(
             @PathVariable String id,

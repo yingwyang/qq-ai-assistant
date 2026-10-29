@@ -139,7 +139,53 @@ public class NapCatService {
         return "local:" + getQrCodePath();
     }
 
-    public boolean checkLoginStatus() throws Exception {
+    /**
+     * 权威登录判定：OneBot /get_login_info（QQ 在线才有 user_id）。
+     * 旧实现依赖配置文件/二维码时间/未公开 WebUI 端点，已登录时可能误报 false；
+     * 旧逻辑保留为 fallback，仅在 OneBot 接口不可用时启用。
+     */
+    public boolean checkLoginStatus() {
+        if (getLoginInfo() != null) {
+            return true;
+        }
+        try {
+            return checkLoginStatusFallback();
+        } catch (Exception e) {
+            log.debug("NapCat 登录态回退判定失败: {}", e.getMessage());
+            return false;
+        }
+    }
+
+    /** 当前登录 QQ 的 OneBot data 节点；未登录/不可用返回 null。 */
+    public com.fasterxml.jackson.databind.JsonNode getLoginInfo() {
+        try {
+            com.fasterxml.jackson.databind.JsonNode resp = postOneBotEmpty("/get_login_info");
+            if (resp != null && "ok".equals(resp.path("status").asText())
+                    && resp.path("data").path("user_id").asLong(0) > 0) {
+                return resp.get("data");
+            }
+        } catch (Exception e) {
+            log.debug("查询 NapCat 登录信息失败: {}", e.getMessage());
+        }
+        return null;
+    }
+
+    /** 向 OneBot HTTP API 发空对象 POST（带 Bearer token），返回解析后的 JSON。 */
+    private com.fasterxml.jackson.databind.JsonNode postOneBotEmpty(String path) throws Exception {
+        String baseUrl = onebotApiUrl != null && !onebotApiUrl.isBlank() ? onebotApiUrl : napcatApiUrl;
+        HttpPost post = new HttpPost(baseUrl + path);
+        post.setHeader("Content-Type", "application/json");
+        post.setHeader("Authorization", "Bearer " + napcatToken);
+        post.setEntity(new StringEntity("{}", java.nio.charset.StandardCharsets.UTF_8));
+        try (CloseableHttpResponse response = httpClient.execute(post)) {
+            String body = new String(response.getEntity().getContent().readAllBytes(),
+                    java.nio.charset.StandardCharsets.UTF_8);
+            if (body.isBlank()) return null;
+            return objectMapper.readTree(body);
+        }
+    }
+
+    private boolean checkLoginStatusFallback() throws Exception {
         log.info("Checking NapCat login status...");
         
         // 方法1: 首先检查 NapCat API 是否可访问（优先检查实际登录状态）

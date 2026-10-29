@@ -197,6 +197,12 @@ public class ComponentOrchestrator {
             while (System.currentTimeMillis() < deadline && runtime(d).probe(d).reachable()) {
                 sleep(300);
             }
+            if (runtime(d).probe(d).reachable()) {
+                rec.state = ComponentModel.ComponentState.FAILED.name();
+                rec.lastError = "停止超时：端口仍可访问（进程可能未被结束）";
+                store.put(id, rec);
+                throw new BizException(502, rec.lastError);
+            }
             rec.state = ComponentModel.ComponentState.STOPPED.name();
             rec.pid = null;
             rec.pidStartInstant = null;
@@ -212,6 +218,10 @@ public class ComponentOrchestrator {
 
     public ComponentModel.ComponentView restart(String id) {
         stop(id, true);
+        ComponentModel.ComponentDescriptor d = registry.get(id);
+        if (runtime(d).probe(d).reachable()) {
+            throw new BizException(409, "组件停止未完成，无法重启: " + id);
+        }
         return start(id, true);
     }
 
