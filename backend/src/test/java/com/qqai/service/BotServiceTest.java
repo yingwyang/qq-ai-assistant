@@ -65,7 +65,47 @@ class BotServiceTest {
         assertEquals("PROVISIONING", bot.getStatus());
         assertTrue(Path.of(bot.getWorkdir()).startsWith(tempDir));
         verify(auditLogService).log("alice", "BOT_CREATE", "9", "SUCCESS",
-                "name=我的机器人 ports=16100/16101");
+                "name=我的机器人 runtime=LOCAL ports=16100/16101");
+    }
+
+    @Test
+    @DisplayName("远程机器人：必须有 OneBot URL，LOCAL 不需要")
+    void remoteRuntimeRequiresUrl() {
+        assertThrows(BizException.class, () -> service.create(2L, "远程", "REMOTE", null, null, "alice"));
+        Bot bot = service.create(2L, "远程", "REMOTE", "http://10.0.0.5:6100", "http://10.0.0.5:6099", "alice");
+        assertEquals("REMOTE", bot.getRuntimeType());
+        assertEquals("http://10.0.0.5:6100", bot.getOnebotUrl());
+    }
+
+    @Test
+    @DisplayName("心跳：正确 token → RUNNING + lastHeartbeat；错误 token → 403")
+    void heartbeatValidatesToken() {
+        Bot bot = new Bot();
+        bot.setId(7L);
+        bot.setOwnerUserId(2L);
+        bot.setAgentToken("agent-token-123");
+        bot.setStatus("STOPPED");
+        given(botRepository.findById(7L)).willReturn(Optional.of(bot));
+
+        assertThrows(BizException.class, () -> service.heartbeat(7L, "wrong"));
+        Bot saved = service.heartbeat(7L, "agent-token-123");
+        assertEquals("RUNNING", saved.getStatus());
+        assertNotNull(saved.getLastHeartbeatAt());
+    }
+
+    @Test
+    @DisplayName("轮换 agent token：旧 token 失效")
+    void rotatesAgentToken() {
+        Bot bot = new Bot();
+        bot.setId(7L);
+        bot.setOwnerUserId(2L);
+        bot.setAgentToken("old-token");
+        given(botRepository.findById(7L)).willReturn(Optional.of(bot));
+
+        String rotated = service.rotateAgentToken(7L, 2L, false, "alice");
+
+        assertNotEquals("old-token", rotated);
+        assertEquals(rotated, bot.getAgentToken());
     }
 
     @Test

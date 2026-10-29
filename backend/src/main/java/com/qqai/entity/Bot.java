@@ -45,6 +45,24 @@ public class Bot {
     @Column(name = "onebot_token", nullable = false, length = 64)
     private String onebotToken;
 
+    /** LOCAL = 本机进程；REMOTE = 独立机器/容器，经 OneBot URL 接入。 */
+    @Column(name = "runtime_type", nullable = false, length = 16)
+    private String runtimeType = "LOCAL";
+
+    @Column(name = "onebot_url", length = 255)
+    private String onebotUrl;
+
+    @Column(name = "webui_url", length = 255)
+    private String webuiUrl;
+
+    /** 远程 agent 心跳凭证（只给 owner 轮换后展示一次）。 */
+    @JsonIgnore
+    @Column(name = "agent_token", length = 64)
+    private String agentToken;
+
+    @Column(name = "last_heartbeat_at")
+    private LocalDateTime lastHeartbeatAt;
+
     @Column(nullable = false, length = 255)
     private String workdir;
 
@@ -91,4 +109,14 @@ public class Bot {
     public LocalDateTime getUpdatedAt() { return updatedAt; }
     public LocalDateTime getStartedAt() { return startedAt; }
     public void setStartedAt(LocalDateTime startedAt) { this.startedAt = startedAt; }
+    public String getRuntimeType() { return runtimeType; }
+    public void setRuntimeType(String runtimeType) { this.runtimeType = runtimeType; }
+    public String getOnebotUrl() { return onebotUrl; }
+    public void setOnebotUrl(String onebotUrl) { this.onebotUrl = onebotUrl; }
+    public String getWebuiUrl() { return webuiUrl; }
+    public void setWebuiUrl(String webuiUrl) { this.webuiUrl = webuiUrl; }
+    public String getAgentToken() { return agentToken; }
+    public void setAgentToken(String agentToken) { this.agentToken = agentToken; }
+    public LocalDateTime getLastHeartbeatAt() { return lastHeartbeatAt; }
+    public void setLastHeartbeatAt(LocalDateTime lastHeartbeatAt) { this.lastHeartbeatAt = lastHeartbeatAt; }
 }
