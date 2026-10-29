@@ -166,12 +166,16 @@ public class BotService {
 
     @Transactional
     public Bot updateRuntime(Long id, Long userId, boolean admin, String runtimeType,
-                             String onebotUrl, String webuiUrl, String operator) {
+                             String onebotUrl, String webuiUrl, String agentUrl, String operator) {
         Bot bot = getOwned(id, userId, admin);
         String rt = normalizeRuntime(runtimeType, onebotUrl, webuiUrl);
+        if ("REMOTE".equals(rt) && agentUrl != null && !agentUrl.isBlank()) {
+            requireHttpUrl(agentUrl, "Agent URL 必须是 http(s) 地址");
+        }
         bot.setRuntimeType(rt);
         bot.setOnebotUrl("REMOTE".equals(rt) ? blankToNull(onebotUrl) : null);
         bot.setWebuiUrl("REMOTE".equals(rt) ? blankToNull(webuiUrl) : null);
+        bot.setAgentUrl("REMOTE".equals(rt) ? blankToNull(agentUrl) : null);
         bot.setLastHeartbeatAt(null);
         if ("REMOTE".equals(rt)) {
             bot.setStatus("STOPPED");
@@ -182,9 +186,41 @@ public class BotService {
         return saved;
     }
 
+    /** 远程 agent 注册：上报自己的 OneBot/WebUI/Agent 地址，并作为一次心跳。 */
+    @Transactional
+    public Bot registerAgent(Long id, String token, String onebotUrl, String webuiUrl, String agentUrl) {
+        Bot bot = authenticateAgent(id, token);
+        requireHttpUrl(onebotUrl, "OneBot URL 必须是 http(s) 地址");
+        if (webuiUrl != null && !webuiUrl.isBlank()) {
+            requireHttpUrl(webuiUrl, "WebUI URL 必须是 http(s) 地址");
+        }
+        if (agentUrl != null && !agentUrl.isBlank()) {
+            requireHttpUrl(agentUrl, "Agent URL 必须是 http(s) 地址");
+        }
+        bot.setRuntimeType("REMOTE");
+        bot.setOnebotUrl(onebotUrl.trim());
+        bot.setWebuiUrl(blankToNull(webuiUrl));
+        bot.setAgentUrl(blankToNull(agentUrl));
+        bot.setLastHeartbeatAt(LocalDateTime.now());
+        bot.setStatus("RUNNING");
+        bot.setLastError(null);
+        Bot saved = botRepository.save(bot);
+        auditLogService.log("AGENT", "BOT_AGENT_REGISTER", String.valueOf(id), "SUCCESS",
+                "onebot=" + onebotUrl + " agent=" + bot.getAgentUrl());
+        return saved;
+    }
+
     /** 远程 agent 心跳：用每 bot 独立 token 认证，不依赖登录态。 */
     @Transactional
     public Bot heartbeat(Long id, String token) {
+        Bot bot = authenticateAgent(id, token);
+        bot.setLastHeartbeatAt(LocalDateTime.now());
+        bot.setStatus("RUNNING");
+        bot.setLastError(null);
+        return botRepository.save(bot);
+    }
+
+    private Bot authenticateAgent(Long id, String token) {
         Bot bot = botRepository.findById(id)
                 .orElseThrow(() -> new BizException(404, "机器人不存在: " + id));
         if (token == null || bot.getAgentToken() == null
@@ -192,10 +228,7 @@ public class BotService {
                 bot.getAgentToken().getBytes(StandardCharsets.UTF_8))) {
             throw new BizException(403, "agent token 无效");
         }
-        bot.setLastHeartbeatAt(LocalDateTime.now());
-        bot.setStatus("RUNNING");
-        bot.setLastError(null);
-        return botRepository.save(bot);
+        return bot;
     }
 
     @Transactional

@@ -55,6 +55,10 @@ public class Bot {
     @Column(name = "webui_url", length = 255)
     private String webuiUrl;
 
+    /** 远程 agent 的 HTTP 基址（提供 /qrcode、/status）。 */
+    @Column(name = "agent_url", length = 255)
+    private String agentUrl;
+
     /** 远程 agent 心跳凭证（只给 owner 轮换后展示一次）。 */
     @JsonIgnore
     @Column(name = "agent_token", length = 64)
@@ -115,6 +119,8 @@ public class Bot {
     public void setOnebotUrl(String onebotUrl) { this.onebotUrl = onebotUrl; }
     public String getWebuiUrl() { return webuiUrl; }
     public void setWebuiUrl(String webuiUrl) { this.webuiUrl = webuiUrl; }
+    public String getAgentUrl() { return agentUrl; }
+    public void setAgentUrl(String agentUrl) { this.agentUrl = agentUrl; }
     public String getAgentToken() { return agentToken; }
     public void setAgentToken(String agentToken) { this.agentToken = agentToken; }
     public LocalDateTime getLastHeartbeatAt() { return lastHeartbeatAt; }

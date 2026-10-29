@@ -78,6 +78,27 @@ class BotServiceTest {
     }
 
     @Test
+    @DisplayName("agent 注册：校验 token/URL，写回远程地址与心跳")
+    void registersAgent() {
+        Bot bot = new Bot();
+        bot.setId(7L);
+        bot.setOwnerUserId(2L);
+        bot.setAgentToken("agent-token-123");
+        given(botRepository.findById(7L)).willReturn(Optional.of(bot));
+
+        assertThrows(BizException.class, () -> service.registerAgent(7L, "bad",
+                "http://10.0.0.5:6100", null, null));
+        Bot saved = service.registerAgent(7L, "agent-token-123",
+                "http://10.0.0.5:6100", "http://10.0.0.5:6099", "http://10.0.0.5:3100");
+
+        assertEquals("REMOTE", saved.getRuntimeType());
+        assertEquals("http://10.0.0.5:6100", saved.getOnebotUrl());
+        assertEquals("http://10.0.0.5:3100", saved.getAgentUrl());
+        assertEquals("RUNNING", saved.getStatus());
+        assertNotNull(saved.getLastHeartbeatAt());
+    }
+
+    @Test
     @DisplayName("心跳：正确 token → RUNNING + lastHeartbeat；错误 token → 403")
     void heartbeatValidatesToken() {
         Bot bot = new Bot();

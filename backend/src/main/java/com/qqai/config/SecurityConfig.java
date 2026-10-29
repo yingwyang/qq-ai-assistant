@@ -141,6 +141,7 @@ public class SecurityConfig implements WebSocketConfigurer {
                 .requestMatchers("/api/system/health").permitAll()
                 // 远程 bot agent 心跳：无登录态，控制器校验每 bot 的 agent token
                 .requestMatchers(org.springframework.http.HttpMethod.POST, "/api/bots/*/heartbeat").permitAll()
+                .requestMatchers(org.springframework.http.HttpMethod.POST, "/api/bots/*/agent/register").permitAll()
                 // NapCat 上行入口(token 在控制器内校验)
                 .requestMatchers("/", "/webhook", "/api/napcat", "/api/napcat/**").permitAll()
                 // WebSocket 握手(鉴权在拦截器中)

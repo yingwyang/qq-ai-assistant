@@ -4,6 +4,11 @@ import com.qqai.common.SecurityHelper;
 import com.qqai.dto.BotView;
 import com.qqai.entity.Bot;
 import com.qqai.dto.common.ApiResponse;
+import com.qqai.exception.BizException;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import com.qqai.capability.im.ImGateway;
+import com.qqai.service.BotAgentClient;
 import com.qqai.service.BotService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
@@ -19,10 +24,15 @@ import java.util.Map;
 public class BotController {
 
     private final BotService botService;
+    private final BotAgentClient agentClient;
+    private final ImGateway imGateway;
     private final SecurityHelper securityHelper;
 
-    public BotController(BotService botService, SecurityHelper securityHelper) {
+    public BotController(BotService botService, BotAgentClient agentClient,
+                         ImGateway imGateway, SecurityHelper securityHelper) {
         this.botService = botService;
+        this.agentClient = agentClient;
+        this.imGateway = imGateway;
         this.securityHelper = securityHelper;
     }
 
@@ -68,7 +78,7 @@ public class BotController {
                                               @Valid @RequestBody RuntimeRequest request) {
         Long userId = securityHelper.requireCurrentUserId();
         Bot bot = botService.updateRuntime(id, userId, securityHelper.isAdmin(), request.runtimeType(),
-                request.onebotUrl(), request.webuiUrl(), securityHelper.getCurrentUsername());
+                request.onebotUrl(), request.webuiUrl(), request.agentUrl(), securityHelper.getCurrentUsername());
         return ApiResponse.success(BotView.of(bot));
     }
 
@@ -81,6 +91,59 @@ public class BotController {
                 "status", "ok",
                 "botId", bot.getId(),
                 "receivedAt", String.valueOf(bot.getLastHeartbeatAt())));
+    }
+
+    /** 远程 agent 注册/更新自身地址（X-Agent-Token，免 JWT）。 */
+    @PostMapping("/{id}/agent/register")
+    public ApiResponse<BotView> registerAgent(@PathVariable Long id,
+                                              @RequestHeader(value = "X-Agent-Token", required = false) String token,
+                                              @RequestBody AgentRegisterRequest request) {
+        Bot bot = botService.registerAgent(id, token, request.onebotUrl(), request.webuiUrl(),
+                request.agentUrl());
+        return ApiResponse.success(BotView.of(bot));
+    }
+
+    /** 二维码：默认本机 bot 读 NapCat 缓存；远程 bot 由 agent 提供。 */
+    @GetMapping("/{id}/qrcode-image")
+    public ResponseEntity<byte[]> qrcodeImage(@PathVariable Long id) throws Exception {
+        Long userId = securityHelper.requireCurrentUserId();
+        Bot bot = botService.getOwned(id, userId, securityHelper.isAdmin());
+        if ("REMOTE".equals(bot.getRuntimeType())) {
+            return ResponseEntity.ok()
+                    .contentType(MediaType.IMAGE_PNG)
+                    .body(agentClient.fetchQrCode(bot));
+        }
+        if (bot.getId() == null || bot.getId() != 1L) {
+            throw new BizException(409, "本机多实例尚未支持，请使用 REMOTE agent");
+        }
+        java.nio.file.Path path = java.nio.file.Paths.get(imGateway.getQrCodePath());
+        if (!java.nio.file.Files.exists(path)) {
+            return ResponseEntity.notFound().build();
+        }
+        return ResponseEntity.ok()
+                .contentType(MediaType.IMAGE_PNG)
+                .body(java.nio.file.Files.readAllBytes(path));
+    }
+
+    /** 登录态：默认本机 bot 走 OneBot；远程 bot 由 agent /status 返回。 */
+    @GetMapping("/{id}/login-status")
+    public ApiResponse<Object> loginStatus(@PathVariable Long id) throws Exception {
+        Long userId = securityHelper.requireCurrentUserId();
+        Bot bot = botService.getOwned(id, userId, securityHelper.isAdmin());
+        if ("REMOTE".equals(bot.getRuntimeType())) {
+            return ApiResponse.success(agentClient.fetchStatus(bot));
+        }
+        if (bot.getId() != null && bot.getId() == 1L) {
+            com.qqai.capability.im.ImLoginInfo info = imGateway.loginInfo();
+            java.util.Map<String, Object> data = new java.util.HashMap<>();
+            data.put("loggedIn", info != null);
+            if (info != null) {
+                data.put("qq", String.valueOf(info.qq()));
+                data.put("nickname", info.nickname());
+            }
+            return ApiResponse.success(data);
+        }
+        throw new BizException(409, "本机多实例尚未支持，请使用 REMOTE agent");
     }
 
     @PostMapping("/{id}/agent-token/rotate")
@@ -97,7 +160,10 @@ public class BotController {
                                    String webuiUrl) {
     }
 
-    public record RuntimeRequest(String runtimeType, String onebotUrl, String webuiUrl) {
+    public record RuntimeRequest(String runtimeType, String onebotUrl, String webuiUrl, String agentUrl) {
+    }
+
+    public record AgentRegisterRequest(String onebotUrl, String webuiUrl, String agentUrl) {
     }
 
     public record RenameBotRequest(@NotBlank @Size(max = 64) String name) {

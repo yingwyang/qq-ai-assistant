@@ -13,6 +13,7 @@ public record BotView(
         String runtimeType,
         String onebotUrl,
         String webuiUrl,
+        String agentUrl,
         LocalDateTime lastHeartbeatAt,
         Integer napcatPort,
         Integer onebotPort,
@@ -23,7 +24,7 @@ public record BotView(
 
     public static BotView of(Bot b) {
         return new BotView(b.getId(), b.getOwnerUserId(), b.getName(), b.getQqNumber(), b.getStatus(),
-                b.getRuntimeType(), b.getOnebotUrl(), b.getWebuiUrl(), b.getLastHeartbeatAt(),
+                b.getRuntimeType(), b.getOnebotUrl(), b.getWebuiUrl(), b.getAgentUrl(), b.getLastHeartbeatAt(),
                 b.getNapcatPort(), b.getOnebotPort(), b.getWorkdir(), b.getLastError(),
                 b.getCreatedAt(), b.getStartedAt());
     }

@@ -1,0 +1,41 @@
+# 每个用户一个机器人：NapCat + agent 各一份，数据落在 ./data
+# 使用前：复制 onebot11.example.json 为 onebot11.json 并填 token；在 .env 填 BOT_ID/AGENT_TOKEN 等。
+name: napcat-bot-${BOT_ID:-1}
+services:
+  napcat:
+    image: mlikiowa/napcat-docker:latest
+    restart: unless-stopped
+    environment:
+      WEBUI_TOKEN: ${WEBUI_TOKEN:?set WEBUI_TOKEN}
+    volumes:
+      - ./data/qq:/app/.config/QQ
+      - ./data/config:/app/napcat/config
+      - ./data/cache:/app/napcat/cache
+      - ./data/plugins:/app/napcat/plugins
+      - ./onebot11.json:/app/napcat/config/onebot11.json:ro
+    ports:
+      - "127.0.0.1:${WEBUI_PORT:-16099}:6099"
+      - "127.0.0.1:${ONEBOT_PORT:-16100}:3000"
+
+  agent:
+    image: node:22-alpine
+    restart: unless-stopped
+    working_dir: /agent
+    command: ["node", "agent.mjs"]
+    volumes:
+      - ./agent.mjs:/agent/agent.mjs:ro
+      - ./data/cache:/app/napcat/cache:ro
+    environment:
+      BACKEND_URL: ${BACKEND_URL:-http://host.docker.internal:8081}
+      BOT_ID: ${BOT_ID:?set BOT_ID}
+      AGENT_TOKEN: ${AGENT_TOKEN:?set AGENT_TOKEN}
+      AGENT_URL: ${AGENT_URL:-http://host.docker.internal:3100}
+      ONEBOT_URL: http://napcat:3000
+      NAPCAT_TOKEN: ${NAPCAT_TOKEN:?set NAPCAT_TOKEN}
+      WEBUI_URL: ${WEBUI_URL:-http://127.0.0.1:16099}
+      AGENT_PORT: 3100
+      QR_PATH: /app/napcat/cache/qrcode.png
+    ports:
+      - "127.0.0.1:${AGENT_PORT:-3100}:3100"
+    depends_on:
+      - napcat
