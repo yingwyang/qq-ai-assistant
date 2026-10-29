@@ -254,7 +254,9 @@ public class BotService {
     @Transactional
     public void delete(Long id, Long userId, boolean admin, String operator) {
         Bot bot = getOwned(id, userId, admin);
-        if (!"PROVISIONING".equals(bot.getStatus()) && !"STOPPED".equals(bot.getStatus())) {
+        // REMOTE 没有本机进程，可直接删除登记；LOCAL 需先停止，避免留下孤儿进程
+        boolean remote = "REMOTE".equals(bot.getRuntimeType());
+        if (!remote && !"PROVISIONING".equals(bot.getStatus()) && !"STOPPED".equals(bot.getStatus())) {
             throw new BizException(409, "请先停止机器人再删除（当前 " + bot.getStatus() + "）");
         }
         botRepository.delete(bot);

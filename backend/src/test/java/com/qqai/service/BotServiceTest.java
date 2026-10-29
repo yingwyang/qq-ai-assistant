@@ -185,6 +185,20 @@ class BotServiceTest {
     }
 
     @Test
+    @DisplayName("REMOTE 运行中可直接删除；LOCAL 仍要求先停止")
+    void remoteDeleteAllowedWhileRunning() {
+        Bot remote = new Bot();
+        remote.setId(8L);
+        remote.setOwnerUserId(2L);
+        remote.setRuntimeType("REMOTE");
+        remote.setStatus("RUNNING");
+        given(botRepository.findById(8L)).willReturn(Optional.of(remote));
+
+        service.delete(8L, 2L, false, "alice");
+        verify(botRepository).delete(remote);
+    }
+
+    @Test
     @DisplayName("默认种子：没有 bots 时用最早 ADMIN 建默认机器人")
     void seedsDefaultBot() {
         given(botRepository.count()).willReturn(0L);

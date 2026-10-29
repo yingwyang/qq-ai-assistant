@@ -376,6 +376,7 @@ docker-compose up -d
 | 2026-10-30 | 多机器人 P2b（远程 agent）：Bot 增加 `agent_url`；新增 `POST /api/bots/{id}/agent/register`（X-Agent-Token，上报 OneBot/WebUI/Agent 地址）、`GET /{id}/qrcode-image`（REMOTE 代理 agent `/qrcode`；默认 bot 读本机 NapCat 缓存）、`GET /{id}/login-status`（REMOTE 代理 agent `/status`）；新增 `deploy/napcat-agent/`（单文件 agent.mjs + compose.yml + onebot11.example.json + README）。实测：mock NapCat + 真实 agent 注册→RUNNING，后端二维码 200 image/png、登录态 loggedIn/qq 正确，agent 无 token 401；清理后仅默认 bot；全量测试 375 项全绿 |
 | 2026-10-30 | 多机器人 P3a（写入侧隔离）：`messages`/`chat_groups` 增加 `bot_id`（老数据默认 1）；webhook 按 token 解析机器人——全局 webhook token → 默认 bot，否则按每 bot `agent_token` 反查；消息与群写入带 `bot_id`；主消息列表 `GET /api/messages/group/{groupId}?botId=` 对非默认 bot 按 owner/admin 授权并只查该 bot。实测：默认 token 消息 bot_id=1、bot token 消息 bot_id=5；`botId=5` 只返回 bot5 消息；owner 与 admin 均可读；清理后测试群/消息归零；全量测试 375 项全绿 |
 | 2026-10-30 | 多机器人 P3b（出站路由 + 读取过滤）：新增 `BotImRouter`，默认/本机 bot 走现有 NapCat，REMOTE 走该 bot 的 OneBot HTTP（`/send_group_msg`、Bearer=agentToken）；`/api/groups/{groupId}/send` 与日报推送支持 `?botId=`（owner/admin 授权）；`/api/messages/group/{groupId}/paged|since` 与 `/recent-groups` 支持 `botId` 并只查该 bot。实测：远程 bot 发送命中 mock OneBot（返回 mock-123）；webhook 写入 bot6 消息后 paged/since/recent-groups 均只返回 bot6；清理归零；测试新增 BotImRouterTest 3 项，全量 378 项全绿 |
+| 2026-10-30 | 多机器人 P4（前端最小闭环）：Sidebar 增加机器人切换器与管理面板（列表/切换/二维码/状态/删除/远程接入表单）；消息读取/发送 API 自动带当前 botId；REMOTE 机器人运行中也允许删除登记；新增 `frontend/src/docs/development/multi-bot.md` 记录模型、接口、数据隔离进度与已知边界。浏览器实测：管理按钮/切换器/面板/默认机器人/创建表单均可见；前端 build+guard 通过；全量 379 项全绿 |
 
 ## 第三方组件与外部依赖
 
