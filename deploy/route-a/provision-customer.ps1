@@ -197,8 +197,8 @@ $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $port = __PORT__
 $tcp = New-Object System.Net.Sockets.TcpClient
 try { $tcp.Connect("127.0.0.1", $port); $tcp.Close(); Write-Host "Backend already listening on $port"; exit 0 } catch { }
-$args = @('/c', ('"' + $root + '\run-backend.cmd"'))
-Start-Process -FilePath "cmd.exe" -ArgumentList $args -WorkingDirectory $root -WindowStyle Hidden | Out-Null
+$cmdArgs = @('/c', ('"' + $root + '\run-backend.cmd"'))
+Start-Process -FilePath "cmd.exe" -ArgumentList $cmdArgs -WorkingDirectory $root -WindowStyle Hidden | Out-Null
 for ($i = 0; $i -lt 120; $i++) {
     Start-Sleep -Seconds 1
     $tcp = New-Object System.Net.Sockets.TcpClient
