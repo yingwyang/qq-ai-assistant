@@ -57,6 +57,19 @@ class ComponentOrchestratorTest {
     }
 
     @Test
+    @DisplayName("全局 enabled=false：start 直接 409，不拉起任何进程")
+    void globallyDisabledRejectsStart() {
+        properties.setEnabled(false);
+        registry = new ComponentRegistry(properties);
+        orchestrator = new ComponentOrchestrator(registry, store, new FakeFactory(runtime));
+
+        assertTrue(registry.ordered().isEmpty());
+        BizException ex = assertThrows(BizException.class, () -> orchestrator.start("astrbot", false));
+        assertEquals(409, ex.getCode());
+        assertEquals(0, runtime.starts.get());
+    }
+
+    @Test
     @DisplayName("已运行再启动：幂等返回，不重复拉起")
     void startIsIdempotent() {
         runtime.reachable = true;

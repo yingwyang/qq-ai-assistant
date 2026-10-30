@@ -34,6 +34,19 @@ class ComponentRegistryTest {
     }
 
     @Test
+    @DisplayName("全局 enabled=false：ordered() 为空，但描述符仍可查")
+    void globallyDisabledHidesAll() {
+        ComponentProperties props = new ComponentProperties();
+        props.setEnabled(false);
+        props.setComponents(List.of(desc("a", 1)));
+        ComponentRegistry registry = new ComponentRegistry(props);
+
+        assertTrue(registry.ordered().isEmpty());
+        assertEquals(1, registry.all().size());
+        assertFalse(registry.isEnabled());
+    }
+
+    @Test
     @DisplayName("重复 id 启动即失败（配置错误要早暴露）")
     void duplicateIdFailsFast() {
         ComponentProperties props = new ComponentProperties();

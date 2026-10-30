@@ -213,6 +213,17 @@ npm run build
 docker-compose up -d
 ```
 
+### 多客户独立部署（Route A）
+
+每个客户一套后端 + 独立数据库/RabbitMQ vhost/上传目录/JWT，互不共享业务表：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File deploy\route-a\provision-customer.ps1 `
+  -Customer acme -Domain acme.example.com -BackendPort 18101 -CreateDatabase
+```
+
+完整拓扑、Nginx、安全清单与升级步骤见 [deploy/route-a/README.md](deploy/route-a/README.md)。该模式用 `component.enabled=false` 关闭本机组件托管，NapCat/AstrBot/GPT-SoVITS 全部走外部地址，避免多客户后端争用 6099/6185/8000。
+
 ## 功能模块
 
 | 模块 | 说明 |

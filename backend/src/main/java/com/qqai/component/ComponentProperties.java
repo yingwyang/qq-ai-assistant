@@ -12,10 +12,14 @@ import java.util.List;
 @ConfigurationProperties(prefix = "component")
 public class ComponentProperties {
 
+    /** 全局开关：false 时本实例不托管任何本地组件（Route A 每客户独立部署、外部服务托管）。 */
+    private boolean enabled = true;
     private long healthIntervalMs = 5000;
     private String stateFile = "data/components-state.json";
     private List<ComponentModel.ComponentDescriptor> components = new ArrayList<>();
 
+    public boolean isEnabled() { return enabled; }
+    public void setEnabled(boolean enabled) { this.enabled = enabled; }
     public long getHealthIntervalMs() { return healthIntervalMs; }
     public void setHealthIntervalMs(long healthIntervalMs) { this.healthIntervalMs = healthIntervalMs; }
     public String getStateFile() { return stateFile; }

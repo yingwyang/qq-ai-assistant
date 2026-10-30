@@ -19,8 +19,10 @@ public class ComponentRegistry {
 
     private final Map<String, ComponentModel.ComponentDescriptor> byId = new LinkedHashMap<>();
     private final List<ComponentModel.ComponentDescriptor> ordered;
+    private final boolean enabled;
 
     public ComponentRegistry(ComponentProperties properties) {
+        this.enabled = properties.isEnabled();
         if (properties.getComponents() == null) {
             log.error("组件配置为 null（配置绑定失败），按空列表处理");
             this.ordered = List.of();
@@ -41,10 +43,13 @@ public class ComponentRegistry {
         List<ComponentModel.ComponentDescriptor> list = new ArrayList<>(byId.values());
         list.sort(Comparator.comparingInt(ComponentModel.ComponentDescriptor::getOrder));
         this.ordered = List.copyOf(list);
-        log.info("组件注册完成: {}", ordered.stream().map(ComponentModel.ComponentDescriptor::getId).toList());
+        log.info("组件注册完成: {} enabled={}", ordered.stream().map(ComponentModel.ComponentDescriptor::getId).toList(), enabled);
     }
 
+    public boolean isEnabled() { return enabled; }
+
     public List<ComponentModel.ComponentDescriptor> ordered() {
+        if (!enabled) return List.of();
         return ordered.stream().filter(ComponentModel.ComponentDescriptor::isEnabled).toList();
     }
 
