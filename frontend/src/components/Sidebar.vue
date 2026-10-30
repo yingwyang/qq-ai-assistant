@@ -8,7 +8,10 @@
       <h3 v-if="!isCollapsed" class="sidebar-title">铃音QQ对话</h3>
     </div>
     <div v-if="!isCollapsed && isLoggedIn" class="bot-switcher">
-      <button class="bot-manage-btn" type="button" @click="openBotPanel">机器人管理</button>
+      <button class="bot-manage-btn" type="button" @click="openBotPanel">
+        <Icon name="robot" :size="14" />
+        <span>机器人管理</span>
+      </button>
       <div v-if="bots.length > 0" class="bot-switcher-select">
         <select v-model.number="activeBotId" @change="switchBot" title="切换机器人">
           <option v-for="b in bots" :key="b.id" :value="b.id">
@@ -253,6 +256,8 @@
     </div>
   </Teleport>
 </template>
+
+
 
 <script>
 import { ref, onMounted, onUnmounted, watch, computed } from 'vue';
@@ -1641,4 +1646,120 @@ export default {
 .gt-mini-LIFE   { background: #14b8a6; }
 .gt-mini-SOCIAL { background: #3b82f6; }
 .gt-mini-OTHER  { background: #6b7280; }
+/* ===== 侧边栏视觉精修 ===== */
+.sidebar {
+  background: linear-gradient(180deg, #1e2b3a 0%, #223346 45%, #1b2634 100%);
+  border-right: 1px solid rgba(255, 255, 255, 0.06);
+}
+.sidebar-header {
+  padding: 16px 14px 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+.sidebar-title { font-size: 19px; letter-spacing: 1px; }
+.toggle-btn:hover { background: rgba(255, 255, 255, 0.08); }
+
+.bot-switcher {
+  margin: 10px 12px 8px;
+  padding: 10px;
+  gap: 8px;
+  background: rgba(255, 255, 255, 0.045);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+}
+.bot-manage-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(88, 166, 255, 0.28);
+  background: rgba(56, 139, 253, 0.14);
+  color: #cfe8ff;
+  font-size: 12px;
+  font-weight: 600;
+  transition: all 0.18s;
+}
+.bot-manage-btn:hover {
+  background: rgba(56, 139, 253, 0.22);
+  border-color: rgba(88, 166, 255, 0.5);
+  color: #eaf5ff;
+}
+.bot-switcher select {
+  appearance: none;
+  padding: 7px 30px 7px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background-color: #1b2a3b;
+  background-image: linear-gradient(45deg, transparent 50%, #8fa3b8 50%),
+    linear-gradient(135deg, #8fa3b8 50%, transparent 50%);
+  background-position: calc(100% - 14px) 52%, calc(100% - 9px) 52%;
+  background-size: 5px 5px;
+  background-repeat: no-repeat;
+  color: #dfe8f1;
+  font-size: 12px;
+  outline: none;
+}
+.bot-switcher select:focus {
+  border-color: rgba(88, 166, 255, 0.55);
+  box-shadow: 0 0 0 2px rgba(56, 139, 253, 0.15);
+}
+
+.sidebar-nav { padding: 10px 0 16px; }
+.nav-section { margin-bottom: 10px; }
+.nav-item {
+  margin: 2px 8px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  gap: 10px;
+}
+.nav-item:hover { background: rgba(255, 255, 255, 0.06); }
+.nav-item.active {
+  background: linear-gradient(90deg, rgba(56, 139, 253, 0.3), rgba(56, 139, 253, 0.06));
+  border-right: none;
+  border-left: 3px solid #58a6ff;
+  padding-left: 9px;
+  color: #fff;
+}
+.nav-icon { min-width: 18px; }
+.nav-text { font-size: 13.5px; }
+
+.qq-binding-header {
+  margin: 4px 8px 2px;
+  padding: 7px 10px;
+  border-top: none;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.035);
+}
+.qq-binding-header:hover { background: rgba(255, 255, 255, 0.07); }
+.qq-binding-avatar { width: 26px; height: 26px; }
+.qq-binding-name { font-size: 12.5px; }
+.qq-binding-number { font-size: 10.5px; }
+.qq-binding-header .default-badge {
+  position: static;
+  align-self: flex-start;
+  width: auto;
+  margin: 2px 0 0;
+  background: rgba(56, 139, 253, 0.85);
+  font-size: 9.5px;
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+.group-item {
+  margin: 1px 8px 1px 14px;
+  padding: 6px 9px;
+  border-radius: 8px;
+  gap: 9px;
+}
+.group-item:hover { background: rgba(255, 255, 255, 0.06); }
+.group-avatar {
+  width: 26px;
+  height: 26px;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+.group-name { font-size: 13px; }
+.gt-badge { transform: scale(0.92); }
+.unread-badge { box-shadow: 0 0 0 2px rgba(255, 59, 48, 0.18); }
+.sidebar-footer { border-top: 1px solid rgba(255, 255, 255, 0.08); }
 </style>
