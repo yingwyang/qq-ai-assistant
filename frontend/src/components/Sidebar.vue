@@ -6,8 +6,10 @@
         <Icon v-else name="close" :size="16" />
       </button>
       <h3 v-if="!isCollapsed" class="sidebar-title">铃音QQ对话</h3>
-      <button v-if="!isCollapsed && isLoggedIn" class="bot-manage-btn" type="button" @click="openBotPanel">机器人</button>
-      <div v-if="!isCollapsed && isLoggedIn && bots.length > 0" class="bot-switcher">
+    </div>
+    <div v-if="!isCollapsed && isLoggedIn" class="bot-switcher">
+      <button class="bot-manage-btn" type="button" @click="openBotPanel">机器人管理</button>
+      <div v-if="bots.length > 0" class="bot-switcher-select">
         <select v-model.number="activeBotId" @change="switchBot" title="切换机器人">
           <option v-for="b in bots" :key="b.id" :value="b.id">
             {{ b.name }}{{ b.qqNumber ? ' (' + b.qqNumber + ')' : '' }}
@@ -976,9 +978,11 @@ export default {
 }
 
 .bot-manage-btn {
-  margin: 0 10px 8px;
-  padding: 4px 8px;
+  width: 100%;
+  margin: 0;
+  padding: 5px 8px;
   font-size: 12px;
+  white-space: nowrap;
   border: 1px solid var(--border-color, #ddd);
   border-radius: 6px;
   background: var(--bg-secondary, #fff);
@@ -1066,7 +1070,11 @@ export default {
 .bot-create-tip { font-size: 11px; color: var(--text-muted, #888); }
 .bot-switcher {
   padding: 0 10px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
+.bot-switcher-select { width: 100%; }
 .bot-switcher select {
   width: 100%;
   padding: 5px 8px;
