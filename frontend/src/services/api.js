@@ -191,17 +191,6 @@ async function downloadWithAuth(endpoint, fallbackName = 'download.json') {
   URL.revokeObjectURL(objectUrl);
 }
 
-/** 当前选中的机器人 id（默认 1=默认机器人）；消息/发送接口自动带上 botId。 */
-const activeBotId = () => {
-  const value = Number(localStorage.getItem('qqai_active_bot'));
-  return Number.isFinite(value) && value > 0 ? value : 1;
-};
-const appendBotId = (url) => {
-  const id = activeBotId();
-  if (id === 1) return url;
-  return url + (url.includes('?') ? '&' : '?') + 'botId=' + id;
-};
-
 export const messageApi = {
   createMessage: (message) => request('/messages', {
     method: 'POST',
@@ -212,7 +201,7 @@ export const messageApi = {
     const params = new URLSearchParams();
     if (selfQq) params.append('selfQq', selfQq);
     const qs = params.toString();
-    return request(appendBotId(`/messages/group/${groupId}${qs ? '?' + qs : ''}`));
+    return request(`/messages/group/${groupId}${qs ? '?' + qs : ''}`);
   },
 
   getMessagesByGroupIdPaged: (groupId, page = 0, size = 50, selfQq) => {
@@ -220,7 +209,6 @@ export const messageApi = {
     params.append('page', page);
     params.append('size', size);
     if (selfQq) params.append('selfQq', selfQq);
-    if (activeBotId() !== 1) params.append('botId', activeBotId());
     return request(`/messages/group/${groupId}/paged?${params.toString()}`);
   },
 
@@ -228,7 +216,6 @@ export const messageApi = {
     const params = new URLSearchParams();
     params.append('afterId', afterId);
     if (selfQq) params.append('selfQq', selfQq);
-    if (activeBotId() !== 1) params.append('botId', activeBotId());
     return request(`/messages/group/${groupId}/since?${params.toString()}`);
   },
 
@@ -363,7 +350,7 @@ export const messageApi = {
 
   getRecentGroups: (sinceTime) => {
     // sinceTime 参数已弃用，现由后端根据 group_read_state 计算未读
-    return request(appendBotId('/messages/recent-groups'));
+    return request('/messages/recent-groups');
   },
 
   markGroupAsRead: (groupId) => request(`/messages/read/${encodeURIComponent(groupId)}`, { method: 'POST' }),
@@ -381,7 +368,7 @@ export const messageApi = {
    */
   sendGroupText: (groupId, payload) => {
     const body = (typeof payload === 'string') ? { text: payload } : (payload || {});
-    return request(appendBotId(`/groups/${encodeURIComponent(groupId)}/send`), {
+    return request(`/groups/${encodeURIComponent(groupId)}/send`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -415,26 +402,6 @@ export const messageApi = {
     const qs = force ? '?forceRefresh=true' : '';
     return request(`/groups/${encodeURIComponent(groupId)}/recognize-type${qs}`, { method: 'POST' });
   },
-};
-
-// 多机器人：列表/创建/运行时/二维码/登录态
-export const botApi = {
-  list: () => request('/bots'),
-  create: (payload) => request('/bots', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload || {}),
-  }),
-  get: (id) => request('/bots/' + id),
-  updateRuntime: (id, payload) => request('/bots/' + id + '/runtime', {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload || {}),
-  }),
-  rotateAgentToken: (id) => request('/bots/' + id + '/agent-token/rotate', { method: 'POST' }),
-  remove: (id) => request('/bots/' + id, { method: 'DELETE' }),
-  loginStatus: (id) => request('/bots/' + id + '/login-status'),
-  qrcodeUrl: (id) => '/api/bots/' + id + '/qrcode-image?ts=' + Date.now(),
 };
 
 // 系统控制类接口：失败时仅抛错给调用方显示 toast，不触发全局 401 登出/清存储/跳转

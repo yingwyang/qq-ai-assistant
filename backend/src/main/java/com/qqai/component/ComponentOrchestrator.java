@@ -83,9 +83,6 @@ public class ComponentOrchestrator {
 
     public ComponentModel.ComponentView start(String id, boolean force) {
         ComponentModel.ComponentDescriptor d = registry.get(id);
-        if (!registry.isEnabled() || !d.isEnabled()) {
-            throw new BizException(409, "组件管理已禁用（外部托管模式）: " + id);
-        }
         ReentrantLock lock = lock(id);
         lock.lock();
         try {
@@ -173,9 +170,6 @@ public class ComponentOrchestrator {
 
     public ComponentModel.ComponentView stop(String id, boolean force) {
         ComponentModel.ComponentDescriptor d = registry.get(id);
-        if (!registry.isEnabled() || !d.isEnabled()) {
-            throw new BizException(409, "组件管理已禁用（外部托管模式）: " + id);
-        }
         ReentrantLock lock = lock(id);
         lock.lock();
         try {

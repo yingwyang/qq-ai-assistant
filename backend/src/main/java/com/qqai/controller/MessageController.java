@@ -57,17 +57,6 @@ public class MessageController {
     private SecurityHelper securityHelper;
 
     @Autowired
-    private com.qqai.repository.BotRepository botRepository;
-
-    private void requireBotOwner(Long botId, Long userId) {
-        com.qqai.entity.Bot bot = botRepository.findById(botId)
-                .orElseThrow(() -> new com.qqai.exception.BizException(404, "机器人不存在: " + botId));
-        if (!securityHelper.isAdmin() && !bot.getOwnerUserId().equals(userId)) {
-            throw new com.qqai.exception.BizException(403, "无权访问该机器人的数据");
-        }
-    }
-
-    @Autowired
     private AuditLogService auditLogService;
 
     @Autowired
@@ -236,26 +225,11 @@ public class MessageController {
     public ResponseEntity<ApiResponse<List<Message>>> getMessagesByGroupId(
             @PathVariable String groupId,
             @RequestParam(required = false) String selfQq,
-            @RequestParam(required = false) Integer limit,
-            @RequestParam(required = false, defaultValue = "1") Long botId) {
+            @RequestParam(required = false) Integer limit) {
         Long userId = securityHelper.getCurrentUserId();
         if (userId == null) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(ApiResponse.error(401, "未登录"));
-        }
-
-        // 非默认 bot：按 bot 归属授权（owner/admin），数据按 botId 过滤
-        if (botId != null && botId != 1L) {
-            com.qqai.entity.Bot bot = botRepository.findById(botId)
-                    .orElseThrow(() -> new com.qqai.exception.BizException(404, "机器人不存在: " + botId));
-            if (!securityHelper.isAdmin() && !bot.getOwnerUserId().equals(userId)) {
-                return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                        .body(ApiResponse.error(403, "无权访问该机器人的数据"));
-            }
-            int fetchByBot = limit != null ? limit
-                    : com.qqai.service.MessageService.DEFAULT_GROUP_MESSAGE_FETCH;
-            return ResponseEntity.ok(ApiResponse.success(
-                    messageService.getRecentMessagesByBot(botId, groupId, fetchByBot)));
         }
 
         // 获取用户绑定的所有QQ账号
@@ -286,23 +260,11 @@ public class MessageController {
             @PathVariable String groupId,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "50") int size,
-            @RequestParam(required = false) String selfQq,
-            @RequestParam(required = false, defaultValue = "1") Long botId) {
+            @RequestParam(required = false) String selfQq) {
         Long userId = securityHelper.getCurrentUserId();
         if (userId == null) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(ApiResponse.error(401, "未登录"));
-        }
-
-        if (botId != 1L) {
-            requireBotOwner(botId, userId);
-            Pageable pageableByBot = PageRequest.of(page, Math.min(size, 200));
-            Map<String, Object> dataByBot = new HashMap<>();
-            dataByBot.put("messages", messageService.getMessagesByBotIdPaged(botId, groupId, pageableByBot));
-            dataByBot.put("total", messageService.countMessagesByBotId(botId, groupId));
-            dataByBot.put("page", page);
-            dataByBot.put("size", size);
-            return ResponseEntity.ok(ApiResponse.success(dataByBot));
         }
 
         // 获取用户绑定的所有QQ账号
@@ -342,18 +304,11 @@ public class MessageController {
     public ResponseEntity<ApiResponse<List<Message>>> getMessagesSince(
             @PathVariable String groupId,
             @RequestParam Long afterId,
-            @RequestParam(required = false) String selfQq,
-            @RequestParam(required = false, defaultValue = "1") Long botId) {
+            @RequestParam(required = false) String selfQq) {
         Long userId = securityHelper.getCurrentUserId();
         if (userId == null) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(ApiResponse.error(401, "未登录"));
-        }
-
-        if (botId != 1L) {
-            requireBotOwner(botId, userId);
-            return ResponseEntity.ok(ApiResponse.success(
-                    messageService.getMessagesSinceIdByBotId(botId, groupId, afterId)));
         }
 
         List<String> userQqList = securityHelper.getCurrentUserQqBindings();
@@ -1184,18 +1139,12 @@ public class MessageController {
      * 基于当前用户绑定的所有 QQ 号聚合查询，并以 group_read_state 统计未读。
      */
     @GetMapping("/recent-groups")
-    public ResponseEntity<ApiResponse<List<Map<String, Object>>>> getRecentGroups(
-            @RequestParam(required = false, defaultValue = "1") Long botId) {
+    public ResponseEntity<ApiResponse<List<Map<String, Object>>>> getRecentGroups() {
         try {
             Long userId = securityHelper.getCurrentUserId();
             if (userId == null) {
                 return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                         .body(ApiResponse.error(401, "未登录"));
-            }
-
-            if (botId != 1L) {
-                requireBotOwner(botId, userId);
-                return ResponseEntity.ok(ApiResponse.success(messageService.getRecentGroupsByBotId(botId, 50)));
             }
 
             List<String> userQqList = securityHelper.getCurrentUserQqBindings();

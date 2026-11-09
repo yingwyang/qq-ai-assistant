@@ -7,19 +7,6 @@
       </button>
       <h3 v-if="!isCollapsed" class="sidebar-title">铃音QQ对话</h3>
     </div>
-    <div v-if="!isCollapsed && isLoggedIn" class="bot-switcher">
-      <button class="bot-manage-btn" type="button" @click="openBotPanel">
-        <Icon name="robot" :size="14" />
-        <span>机器人管理</span>
-      </button>
-      <div v-if="bots.length > 0" class="bot-switcher-select">
-        <select v-model.number="activeBotId" @change="switchBot" title="切换机器人">
-          <option v-for="b in bots" :key="b.id" :value="b.id">
-            {{ b.name }}{{ b.qqNumber ? ' (' + b.qqNumber + ')' : '' }}
-          </option>
-        </select>
-      </div>
-    </div>
     
     
     
@@ -34,26 +21,6 @@
           
           <!-- 最近对话列表 - 按QQ绑定分组显示 -->
           <template v-if="isLoggedIn && isRecentExpanded">
-            <template v-if="activeBotId !== 1">
-              <li class="nav-item qq-binding-header">
-                <div v-if="!isCollapsed" class="qq-binding-info">
-                  <div class="qq-binding-name">{{ activeBot?.name || '我的机器人' }}</div>
-                  <div class="qq-binding-number">{{ activeBot?.qqNumber || '未登录' }}</div>
-                </div>
-              </li>
-              <li
-                v-for="group in recentGroups"
-                :key="group.groupId"
-                class="nav-item group-item"
-                :class="{ active: isGroupActive(group) }"
-                @click="selectGroup(group)"
-              >
-                <div class="group-avatar">
-                  <img :src="getGroupAvatar(group)" :alt="group.groupName" @error="handleAvatarError" />
-                </div>
-                <span v-if="!isCollapsed" class="nav-text">{{ group.groupName || group.groupId }}</span>
-              </li>
-            </template>
             <template v-for="binding in qqBindings" :key="binding.id">
               <!-- 该QQ下有群才显示分组 -->
               <template v-if="getGroupsByQq(binding.qqNumber).length > 0">
@@ -213,56 +180,12 @@
       </div>
     </div>
   </div>
-
-  <Teleport to="body">
-    <div v-if="showBotPanel" class="bot-panel-overlay" @click.self="showBotPanel = false">
-      <div class="bot-panel">
-        <div class="bot-panel-head">
-          <strong>我的机器人</strong>
-          <button type="button" class="bot-panel-close" @click="showBotPanel = false">×</button>
-        </div>
-        <div class="bot-panel-list">
-          <div v-for="bot in bots" :key="bot.id" class="bot-row">
-            <div class="bot-row-main">
-              <div class="bot-row-name">{{ bot.name }}</div>
-              <div class="bot-row-meta">
-                {{ bot.qqNumber || '未登录' }} · {{ bot.status }} · {{ bot.runtimeType }}
-              </div>
-            </div>
-            <div class="bot-row-actions">
-              <button type="button" @click="switchToBot(bot)">切换</button>
-              <button type="button" @click="showBotQr(bot)">二维码</button>
-              <button type="button" @click="refreshBotStatus(bot)">状态</button>
-              <button v-if="bot.id !== 1" type="button" class="danger" @click="removeBot(bot)">删除</button>
-            </div>
-          </div>
-        </div>
-        <div v-if="qrUrl" class="bot-qr">
-          <div class="bot-qr-title">扫码登录（{{ qrBotId }}）</div>
-          <img :src="qrUrl" alt="机器人登录二维码" />
-          <div class="bot-qr-tip">用手机 QQ 扫码；登录成功后状态会变为 RUNNING</div>
-        </div>
-        <div class="bot-create">
-          <div class="bot-create-title">接入一个自己的机器人（远程）</div>
-          <input v-model.trim="newBotName" maxlength="64" placeholder="机器人名称" />
-          <input v-model.trim="newBotOnebotUrl" placeholder="OneBot URL，如 http://你的机器:16100" />
-          <input v-model.trim="newBotWebuiUrl" placeholder="WebUI URL（可选）" />
-          <div class="bot-create-tip">需先在目标机器部署 NapCat + agent（见 deploy/napcat-agent）</div>
-          <button type="button" :disabled="creatingBot" @click="createBot">
-            {{ creatingBot ? '创建中...' : '创建' }}
-          </button>
-        </div>
-      </div>
-    </div>
-  </Teleport>
 </template>
-
-
 
 <script>
 import { ref, onMounted, onUnmounted, watch, computed } from 'vue';
 import { useRouter } from 'vue-router';
-import { botApi, messageApi, userApi } from '../services/api';
+import { messageApi, userApi } from '../services/api';
 import Icon from './Icon.vue';
 import { showToast } from './Toast.vue';
 import { showConfirm } from './ConfirmDialog.vue';
@@ -323,16 +246,6 @@ export default {
     const STORAGE_KEY_QQ = 'sidebar_qq_expanded';
 
     const isRecentExpanded = ref(true);
-    const bots = ref([]);
-    const activeBotId = ref(Number(localStorage.getItem('qqai_active_bot')) || 1);
-    const activeBot = computed(() => bots.value.find(b => b.id === activeBotId.value) || null);
-    const showBotPanel = ref(false);
-    const newBotName = ref('');
-    const newBotOnebotUrl = ref('');
-    const newBotWebuiUrl = ref('');
-    const qrBotId = ref(null);
-    const qrUrl = ref('');
-    const creatingBot = ref(false);
     const qqBindings = ref([]);
     const expandedQqBindings = ref(new Set());
     const selectedGroup = ref(null); // { groupId, ownerQq }
@@ -624,109 +537,6 @@ export default {
       }
     };
 
-    const loadBots = async () => {
-      if (!props.isLoggedIn) {
-        bots.value = [];
-        return;
-      }
-      try {
-        const list = await botApi.list();
-        bots.value = Array.isArray(list) ? list : [];
-        if (!bots.value.some(b => b.id === activeBotId.value)) {
-          activeBotId.value = bots.value[0]?.id || 1;
-          localStorage.setItem('qqai_active_bot', String(activeBotId.value));
-        }
-      } catch (error) {
-        logger.error('加载机器人列表失败:', error);
-        bots.value = [];
-      }
-    };
-
-    const switchBot = () => {
-      localStorage.setItem('qqai_active_bot', String(activeBotId.value));
-      window.location.reload();
-    };
-
-    const openBotPanel = async () => {
-      showBotPanel.value = true;
-      await loadBots();
-    };
-
-    const switchToBot = (bot) => {
-      localStorage.setItem('qqai_active_bot', String(bot.id));
-      window.location.reload();
-    };
-
-    const showBotQr = (bot) => {
-      qrBotId.value = bot.id;
-      qrUrl.value = botApi.qrcodeUrl(bot.id);
-    };
-
-    const refreshBotStatus = async (bot) => {
-      try {
-        const status = await botApi.loginStatus(bot.id);
-        showToast(status?.loggedIn
-          ? '已登录 ' + (status.nickname || '') + (status.qq ? '（' + status.qq + '）' : '')
-          : '未登录');
-      } catch (error) {
-        showToast('状态查询失败: ' + error.message, 'error');
-      }
-    };
-
-    const createBot = async () => {
-      if (!newBotName.value) {
-        showToast('请填写机器人名称', 'error');
-        return;
-      }
-      if (!newBotOnebotUrl.value) {
-        showToast('远程机器人需要 OneBot URL', 'error');
-        return;
-      }
-      creatingBot.value = true;
-      try {
-        const bot = await botApi.create({
-          name: newBotName.value,
-          runtimeType: 'REMOTE',
-          onebotUrl: newBotOnebotUrl.value,
-          webuiUrl: newBotWebuiUrl.value || null,
-        });
-        showToast('已创建: ' + bot.name);
-        newBotName.value = '';
-        newBotOnebotUrl.value = '';
-        newBotWebuiUrl.value = '';
-        await loadBots();
-        if (bot && bot.id) {
-          localStorage.setItem('qqai_active_bot', String(bot.id));
-          activeBotId.value = bot.id;
-        }
-      } catch (error) {
-        showToast('创建失败: ' + error.message, 'error');
-      } finally {
-        creatingBot.value = false;
-      }
-    };
-
-    const removeBot = async (bot) => {
-      const ok = await showConfirm({
-        title: '删除机器人',
-        message: '确定删除「' + bot.name + '」吗？该操作只删除登记，不删除远程实例数据。',
-        type: 'warning',
-        confirmText: '删除',
-      });
-      if (!ok) return;
-      try {
-        await botApi.remove(bot.id);
-        showToast('已删除');
-        if (activeBotId.value === bot.id) {
-          localStorage.setItem('qqai_active_bot', '1');
-          activeBotId.value = 1;
-        }
-        await loadBots();
-      } catch (error) {
-        showToast('删除失败: ' + error.message, 'error');
-      }
-    };
-
     const getGroupsByQq = (qqNumber) => {
       return recentGroups.value.filter(g => String(g.ownerQq) === String(qqNumber));
     };
@@ -834,7 +644,6 @@ export default {
 
     onMounted(() => {
       loadExpandedState();
-      loadBots();
       loadRecentGroups();
       loadQqBindings();
 
@@ -868,7 +677,6 @@ export default {
     watch(() => props.isLoggedIn, (newValue) => {
       logger.debug('登录状态变化:', newValue);
       if (newValue) {
-        loadBots();
         loadRecentGroups();
         loadQqBindings();
         reloadCredits();
@@ -892,23 +700,6 @@ export default {
       recentGroups,
       isRecentExpanded,
       qqBindings,
-      bots,
-      activeBotId,
-      activeBot,
-      showBotPanel,
-      newBotName,
-      newBotOnebotUrl,
-      newBotWebuiUrl,
-      qrBotId,
-      qrUrl,
-      creatingBot,
-      openBotPanel,
-      switchToBot,
-      showBotQr,
-      refreshBotStatus,
-      createBot,
-      removeBot,
-      switchBot,
       selectedGroup,
       isLoggedIn: isLoggedInComputed,
       toggleSidebar,
@@ -982,113 +773,6 @@ export default {
   display: none;
 }
 
-.bot-manage-btn {
-  width: 100%;
-  margin: 0;
-  padding: 5px 8px;
-  font-size: 12px;
-  white-space: nowrap;
-  border: 1px solid var(--border-color, #ddd);
-  border-radius: 6px;
-  background: var(--bg-secondary, #fff);
-  color: var(--text-secondary, #666);
-  cursor: pointer;
-}
-.bot-manage-btn:hover { color: var(--accent-color, #3498db); border-color: var(--accent-color, #3498db); }
-.bot-panel-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.35);
-  z-index: 10000;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.bot-panel {
-  width: min(520px, 92vw);
-  max-height: 86vh;
-  overflow: auto;
-  background: var(--card-bg, #fff);
-  color: var(--text-primary, #333);
-  border-radius: 12px;
-  padding: 16px;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
-}
-.bot-panel-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 10px;
-}
-.bot-panel-close {
-  border: none;
-  background: transparent;
-  font-size: 20px;
-  cursor: pointer;
-  color: var(--text-muted, #999);
-}
-.bot-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 8px 0;
-  border-bottom: 1px solid var(--border-color, #eee);
-}
-.bot-row-name { font-size: 13px; font-weight: 600; }
-.bot-row-meta { font-size: 11px; color: var(--text-muted, #888); margin-top: 2px; }
-.bot-row-actions { display: flex; gap: 4px; flex-wrap: wrap; }
-.bot-row-actions button {
-  font-size: 11px;
-  padding: 3px 7px;
-  border-radius: 5px;
-  border: 1px solid var(--border-color, #ddd);
-  background: var(--bg-secondary, #fafafa);
-  color: var(--text-secondary, #555);
-  cursor: pointer;
-}
-.bot-row-actions button.danger { color: #e74c3c; border-color: #f0b3ad; }
-.bot-qr { text-align: center; padding: 10px 0; }
-.bot-qr-title { font-size: 12px; margin-bottom: 6px; }
-.bot-qr img { width: 180px; height: 180px; object-fit: contain; background: #fff; }
-.bot-qr-tip { font-size: 11px; color: var(--text-muted, #888); }
-.bot-create { margin-top: 14px; display: flex; flex-direction: column; gap: 6px; }
-.bot-create-title { font-size: 12px; font-weight: 600; }
-.bot-create input {
-  padding: 6px 8px;
-  border-radius: 6px;
-  border: 1px solid var(--border-color, #ddd);
-  background: var(--bg-secondary, #fff);
-  color: var(--text-primary, #333);
-  font-size: 12px;
-}
-.bot-create button {
-  align-self: flex-start;
-  padding: 5px 14px;
-  border-radius: 6px;
-  border: none;
-  background: var(--accent-color, #3498db);
-  color: #fff;
-  font-size: 12px;
-  cursor: pointer;
-}
-.bot-create-tip { font-size: 11px; color: var(--text-muted, #888); }
-.bot-switcher {
-  padding: 0 10px 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.bot-switcher-select { width: 100%; }
-.bot-switcher select {
-  width: 100%;
-  padding: 5px 8px;
-  border-radius: 6px;
-  border: 1px solid var(--border-color, #ddd);
-  background: var(--bg-secondary, #fff);
-  color: var(--text-primary, #333);
-  font-size: 12px;
-}
 .sidebar-header {
   padding: 20px;
   display: flex;
@@ -1646,120 +1330,4 @@ export default {
 .gt-mini-LIFE   { background: #14b8a6; }
 .gt-mini-SOCIAL { background: #3b82f6; }
 .gt-mini-OTHER  { background: #6b7280; }
-/* ===== 侧边栏视觉精修 ===== */
-.sidebar {
-  background: linear-gradient(180deg, #1e2b3a 0%, #223346 45%, #1b2634 100%);
-  border-right: 1px solid rgba(255, 255, 255, 0.06);
-}
-.sidebar-header {
-  padding: 16px 14px 8px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
-}
-.sidebar-title { font-size: 19px; letter-spacing: 1px; }
-.toggle-btn:hover { background: rgba(255, 255, 255, 0.08); }
-
-.bot-switcher {
-  margin: 10px 12px 8px;
-  padding: 10px;
-  gap: 8px;
-  background: rgba(255, 255, 255, 0.045);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 12px;
-}
-.bot-manage-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 7px 10px;
-  border-radius: 8px;
-  border: 1px solid rgba(88, 166, 255, 0.28);
-  background: rgba(56, 139, 253, 0.14);
-  color: #cfe8ff;
-  font-size: 12px;
-  font-weight: 600;
-  transition: all 0.18s;
-}
-.bot-manage-btn:hover {
-  background: rgba(56, 139, 253, 0.22);
-  border-color: rgba(88, 166, 255, 0.5);
-  color: #eaf5ff;
-}
-.bot-switcher select {
-  appearance: none;
-  padding: 7px 30px 7px 10px;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background-color: #1b2a3b;
-  background-image: linear-gradient(45deg, transparent 50%, #8fa3b8 50%),
-    linear-gradient(135deg, #8fa3b8 50%, transparent 50%);
-  background-position: calc(100% - 14px) 52%, calc(100% - 9px) 52%;
-  background-size: 5px 5px;
-  background-repeat: no-repeat;
-  color: #dfe8f1;
-  font-size: 12px;
-  outline: none;
-}
-.bot-switcher select:focus {
-  border-color: rgba(88, 166, 255, 0.55);
-  box-shadow: 0 0 0 2px rgba(56, 139, 253, 0.15);
-}
-
-.sidebar-nav { padding: 10px 0 16px; }
-.nav-section { margin-bottom: 10px; }
-.nav-item {
-  margin: 2px 8px;
-  padding: 8px 12px;
-  border-radius: 8px;
-  gap: 10px;
-}
-.nav-item:hover { background: rgba(255, 255, 255, 0.06); }
-.nav-item.active {
-  background: linear-gradient(90deg, rgba(56, 139, 253, 0.3), rgba(56, 139, 253, 0.06));
-  border-right: none;
-  border-left: 3px solid #58a6ff;
-  padding-left: 9px;
-  color: #fff;
-}
-.nav-icon { min-width: 18px; }
-.nav-text { font-size: 13.5px; }
-
-.qq-binding-header {
-  margin: 4px 8px 2px;
-  padding: 7px 10px;
-  border-top: none;
-  border-radius: 9px;
-  background: rgba(255, 255, 255, 0.035);
-}
-.qq-binding-header:hover { background: rgba(255, 255, 255, 0.07); }
-.qq-binding-avatar { width: 26px; height: 26px; }
-.qq-binding-name { font-size: 12.5px; }
-.qq-binding-number { font-size: 10.5px; }
-.qq-binding-header .default-badge {
-  position: static;
-  align-self: flex-start;
-  width: auto;
-  margin: 2px 0 0;
-  background: rgba(56, 139, 253, 0.85);
-  font-size: 9.5px;
-  padding: 1px 5px;
-  border-radius: 4px;
-}
-
-.group-item {
-  margin: 1px 8px 1px 14px;
-  padding: 6px 9px;
-  border-radius: 8px;
-  gap: 9px;
-}
-.group-item:hover { background: rgba(255, 255, 255, 0.06); }
-.group-avatar {
-  width: 26px;
-  height: 26px;
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08);
-}
-.group-name { font-size: 13px; }
-.gt-badge { transform: scale(0.92); }
-.unread-badge { box-shadow: 0 0 0 2px rgba(255, 59, 48, 0.18); }
-.sidebar-footer { border-top: 1px solid rgba(255, 255, 255, 0.08); }
 </style>

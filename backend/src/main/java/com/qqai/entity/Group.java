@@ -10,8 +10,7 @@ import java.time.LocalDateTime;
 @Table(name = "chat_groups", indexes = {
     @Index(name = "idx_group_id", columnList = "groupId"),
     @Index(name = "idx_group_name", columnList = "groupName"),
-    @Index(name = "idx_owner_qq", columnList = "ownerQq"),
-    @Index(name = "idx_bot_group", columnList = "botId, groupId")
+    @Index(name = "idx_owner_qq", columnList = "ownerQq")
 }, uniqueConstraints = {
     @UniqueConstraint(name = "uk_group_owner", columnNames = {"groupId", "ownerQq"})
 })
@@ -20,9 +19,6 @@ public class Group {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
-
-    @Column(name = "bot_id", nullable = false)
-    private Long botId = 1L;  // 所属机器人
 
     @Column(nullable = false, length = 50)
     private String groupId;  // 群号
@@ -58,8 +54,6 @@ public class Group {
     // Getters and Setters
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
-    public Long getBotId() { return botId; }
-    public void setBotId(Long botId) { this.botId = botId; }
     
     public String getGroupId() { return groupId; }
     public void setGroupId(String groupId) { this.groupId = groupId; }

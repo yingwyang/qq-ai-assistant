@@ -213,17 +213,6 @@ npm run build
 docker-compose up -d
 ```
 
-### 多客户独立部署（Route A）
-
-每个客户一套后端 + 独立数据库/RabbitMQ vhost/上传目录/JWT，互不共享业务表：
-
-```powershell
-powershell -ExecutionPolicy Bypass -File deploy\route-a\provision-customer.ps1 `
-  -Customer acme -Domain acme.example.com -BackendPort 18101 -CreateDatabase
-```
-
-完整拓扑、Nginx、安全清单与升级步骤见 [deploy/route-a/README.md](deploy/route-a/README.md)。该模式用 `component.enabled=false` 关闭本机组件托管，NapCat/AstrBot/GPT-SoVITS 全部走外部地址，避免多客户后端争用 6099/6185/8000。
-
 ## 功能模块
 
 | 模块 | 说明 |
@@ -382,12 +371,6 @@ powershell -ExecutionPolicy Bypass -File deploy\route-a\provision-customer.ps1 `
 | 2026-10-29 | 组件插件化 Phase 4 + 收尾文档：新增 `capability.tts`（TtsProvider）与 `adapter.tts.GptSovitsTtsAdapter`，SystemController 的 /tts、/tts/characters、/tts/switch-character 改走接口；新增 `frontend/src/docs/development/plugin-architecture.md`（分层/描述符/状态机/故障注入/回滚）。TTS 适配器单测覆盖透传与健康探测；四阶段（组件编排、对话、IM、TTS）全部落地 |
 | 2026-10-29 | NapCat 登录态与组件重启：`/api/system/napcat/login-status` 改为走 OneBot `/get_login_info`（权威判据，返回 `loggedIn/qq/nickname`；旧实现依赖配置文件/未公开 WebUI 端点，已登录时会误报 false）；QQ 登录面板登录成功后显示「已登录 昵称 + QQ」并停止轮询二维码，新增「重启 NapCat」按钮（含确认，会断开登录）；组件页每个组件也增加「重启」按钮；新增 `POST /api/system/components/{id}/restart`（ADMIN，审计 COMPONENT_RESTART）。同时修正编排器停止/重启的校验：停止超时端口仍可访问 → FAILED 并报错，重启前确认已停止，按端口兜底杀进程后再用 Stop-Process 重试。实测：login-status 返回 `qq=2488130337, nickname=陰陽`；重启 AstrBot 进程由 13928 换成 18200（端口监听 PID 11636），状态 RUNNING |
 | 2026-10-29 | 组件启停安全加固（真机故障注入）：①**端口被陌生进程占用**时 `start` 返回 409「端口已被其他进程占用」，不再把对方进程误认领为 RUNNING；②健康巡检不再把 STOPPED 状态自动改成 RUNNING（避免假健康）；③`STOPPED` 状态下端口被占用时 UI 不再显示「停止」按钮（防止误杀陌生进程）；④`stop` 在进程树 kill 后**始终**复查端口，若 AstrBot 的 python 孙进程脱离进程树残留则按端口清理（taskkill + Stop-Process 兜底）；⑤停止超时且端口仍可达 → FAILED+502，不再假报 STOPPED。实测：占位 6185 启动 → 409 且占位进程存活；停止 AstrBot 后进程树（cmd/astrbot/python/监听 PID）全部消失、端口释放；全量测试 364 项全绿 |
-| 2026-10-30 | 多机器人 P1（数据底座）：新增 `bots` 表/实体、`BotService` 与 `/api/bots`（列表/创建/改名/删除）；首次启动把现有单机器人登记为默认机器人（归最早 ADMIN，qq=2488130337，端口 6099/6100）；每个新 bot 分配独立 OneBot token 与端口段（16100 起、步长 2）及工作目录，每用户默认上限 1 个；归属校验（非 owner 403，admin 可 `?all=true`）与 BOT_CREATE/RENAME/DELETE 审计；测试配置关闭默认种子。实测：默认 bot 落库；用户创建得到 16100/16101；跨用户读 403；管理员列表含两个；删除后库中仅默认 bot；全量测试 371 项全绿 |
-| 2026-10-30 | 多机器人 P2a（远程运行时基础）：`bots` 增加 `runtime_type`（LOCAL/REMOTE）、`onebot_url`、`webui_url`、每 bot `agent_token`、`last_heartbeat_at`；创建支持 REMOTE（必须 OneBot URL，WebUI 可选）；新增 `PATCH /api/bots/{id}/runtime`、`POST /api/bots/{id}/heartbeat`（用 `X-Agent-Token` 免 JWT，控制器常量时间校验每 bot token）、`POST /api/bots/{id}/agent-token/rotate`（owner/admin）；启动时补齐 P1 老数据的 runtimeType 与 agentToken。实测：默认 bot 回填 LOCAL；用户创建 REMOTE→心跳 200/状态 RUNNING/记录时间；错误 token 403；轮换后旧 token 失效；清理后仅默认 bot；全量测试 374 项全绿 |
-| 2026-10-30 | 多机器人 P2b（远程 agent）：Bot 增加 `agent_url`；新增 `POST /api/bots/{id}/agent/register`（X-Agent-Token，上报 OneBot/WebUI/Agent 地址）、`GET /{id}/qrcode-image`（REMOTE 代理 agent `/qrcode`；默认 bot 读本机 NapCat 缓存）、`GET /{id}/login-status`（REMOTE 代理 agent `/status`）；新增 `deploy/napcat-agent/`（单文件 agent.mjs + compose.yml + onebot11.example.json + README）。实测：mock NapCat + 真实 agent 注册→RUNNING，后端二维码 200 image/png、登录态 loggedIn/qq 正确，agent 无 token 401；清理后仅默认 bot；全量测试 375 项全绿 |
-| 2026-10-30 | 多机器人 P3a（写入侧隔离）：`messages`/`chat_groups` 增加 `bot_id`（老数据默认 1）；webhook 按 token 解析机器人——全局 webhook token → 默认 bot，否则按每 bot `agent_token` 反查；消息与群写入带 `bot_id`；主消息列表 `GET /api/messages/group/{groupId}?botId=` 对非默认 bot 按 owner/admin 授权并只查该 bot。实测：默认 token 消息 bot_id=1、bot token 消息 bot_id=5；`botId=5` 只返回 bot5 消息；owner 与 admin 均可读；清理后测试群/消息归零；全量测试 375 项全绿 |
-| 2026-10-30 | 多机器人 P3b（出站路由 + 读取过滤）：新增 `BotImRouter`，默认/本机 bot 走现有 NapCat，REMOTE 走该 bot 的 OneBot HTTP（`/send_group_msg`、Bearer=agentToken）；`/api/groups/{groupId}/send` 与日报推送支持 `?botId=`（owner/admin 授权）；`/api/messages/group/{groupId}/paged|since` 与 `/recent-groups` 支持 `botId` 并只查该 bot。实测：远程 bot 发送命中 mock OneBot（返回 mock-123）；webhook 写入 bot6 消息后 paged/since/recent-groups 均只返回 bot6；清理归零；测试新增 BotImRouterTest 3 项，全量 378 项全绿 |
-| 2026-10-30 | 多机器人 P4（前端最小闭环）：Sidebar 增加机器人切换器与管理面板（列表/切换/二维码/状态/删除/远程接入表单）；消息读取/发送 API 自动带当前 botId；REMOTE 机器人运行中也允许删除登记；新增 `frontend/src/docs/development/multi-bot.md` 记录模型、接口、数据隔离进度与已知边界。浏览器实测：管理按钮/切换器/面板/默认机器人/创建表单均可见；前端 build+guard 通过；全量 379 项全绿 |
 
 ## 第三方组件与外部依赖
 

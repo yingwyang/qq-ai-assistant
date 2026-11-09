@@ -54,15 +54,8 @@ public class GroupService {
      * 每个登录账号的群聊记录独立，保留最新
      */
     public void saveGroupInfo(String ownerQq, String groupId, String groupName) {
-        saveGroupInfo(ownerQq, groupId, groupName, 1L);
-    }
-
-    /** 保存群聊信息（按 bot 隔离）。 */
-    public void saveGroupInfo(String ownerQq, String groupId, String groupName, Long botId) {
         try {
-            long effectiveBotId = botId == null ? 1L : botId;
-            Optional<Group> existingGroup = groupRepository
-                    .findByBotIdAndGroupIdAndOwnerQq(effectiveBotId, groupId, ownerQq);
+            Optional<Group> existingGroup = groupRepository.findByGroupIdAndOwnerQq(groupId, ownerQq);
             Group group;
             if (existingGroup.isPresent()) {
                 group = existingGroup.get();
@@ -93,7 +86,6 @@ public class GroupService {
                 groupRepository.save(group);
             } else {
                 group = new Group();
-                group.setBotId(effectiveBotId);
                 group.setGroupId(groupId);
                 group.setOwnerQq(ownerQq);
                 group.setGroupName(groupName != null ? groupName : "群聊 " + groupId);

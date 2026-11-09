@@ -60,9 +60,3 @@ SESSION_FULL_*.md
 
 # ==================== 本地启动器（仓库内但忽略） ====================
 /qqai-launcher/
-# 多机器人运行时实例目录（不提交）
-backend/bots/
-# 远程 agent 运行时数据/密钥
-deploy/napcat-agent/data/
-deploy/napcat-agent/onebot11.json
-deploy/napcat-agent/.env
